@@ -1,0 +1,13 @@
+# Normalize line endings across platforms; silences LF/CRLF warnings.
+* text=auto
+
+# Treat these as text with LF in the repo.
+*.md   text eol=lf
+*.py   text eol=lf
+*.sql  text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Binary artifacts — never normalize.
+*.db   binary
+*.pyc  binary
