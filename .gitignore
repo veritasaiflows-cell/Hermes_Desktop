@@ -1,0 +1,20 @@
+# Secrets and local credentials
+.env
+*.pem
+*.key
+
+# Local databases and SQLite sidecars
+*.db
+*.db-shm
+*.db-wal
+
+# Generated indexes and derived caches
+vector/indexes/
+derived/cache/
+
+# Runtime logs and temporary files
+telemetry/runtime/
+*.log
+*.tmp
+__pycache__/
+*.pyc
