@@ -1,0 +1,93 @@
+{
+  "schema": "wiki-bootstrap-manifest.v1",
+  "generated_at": "2026-08-15T00:00:00Z",
+  "generated_by": "manual-bootstrap",
+  "required_pages": [
+    "wiki/index.md",
+    "wiki/source-map/ownership.md",
+    "wiki/syntheses/system-map.md",
+    "wiki/decisions/initial.md",
+    "wiki/gaps/open-gaps.md",
+    "wiki/changes/change-log.md"
+  ],
+  "pages": {
+    "wiki/index.md": {
+      "source_artifacts": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "README.md"
+      ],
+      "source_map": [
+        "references/operating-procedures.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "weekly"
+    },
+    "wiki/source-map/ownership.md": {
+      "source_artifacts": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "references/operating-procedures.md"
+      ],
+      "source_map": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "references/operating-procedures.md"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "weekly"
+    },
+    "wiki/syntheses/system-map.md": {
+      "source_artifacts": [
+        "references/operating-procedures.md",
+        "references/memory-routing.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_map": [
+        "references/operating-procedures.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "weekly"
+    },
+    "wiki/decisions/initial.md": {
+      "source_artifacts": [
+        "references/operating-procedures.md",
+        "tests/test_run_checks.py",
+        "scripts/run_checks.py"
+      ],
+      "source_map": [
+        "references/operating-procedures.md",
+        "scripts/run_checks.py"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "weekly"
+    },
+    "wiki/gaps/open-gaps.md": {
+      "source_artifacts": [
+        "prompts/workspace-workflow-readiness-audit-2026-08-15.md",
+        "references/concurrent-lane-control-plane.md",
+        "scripts/concurrent_lane_manager.py"
+      ],
+      "source_map": [
+        "prompts/workspace-workflow-readiness-audit-2026-08-15.md",
+        "references/concurrent-lane-control-plane.md"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "weekly"
+    },
+    "wiki/changes/change-log.md": {
+      "source_artifacts": [
+        "scripts/wiki_bootstrap.py",
+        "AGENTS.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_map": [
+        "scripts/wiki_bootstrap.py"
+      ],
+      "source_hashes": {},
+      "freshness_rule": "daily"
+    }
+  }
+}

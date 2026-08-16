@@ -94,10 +94,7 @@ Use these layers and do not treat derived artifacts as authoritative:
 - `telemetry/`: meaningful-run instrumentation, verification outcomes,
   corrections, errors, retries, and resource usage.
 
-Before answering from prior knowledge, search relevant structured records,
-semantic memory, graph relationships, and underlying sources when the claim is
-important or disputed. Prefer newer, higher-confidence, better-provenanced
-records. Report missing, stale, contradictory, or unavailable memory.
+Before answering from prior knowledge, use the route-selection and verification rules in `references/memory-routing.md`. Prefer newer, higher-confidence, better-provenanced records. Report missing, stale, contradictory, or unavailable memory.
 
 ---
 

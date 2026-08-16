@@ -67,11 +67,12 @@ For research work, separate verified facts, reasoned interpretation, open questi
 At the beginning of a session:
 
 1. Load identity and operating instructions.
-2. Check current system and task status.
-3. Review recent relevant memory.
-4. Check SQL, graph, vector, and source-store health.
-5. Inspect active tasks and unresolved blockers.
-6. Return a compact operating brief containing current status, recent relevant accomplishment, active blocker or trust limitation, and recommended next action.
+2. Validate `wiki/bootstrap-manifest.json` freshness and required pages.
+3. Check current system and task status.
+4. Review recent relevant memory.
+5. Check SQL, graph, vector, and source-store health.
+6. Inspect active tasks and unresolved blockers.
+7. Return a compact operating brief containing current status, recent relevant accomplishment, active blocker or trust limitation, and the recommended next action.
 
 Do not give a generic greeting when an operating brief is more useful.
 
@@ -99,6 +100,7 @@ Authoritative pointers:
 
 - File-organization governance: `GOVERNANCE.md`
 - Detailed operating procedures (full operating loop, memory architecture, learning/telemetry, helper-agent rules, workspace change policy, failure handling): `references/operating-procedures.md`
+- SQL/vector retrieval selection and durable-memory write policy: `references/memory-routing.md`
 - Canonical data model: `canonical/schema.sql` and `canonical/README.md`
 - Memory-layer purpose and rules: `source/`, `canonical/`, `graph/`, `vector/`, `derived/`, `telemetry/` README files
 

@@ -1,0 +1,124 @@
+{
+  "generated_at": "2026-08-16T00:41:27Z",
+  "generated_by": "scripts/wiki_bootstrap.py",
+  "lkg_manifest": "wiki/.lkg/bootstrap-manifest.json",
+  "pages": {
+    "wiki/changes/change-log.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "scripts/wiki_bootstrap.py",
+        "AGENTS.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_hashes": {
+        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md": "5181eafa760615c6b535176620bcbf2422e9790459952177cea79d88bfe57b88",
+        "scripts/wiki_bootstrap.py": "81e811ece62fffc2a7dd4d1164de8f23d54e423359b1f1d7475a991c7aa80d92"
+      },
+      "source_map": [
+        "scripts/wiki_bootstrap.py"
+      ],
+      "status": "current"
+    },
+    "wiki/decisions/initial.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "references/operating-procedures.md",
+        "tests/test_run_checks.py",
+        "scripts/run_checks.py"
+      ],
+      "source_hashes": {
+        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965",
+        "scripts/run_checks.py": "708ae59ca0143052e007f720f9d520f67646cdd2b53cd80bd5491405e34f45d3",
+        "tests/test_run_checks.py": "2d4e6158509863bc183d34d2d514eee119b590c803fc070274c8bccb55c99f7a"
+      },
+      "source_map": [
+        "references/operating-procedures.md",
+        "scripts/run_checks.py"
+      ],
+      "status": "current"
+    },
+    "wiki/gaps/open-gaps.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "prompts/workspace-workflow-readiness-audit-2026-08-15.md",
+        "references/concurrent-lane-control-plane.md",
+        "scripts/concurrent_lane_manager.py"
+      ],
+      "source_hashes": {
+        "prompts/workspace-workflow-readiness-audit-2026-08-15.md": "24cd008891a9e5c285286f310838531bb2f52a5f36924df77dc2a870f589fe8a",
+        "references/concurrent-lane-control-plane.md": "e945fa039e0284276f2c1aa45042d575b0856ada033e9b9c0a5481daaaaa0fd0",
+        "scripts/concurrent_lane_manager.py": "99e304816af5a315f3808ebff9f50d003447e1f90b6d14257c888ba8d0f5b528"
+      },
+      "source_map": [
+        "prompts/workspace-workflow-readiness-audit-2026-08-15.md",
+        "references/concurrent-lane-control-plane.md"
+      ],
+      "status": "current"
+    },
+    "wiki/index.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "README.md"
+      ],
+      "source_hashes": {
+        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
+        "GOVERNANCE.md": "c0c2e346da57e75836ae067dd6d68a6e2284025d0d7434d909a340d0c7f221f8",
+        "README.md": "71f9a3234bc893572fc98da5cd932076df9b91a9b7110c5fcfdd85233e4cf4bd"
+      },
+      "source_map": [
+        "references/operating-procedures.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "status": "current"
+    },
+    "wiki/source-map/ownership.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "references/operating-procedures.md"
+      ],
+      "source_hashes": {
+        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
+        "GOVERNANCE.md": "c0c2e346da57e75836ae067dd6d68a6e2284025d0d7434d909a340d0c7f221f8",
+        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965"
+      },
+      "source_map": [
+        "AGENTS.md",
+        "GOVERNANCE.md",
+        "references/operating-procedures.md"
+      ],
+      "status": "current"
+    },
+    "wiki/syntheses/system-map.md": {
+      "freshness_rule": "weekly",
+      "source_artifacts": [
+        "references/operating-procedures.md",
+        "references/memory-routing.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "source_hashes": {
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md": "5181eafa760615c6b535176620bcbf2422e9790459952177cea79d88bfe57b88",
+        "references/memory-routing.md": "8a53f30bb6b12246b32c37dc4e2f2fe706efc26cf1b55f2cbe140f758f71d4ab",
+        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965"
+      },
+      "source_map": [
+        "references/operating-procedures.md",
+        "prompts/hermes-trustworthy-work-operating-model-prompt.md"
+      ],
+      "status": "current"
+    }
+  },
+  "required_pages": [
+    "wiki/index.md",
+    "wiki/source-map/ownership.md",
+    "wiki/syntheses/system-map.md",
+    "wiki/decisions/initial.md",
+    "wiki/gaps/open-gaps.md",
+    "wiki/changes/change-log.md"
+  ],
+  "schema": "wiki-bootstrap-manifest.v1"
+}

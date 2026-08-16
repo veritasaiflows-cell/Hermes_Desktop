@@ -1,0 +1,62 @@
+{
+  "authoritative_next_action": "Run product_research_workflow.py against approved source catalog and review candidates before any external connector action.",
+  "authority_boundary": "canary",
+  "authority_class": "review_ready",
+  "blocker_count": 1,
+  "blockers": [
+    "No approved external connector configuration yet for phase 3."
+  ],
+  "continuity_note": "continuity\\WF-1000-Product-Research.md",
+  "control_override": null,
+  "current_state": "Workflow A processes supplier catalogs into scored product_candidate entities.",
+  "default_resume_command": "python scripts/workflow_router.py WF-1000 --answer next --validate",
+  "dependency_blockers": [],
+  "depends_on": [],
+  "display_name": "Workflow A - Product Research",
+  "effective_status": "active",
+  "freshness_sla": "daily",
+  "generated_at": "2026-08-16T00:41:44Z",
+  "helper_safe": true,
+  "human_approval_owner": "operator",
+  "lifecycle": "active",
+  "next_action": "Run product_research_workflow.py against approved source catalog and review candidates before phase-3.",
+  "owner_action_required": false,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1000.json",
+  "priority": "high",
+  "proof_artifact": "continuity\\WF-1000-Product-Research.md",
+  "readiness": "active",
+  "required_refresh_command": "python scripts/workflow_router.py --write-index --answer summary",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v1",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/ACTIVE_WORKFLOWS.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/WORKFLOW_ALIAS_INDEX.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/ACTIVE_WORKFLOWS.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/WORKFLOW_ALIAS_INDEX.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1000-Product-Research.md"
+  ],
+  "stop_lines": [
+    "Override removal before external writes"
+  ],
+  "tier": "P1",
+  "validator_commands": [
+    "python -m unittest discover -s tests -v",
+    "python scripts/run_checks.py --skip-smoke",
+    "python scripts/workflow_router.py WF-1000 --answer summary --validate"
+  ],
+  "workflow_id": "WF-1000"
+}

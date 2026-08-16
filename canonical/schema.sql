@@ -113,6 +113,47 @@ CREATE TABLE IF NOT EXISTS validation_results (
     provenance_id TEXT REFERENCES provenance(provenance_id)
 );
 
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    title TEXT,
+    claim_text TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_artifact_id TEXT,
+    source_locator TEXT,
+    source_hash TEXT,
+    source_version TEXT,
+    observed_at TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_until TEXT,
+    freshness_rule TEXT,
+    confidence REAL CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
+    authority_class TEXT NOT NULL DEFAULT 'review_only',
+    verification_method TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'invalidated', 'expired', 'unknown')),
+    contradiction_notes TEXT,
+    superseded_by TEXT REFERENCES claims(claim_id),
+    invalidated_by TEXT,
+    invalidated_reason TEXT,
+    provenance_id TEXT REFERENCES provenance(provenance_id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    run_id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    run_key TEXT NOT NULL UNIQUE,
+    input_hash TEXT NOT NULL,
+    source_uri TEXT,
+    status TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    provenance_id TEXT REFERENCES provenance(provenance_id)
+);
+
 CREATE TABLE IF NOT EXISTS version_history (
     version_id TEXT PRIMARY KEY,
     subject_type TEXT NOT NULL,
@@ -148,4 +189,8 @@ CREATE TABLE IF NOT EXISTS run_metrics (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject_type, subject_id);
 CREATE INDEX IF NOT EXISTS idx_validation_subject ON validation_results(subject_type, subject_id);
+CREATE INDEX IF NOT EXISTS idx_claims_subject ON claims(subject_type, subject_id);
+CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
+CREATE INDEX IF NOT EXISTS idx_claims_valid_until ON claims(valid_until);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, completed_at);
 CREATE INDEX IF NOT EXISTS idx_run_metrics_started ON run_metrics(started_at);

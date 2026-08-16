@@ -18,3 +18,5 @@ telemetry/runtime/
 *.tmp
 __pycache__/
 *.pyc
+
+tmp/

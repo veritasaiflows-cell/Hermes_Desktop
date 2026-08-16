@@ -1,0 +1,15 @@
+# Workflow alias index (routing surface)
+
+```json
+{
+  "schema": "workflow-alias-index.v1",
+  "generated_by": "control-plane bootstrap",
+  "generated_at": "2026-08-15T00:00:00Z",
+  "aliases": {
+    "workflow-a": "WF-1000",
+    "product research": "WF-1000",
+    "product-research": "WF-1000",
+    "workflow a": "WF-1000"
+  }
+}
+```

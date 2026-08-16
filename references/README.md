@@ -5,6 +5,12 @@ Authoritative detailed instructions that the lean bootstrap (`AGENTS.md`) points
 ## Contents
 
 - `operating-procedures.md` — full standard operating loop, workspace memory architecture, learning/telemetry instrumentation, helper-agent rules, workspace change policy, and the failure-handling taxonomy.
+- `memory-routing.md` — SQL versus semantic retrieval selection, evidence/freshness rules, approved memory writes, and retrieval observability.
+- `commerce-data-model.md` — Phase 1 commercial entity/metric conventions for monetization workflows.
+- `workflow-product-research.md` — phase-2 workflow scaffold: product research ingestion and candidate scoring.
+- `workflow-routing-control-plane.md` — routing and ownership control-plane implementation for workflow capsules and stale checks.
+- `concurrent-lane-control-plane.md` — collision-safe lane leasing and completion proof protocol.
+- `wiki/` (new): authoritative bootstrap evidence for startup and operational evidence routing.
 
 ## Rules
 

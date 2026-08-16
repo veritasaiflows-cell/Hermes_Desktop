@@ -27,3 +27,44 @@ The canonical SQL baseline is `canonical/schema.sql`. Apply it to a new database
 ## Recovery
 
 The workspace is version-controlled with git. The pre-refactor baseline is preserved in history and any prior file can be recovered with `git checkout <commit> -- <path>`.
+
+## Phase-0 verification
+
+Run a minimal reproducible harness check:
+
+```bash
+python scripts/wiki_bootstrap.py validate
+python scripts/run_checks.py
+python scripts/workflow_router.py WF-1000 --answer summary --validate --write-index
+```
+
+The default harness runs smoke activity against a temporary database and copied
+control plane. Use `--skip-smoke` to run only the unit tests. A persistent smoke
+run is deliberately opt-in and requires both flags:
+
+```bash
+python scripts/run_checks.py --persistent-smoke --database canonical/efficiens.db
+```
+
+## Concurrent lane control plane
+
+For parallel work without overlapping file edits, use:
+
+```bash
+python scripts/concurrent_lane_manager.py plan \
+  --parent-job-id WF-1000-PROD \
+  --workflow-id WF-1000 \
+  --workstream research-pass \
+  --owner agent-a \
+  --allowed-write derived/results.json
+
+python scripts/concurrent_lane_manager.py lease WF-1000::research-pass --owner agent-a
+python scripts/concurrent_lane_manager.py start WF-1000::research-pass
+python scripts/concurrent_lane_manager.py complete WF-1000::research-pass --proof derived/proof.json
+python scripts/concurrent_lane_manager.py status --validate
+```
+
+The lane manager enforces write-surface collisions, leases, status transitions,
+and proof-required completion. Workflow CLIs that write canonical data also use
+the mandatory routing/lease/write-surface preflight in
+`scripts/workflow_runner.py`.

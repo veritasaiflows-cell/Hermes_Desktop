@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
@@ -45,6 +47,7 @@ class CanonicalDB:
         self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.executescript(self.schema_path.read_text(encoding="utf-8"))
         self.connection.commit()
+        self._transaction_depth = 0
         self.integrity_checks_run = 0
         self.integrity_check()
 
@@ -70,6 +73,29 @@ class CanonicalDB:
         if result != "ok":
             raise DatabaseIntegrityError(f"SQLite integrity_check failed: {result}")
         return result
+
+    @contextmanager
+    def transaction(self):
+        """Run multiple canonical inserts as one rollback-safe write unit.
+
+        ``insert()`` and ``add_provenance()`` detect this explicit transaction
+        and defer their individual commits. Nested write transactions are not
+        supported because SQLite has no implicit nested transaction semantics.
+        """
+        if self._transaction_depth or self.connection.in_transaction:
+            raise RuntimeError("CanonicalDB transaction cannot be nested")
+        self.connection.execute("BEGIN IMMEDIATE")
+        self._transaction_depth += 1
+        try:
+            yield self
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+            self.integrity_check()
+        finally:
+            self._transaction_depth -= 1
 
     def add_provenance(
         self,
@@ -99,6 +125,177 @@ class CanonicalDB:
             "notes": notes,
         }
         return self._insert("provenance", values)
+
+    def add_claim(
+        self,
+        subject_type: str,
+        subject_id: str,
+        claim_text: str,
+        *,
+        title: str | None = None,
+        source_type: str = "workflow",
+        source_artifact_id: str | None = None,
+        source_locator: str | None = None,
+        source_hash: str | None = None,
+        source_version: str | None = None,
+        observed_at: str | None = None,
+        valid_from: str | None = None,
+        valid_until: str | None = None,
+        freshness_ttl_seconds: int | None = None,
+        freshness_rule: str | None = None,
+        confidence: float | None = None,
+        authority_class: str = "review_only",
+        verification_method: str | None = None,
+        status: str = "active",
+        contradiction_notes: str | None = None,
+        superseded_by: str | None = None,
+        provenance_id: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        claim_id: str | None = None,
+    ) -> str:
+        """Insert one structured evidence claim and return its stable identifier."""
+        if not claim_text.strip():
+            raise ValueError("claim_text is required")
+        if provenance_id and provenance:
+            raise ValueError("Provide provenance_id or provenance, not both")
+        if freshness_rule and "ttl:" in freshness_rule:
+            try:
+                ttl_parts = int(freshness_rule.split(":", 1)[1])
+            except ValueError as exc:
+                raise ValueError("freshness_rule ttl must be an integer") from exc
+            if freshness_ttl_seconds is not None and ttl_parts != freshness_ttl_seconds:
+                raise ValueError("Freshness rule ttl and freshness_ttl_seconds mismatch")
+            freshness_ttl_seconds = ttl_parts
+
+        observed_ts = _parse_utc_timestamp(observed_at)
+        valid_from_ts = _parse_utc_timestamp(valid_from or observed_at)
+        if valid_from_ts < observed_ts:
+            raise ValueError("valid_from cannot be before observed_at")
+
+        if valid_until is not None and freshness_ttl_seconds is not None:
+            raise ValueError("Set either valid_until or freshness_ttl_seconds, not both")
+
+        valid_until_ts = _parse_utc_timestamp(valid_until) if valid_until is not None else None
+        if freshness_ttl_seconds is not None:
+            valid_until_ts = observed_ts + timedelta(seconds=freshness_ttl_seconds)
+            if freshness_rule is None:
+                freshness_rule = f"ttl_seconds:{freshness_ttl_seconds}"
+
+        row = {
+            "claim_id": claim_id or str(uuid4()),
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "title": title,
+            "claim_text": claim_text,
+            "source_type": source_type,
+            "source_artifact_id": source_artifact_id,
+            "source_locator": source_locator,
+            "source_hash": source_hash,
+            "source_version": source_version,
+            "observed_at": _to_iso8601(observed_ts),
+            "valid_from": _to_iso8601(valid_from_ts),
+            "valid_until": _to_iso8601(valid_until_ts) if valid_until_ts else None,
+            "freshness_rule": freshness_rule,
+            "confidence": confidence,
+            "authority_class": authority_class,
+            "verification_method": verification_method,
+            "status": status,
+            "contradiction_notes": contradiction_notes,
+            "superseded_by": superseded_by,
+            "provenance_id": provenance_id,
+            "created_at": _utc_now(),
+            "updated_at": _utc_now(),
+        }
+
+        if provenance:
+            row["provenance_id"] = self._insert_provenance_in_transaction(provenance)
+
+        return self._insert("claims", row)
+
+    def list_claims(
+        self,
+        *,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        status: str | None = None,
+        authority_class: str | None = None,
+        include_expired: bool = False,
+        now: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List claims matching filters and return row dictionaries."""
+        filters: list[str] = ["1=1"]
+        parameters: list[Any] = []
+
+        if subject_type is not None:
+            filters.append("subject_type = ?")
+            parameters.append(subject_type)
+        if subject_id is not None:
+            filters.append("subject_id = ?")
+            parameters.append(subject_id)
+        if status is not None:
+            filters.append("status = ?")
+            parameters.append(status)
+        if authority_class is not None:
+            filters.append("authority_class = ?")
+            parameters.append(authority_class)
+
+        if not include_expired:
+            filters.append("(valid_until IS NULL OR valid_until >= ?)")
+            parameters.append(now or _utc_now())
+
+        query = (
+            "SELECT * FROM claims WHERE "
+            + " AND ".join(filters)
+            + " ORDER BY observed_at DESC, updated_at DESC"
+        )
+        rows = self.connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_claim(self, claim_id: str) -> dict[str, Any] | None:
+        """Fetch one claim by identifier."""
+        row = self.connection.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_active_claims(
+        self,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        *,
+        now: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Shortcut for active, non-expired claims."""
+        return self.list_claims(
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status="active",
+            include_expired=False,
+            now=now,
+        )
+
+    def invalidate_claim(
+        self,
+        claim_id: str,
+        *,
+        reason: str,
+        invalidated_by: str | None = None,
+        provenance_id: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Invalidate one claim while preserving full audit trail."""
+        if not reason.strip():
+            raise ValueError("reason is required")
+        updates = {
+            "status": "invalidated",
+            "contradiction_notes": reason,
+            "invalidated_by": invalidated_by,
+        }
+        self.update(
+            "claims",
+            claim_id,
+            updates,
+            provenance_id=provenance_id,
+            provenance=provenance,
+        )
 
     def insert(
         self,
@@ -149,10 +346,158 @@ class CanonicalDB:
                 )
         return self._insert(table, row)
 
-    def _insert(self, table: str, values: Mapping[str, Any]) -> str:
-        with self.connection:
-            self._insert_sql(table, values)
+    def update(
+        self,
+        table: str,
+        record_id: str,
+        changes: Mapping[str, Any],
+        *,
+        provenance_id: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Update one record while preserving its prior state and audit event.
+
+        The prior row is written to ``version_history`` and an update event is
+        written before the target row is mutated, all within one transaction.
+        Any failure rolls back the history, event, provenance, and update
+        together, so the database cannot contain a partial audit trail.
+        """
+        if table == "provenance":
+            raise ValueError("Use add_provenance() for provenance records")
+        if table in {"events", "version_history"}:
+            raise ValueError(f"{table} is append-only and cannot be updated")
+        if provenance_id and provenance:
+            raise ValueError("Provide provenance_id or provenance, not both")
+
+        requested_changes = dict(changes)
+        if not requested_changes:
+            raise ValueError("At least one change is required")
+
+        columns = self._columns(table)
+        primary_key = self._primary_key(table)
+        if primary_key is None:
+            raise ValueError(f"Table has no supported primary key: {table}")
+        unknown = set(requested_changes) - columns
+        if unknown:
+            raise ValueError(f"Unknown columns for {table}: {sorted(unknown)}")
+        if primary_key in requested_changes:
+            raise ValueError(f"Primary key cannot be updated: {primary_key}")
+        if "created_at" in requested_changes:
+            raise ValueError("created_at cannot be updated")
+        if "provenance_id" in requested_changes:
+            requested_provenance_id = requested_changes["provenance_id"]
+            if requested_provenance_id is None:
+                raise ValueError("provenance_id cannot be cleared by update")
+            if provenance is not None:
+                raise ValueError(
+                    "Provide provenance or changes['provenance_id'], not both"
+                )
+            if provenance_id is not None and requested_provenance_id != provenance_id:
+                raise ValueError("Conflicting provenance_id values")
+
+        now = _utc_now()
+        applied_changes = dict(requested_changes)
+        if "updated_at" in columns:
+            applied_changes["updated_at"] = now
+
+        audit_provenance_id: str | None = provenance_id or requested_changes.get(
+            "provenance_id"
+        )
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            current_row = self.connection.execute(
+                f"SELECT * FROM {_quote_identifier(table)} "
+                f"WHERE {_quote_identifier(primary_key)} = ?",
+                (record_id,),
+            ).fetchone()
+            if current_row is None:
+                raise KeyError(f"No {table} record exists with id {record_id!r}")
+            current = dict(current_row)
+
+            if audit_provenance_id is None and provenance is not None:
+                audit_provenance_id = self._insert_provenance_in_transaction(provenance)
+            elif audit_provenance_id is None:
+                audit_provenance_id = self._insert_provenance_in_transaction(
+                    {
+                        "source_type": "workspace",
+                        "source_ref": f"canonical:{table}:{record_id}",
+                        "captured_at": now,
+                        "notes": "Automatic provenance for canonical record update",
+                    }
+                )
+            if "provenance_id" in columns and "provenance_id" not in applied_changes:
+                applied_changes["provenance_id"] = audit_provenance_id
+
+            version_number = self.connection.execute(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 "
+                "FROM version_history WHERE subject_type = ? AND subject_id = ?",
+                (table, record_id),
+            ).fetchone()[0]
+            snapshot_json = json.dumps(current, sort_keys=True)
+            payload_json = json.dumps(
+                {
+                    "changes": requested_changes,
+                    "applied_changes": applied_changes,
+                    "version_number": version_number,
+                },
+                sort_keys=True,
+            )
+
+            self._insert_sql(
+                "version_history",
+                {
+                    "version_id": str(uuid4()),
+                    "subject_type": table,
+                    "subject_id": record_id,
+                    "version_number": version_number,
+                    "operation": "update",
+                    "snapshot_json": snapshot_json,
+                    "changed_at": now,
+                    "provenance_id": audit_provenance_id,
+                },
+            )
+            self._insert_sql(
+                "events",
+                {
+                    "event_id": str(uuid4()),
+                    "event_type": "record.updated",
+                    "subject_type": table,
+                    "subject_id": record_id,
+                    "payload_json": payload_json,
+                    "provenance_id": audit_provenance_id,
+                    "occurred_at": now,
+                    "recorded_at": now,
+                },
+            )
+
+            assignments = ", ".join(
+                f"{_quote_identifier(column)} = ?" for column in applied_changes
+            )
+            result = self.connection.execute(
+                f"UPDATE {_quote_identifier(table)} SET {assignments} "
+                f"WHERE {_quote_identifier(primary_key)} = ?",
+                [*applied_changes.values(), record_id],
+            )
+            if result.rowcount != 1:
+                raise DatabaseIntegrityError(
+                    f"Expected one updated {table} record, got {result.rowcount}"
+                )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
         self.integrity_check()
+        return record_id
+
+    def _insert(self, table: str, values: Mapping[str, Any]) -> str:
+        in_explicit_transaction = self._transaction_depth > 0
+        if in_explicit_transaction:
+            self._insert_sql(table, values)
+        else:
+            with self.connection:
+                self._insert_sql(table, values)
+            self.integrity_check()
         return str(values[self._primary_key(table)])
 
     def _insert_provenance_in_transaction(self, values: Mapping[str, Any]) -> str:
@@ -208,4 +553,24 @@ def _quote_identifier(identifier: str) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return _to_iso8601(_utc_now_datetime())
+
+
+def _utc_now_datetime() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _to_iso8601(value: datetime) -> str:
+    return value.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_utc_timestamp(value: str | None) -> datetime:
+    text = value or _to_iso8601(_utc_now_datetime())
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"Invalid UTC timestamp: {value!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
