@@ -26,6 +26,7 @@ import re
 import sqlite3
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Sequence
 
@@ -54,6 +55,24 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
 EXCLUDED_SUFFIXES = frozenset({".db", ".key", ".log", ".pem", ".pyc", ".tmp"})
 VALID_RETRIEVAL_MODES = frozenset({"full_text", "semantic", "hybrid"})
 DEFAULT_RETRIEVAL_MODE = "full_text"
+
+# In-process LRU cache for *query* embeddings only (never document embeddings).
+# Keyed on (text, provider, model, base_url). Cleared on every build_index().
+_QUERY_EMBEDDING_CACHE: "OrderedDict[tuple[str, str, str, str], list[float]]" = OrderedDict()
+_QUERY_EMBEDDING_CACHE_MAXSIZE = 256
+_QUERY_EMBEDDING_CACHE_STATS: dict[str, int] = {"hits": 0, "misses": 0}
+
+
+def clear_query_embedding_cache() -> None:
+    """Drop all cached query embeddings and reset hit/miss counters."""
+    _QUERY_EMBEDDING_CACHE.clear()
+    _QUERY_EMBEDDING_CACHE_STATS["hits"] = 0
+    _QUERY_EMBEDDING_CACHE_STATS["misses"] = 0
+
+
+def query_embedding_cache_stats() -> dict[str, int]:
+    """Return a snapshot of query-embedding cache hits/misses and current size."""
+    return {**_QUERY_EMBEDDING_CACHE_STATS, "size": len(_QUERY_EMBEDDING_CACHE)}
 
 
 @dataclass(frozen=True)
@@ -130,6 +149,10 @@ def build_index(
 
     if not sources:
         raise ValueError("At least one explicit source is required")
+
+    # Query embeddings are corpus-independent, but clearing on reindex keeps the
+    # cache conservative and guarantees deterministic test isolation.
+    clear_query_embedding_cache()
 
     destination = Path(index_path).resolve()
     documents: list[tuple[Path, SourceSpec, str, str, list[float] | None]] = []
@@ -791,13 +814,43 @@ def _build_query_embedding(
     ollama_base_url: str,
     timeout: float,
 ) -> list[float] | None:
-    return _safe_embedding_for_text(
+    """Return the embedding for a *query* string, using an in-process cache.
+
+    A query's embedding depends only on (text, provider, model, base_url) and is
+    independent of the indexed corpus, so cached vectors never go stale on
+    re-index. This is the hot path for hybrid/semantic retrieval; caching avoids
+    a ~130ms Ollama round-trip on repeated queries. The cache is bounded (LRU)
+    and cleared on every `build_index` call as a conservative safety measure.
+    """
+
+    key = (
+        text,
+        embedding_provider.strip().lower(),
+        embedding_model,
+        ollama_base_url.rstrip("/"),
+    )
+    cached = _QUERY_EMBEDDING_CACHE.get(key)
+    if cached is not None:
+        _QUERY_EMBEDDING_CACHE.move_to_end(key)
+        _QUERY_EMBEDDING_CACHE_STATS["hits"] += 1
+        return list(cached)
+
+    embedding = _safe_embedding_for_text(
         text,
         provider=embedding_provider,
         model=embedding_model,
         ollama_base_url=ollama_base_url,
         timeout=timeout,
     )
+    _QUERY_EMBEDDING_CACHE_STATS["misses"] += 1
+    if embedding is None:
+        return None
+
+    _QUERY_EMBEDDING_CACHE[key] = list(embedding)
+    _QUERY_EMBEDDING_CACHE.move_to_end(key)
+    while len(_QUERY_EMBEDDING_CACHE) > _QUERY_EMBEDDING_CACHE_MAXSIZE:
+        _QUERY_EMBEDDING_CACHE.popitem(last=False)
+    return list(embedding)
 
 
 def _ollama_embedding(
