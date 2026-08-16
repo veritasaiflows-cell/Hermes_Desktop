@@ -1,0 +1,122 @@
+"""Tests for the cron health check (A2) and wiki regen (A1) wrappers.
+
+These test the *logic* of the wrappers (exit codes, output shape, branching)
+directly. They do NOT subprocess the real `run_checks.py` / `wiki_bootstrap.py`
+because that would cause the test to be discovered and re-run by the suite
+itself, creating an infinite-spawn loop.
+
+The full end-to-end cron path is exercised by the cron scheduler in
+production, not by these unit tests. These tests pin the contract.
+"""
+from __future__ import annotations
+
+import json
+import unittest
+from unittest.mock import patch
+
+from scripts import cron_health_check, cron_wiki_regen
+
+
+class HealthCheckLogicTests(unittest.TestCase):
+    def test_green_when_run_checks_passes_and_wiki_fresh(self):
+        fake_run_checks = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_run_checks, fake_wiki],
+        ) as run_mock:
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(run_mock.call_count, 2)
+
+    def test_hard_fail_when_run_checks_fails(self):
+        fake_run_checks = {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback...\nAssertionError: 1 != 0",
+        }
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_run_checks, fake_wiki],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+    def test_stale_wiki_is_soft_warning_not_hard_fail(self):
+        # A2 contract: stale wiki is recoverable by A1, must not page.
+        fake_run_checks = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_wiki = {
+            "exit": 2,
+            "stdout": json.dumps({"status": "stale", "issues": [{"type": "stale_freshness"}]}),
+            "stderr": "",
+        }
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_run_checks, fake_wiki],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 0)
+
+    def test_timeout_treated_as_hard_fail(self):
+        fake_run_checks = {"exit": 124, "stdout": "", "stderr": "timeout after 300s"}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_run_checks, fake_wiki],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+
+class WikiRegenLogicTests(unittest.TestCase):
+    def test_fresh_publish_returns_zero(self):
+        fake_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"status": "fresh", "changed_sources": []}),
+        )
+        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 0)
+
+    def test_degraded_publish_returns_one(self):
+        fake_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"status": "stale", "issues": [{"type": "x"}]}),
+        )
+        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 1)
+
+    def test_subprocess_failure_returns_one(self):
+        fake_result = subprocess_result(returncode=1, stdout="", stderr="boom")
+        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 1)
+
+
+def subprocess_result(*, returncode, stdout, stderr=""):
+    """Build a minimal stand-in for subprocess.CompletedProcess."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
