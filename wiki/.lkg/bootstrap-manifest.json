@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-08-15T23:50:39Z",
+  "generated_at": "2026-08-16T02:40:24Z",
   "generated_by": "scripts/wiki_bootstrap.py",
   "lkg_manifest": "wiki/.lkg/bootstrap-manifest.json",
   "pages": {
     "wiki/changes/change-log.md": {
-      "freshness_rule": "daily",
+      "freshness_rule": "weekly",
       "source_artifacts": [
         "scripts/wiki_bootstrap.py",
         "AGENTS.md",
