@@ -7,6 +7,11 @@
 *.db
 *.db-shm
 *.db-wal
+*.sqlite-shm
+*.sqlite-wal
+
+# Timestamped wiki LKG manifest rotations (keep canonical bootstrap-manifest.json)
+wiki/.lkg/bootstrap-manifest.*Z.json
 
 # Generated indexes and derived caches
 vector/indexes/
