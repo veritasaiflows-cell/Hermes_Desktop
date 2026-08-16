@@ -18,15 +18,16 @@ This reference captures:
 
 | Source | Purpose | Path |
 |---|---|---|
-| Active queue | Workflow truth, lifecycle, owners, state | `state/ACTIVE_WORKFLOWS.md` |
-| Alias index | Human-friendly workflow names -> stable IDs | `state/WORKFLOW_ALIAS_INDEX.md` |
+| Active queue | Workflow truth, lifecycle, owners, state | `state/active_workflows.json` |
+| Alias index | Human-friendly workflow names -> stable IDs | `state/workflow_alias_index.json` |
 | Overrides | Pause/halt/gate controls | `state/workflow-control-overrides.json` |
 | Continuity notes | Human-readable resume context per workflow | `continuity/` |
-| Route index | Generated freshness artifact | `tmp/workflow-routing-index.json` |
+| Route index | Generated freshness artifact | `state/workflow-routing-index.json` |
 | Capsules | Generated per-workflow control summary | `state/workflows/WF-<ID>.json` |
 
-Legacy compatibility files remain (`state/active_workflows.json`, `state/workflow_alias_index.json`).
-The router prefers the uppercase names but reads these legacy files if needed.
+Markdown compatibility files remain (`state/ACTIVE_WORKFLOWS.md`, `state/WORKFLOW_ALIAS_INDEX.md`)
+as human-readable rendered views. The router prefers the JSON names but reads these
+legacy markdown files if needed.
 
 ## Command surface
 
@@ -42,6 +43,12 @@ python scripts/workflow_router.py WF-1000 --answer summary --validate --write-in
 python scripts/workflow_router.py --all --answer all --write-index
 ```
 
+- List available aliases:
+
+```bash
+python scripts/workflow_router.py --aliases
+```
+
 `--write-capsules` remains supported for explicitness.
 
 - Run phase-0 + routing checks:
@@ -50,7 +57,12 @@ python scripts/workflow_router.py --all --answer all --write-index
 python scripts/run_checks.py
 ```
 
-## Guardrails
+## Routing cache
+
+Revalidated routing queries are cached in `canonical/efficiens.db` (`routing_cache`)
+for 300 seconds. The cache is keyed by selector, answer mode, validation flag, and
+source signatures; if any control-plane source changes, the next call regenerates.
+Use `--no-cache` to force a fresh computation.
 
 Before meaningful work:
 
@@ -58,6 +70,20 @@ Before meaningful work:
 2. stale route-index must be detected and surfaced
 3. blocked/gated states require owner action before advancing
 4. helper output is advisory unless integrated by the owning workflow lane
+
+## Workflow capsule contract
+
+Each generated capsule (`state/workflows/WF-<ID>.json`) includes:
+
+- `workflow_id`, `display_name`, `lifecycle`, `effective_status`
+- `implementation_script`: the canonical script entry point
+- `commands`: `dry_run` and `write` command templates
+- `blockers`, `stop_lines`, `owner_action_required`
+- `default_resume_command`: the router command to get the next safe action
+- `validator_commands`: checks that must pass before the workflow advances
+
+Use these fields instead of parsing free-text `next_action` when selecting
+which script to run.
 
 ## Mandatory write preflight
 
@@ -85,5 +111,8 @@ tests and controlled internal harnesses; new workflow CLIs must use the gate.
 - `unsafe_to_trust` (boolean)
 - `workflow` for single selector routes
 - `workflows` list for multi-route operations
+- `implementation_script` and `commands` inside each workflow view
 
 Use `routing_index_stale` and `unsafe_to_trust` as hard gates for automation.
+Use `implementation_script`/`commands` as the machine-readable instruction for
+which script to execute.

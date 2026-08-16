@@ -2,24 +2,27 @@
   "authoritative_next_action": "Run product_research_workflow.py against approved source catalog and review candidates before any external connector action.",
   "authority_boundary": "canary",
   "authority_class": "review_ready",
-  "blocker_count": 1,
-  "blockers": [
-    "No approved external connector configuration yet for phase 3."
-  ],
+  "blocker_count": 0,
+  "blockers": [],
+  "commands": {
+    "dry_run": "python scripts/product_research_workflow.py <catalog.csv> --dry-run --top-n 5",
+    "write": "python scripts/product_research_workflow.py <catalog.csv> --database canonical/efficiens.db --top-n 5 --lane-id WF-1000::product-research --lane-owner agent-main"
+  },
   "continuity_note": "continuity\\WF-1000-Product-Research.md",
   "control_override": null,
-  "current_state": "Workflow A processes supplier catalogs into scored product_candidate entities.",
+  "current_state": "Workflow A processes supplier catalogs into scored product_candidate entities with business-key dedupe, dry-run-first preflight, and phase-3 handoff packets.",
   "default_resume_command": "python scripts/workflow_router.py WF-1000 --answer next --validate",
   "dependency_blockers": [],
   "depends_on": [],
   "display_name": "Workflow A - Product Research",
   "effective_status": "active",
   "freshness_sla": "daily",
-  "generated_at": "2026-08-16T00:41:44Z",
+  "generated_at": "2026-08-16T23:00:39Z",
   "helper_safe": true,
   "human_approval_owner": "operator",
+  "implementation_script": "scripts/product_research_workflow.py",
   "lifecycle": "active",
-  "next_action": "Run product_research_workflow.py against approved source catalog and review candidates before phase-3.",
+  "next_action": "Run product_research_workflow.py against approved source catalogs and review top-opportunity packets in derived/research before any connector activation.",
   "owner_action_required": false,
   "primary_owner_lane": "agent-main",
   "primary_route_artifact": "state/workflows/WF-1000.json",
@@ -28,6 +31,7 @@
   "readiness": "active",
   "required_refresh_command": "python scripts/workflow_router.py --write-index --answer summary",
   "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
   "routing_source_contracts": {
     "active_workflows": "active-workflows.v1",
     "alias_source": "workflow-alias-index.v1",
@@ -35,8 +39,8 @@
   },
   "schema": "workflow_capsule.v1",
   "secondary_artifacts": [
-    "C:/Users/Veritas/Documents/HermesWorkspace/state/ACTIVE_WORKFLOWS.md",
-    "C:/Users/Veritas/Documents/HermesWorkspace/state/WORKFLOW_ALIAS_INDEX.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
     "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
   ],
   "secondary_consumers": [
@@ -44,14 +48,12 @@
     "operations"
   ],
   "state_sources": [
-    "C:/Users/Veritas/Documents/HermesWorkspace/state/ACTIVE_WORKFLOWS.md",
-    "C:/Users/Veritas/Documents/HermesWorkspace/state/WORKFLOW_ALIAS_INDEX.md",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
     "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
     "continuity\\WF-1000-Product-Research.md"
   ],
-  "stop_lines": [
-    "Override removal before external writes"
-  ],
+  "stop_lines": [],
   "tier": "P1",
   "validator_commands": [
     "python -m unittest discover -s tests -v",

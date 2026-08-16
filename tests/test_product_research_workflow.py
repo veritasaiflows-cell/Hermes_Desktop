@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import json
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -7,9 +8,121 @@ import unittest
 
 from canonical.db import CanonicalDB
 from scripts.product_research_workflow import run_product_research
+from scripts.workflow_runner import WorkflowPreflightError
 
 
 class ProductResearchWorkflowTests(unittest.TestCase):
+
+    def run_dry_preflight(
+        self,
+        catalog: Path,
+        database_path: Path,
+        **kwargs,
+    ):
+        summary = run_product_research(catalog, database_path=database_path, dry_run=True, **kwargs)
+        self.assertEqual(summary["mode"], "dry_run")
+        return summary
+
+    @staticmethod
+    def source_freshness_hash(catalog: Path) -> str:
+        with open(catalog, "rb") as catalog_file:
+            return hashlib.sha256(catalog_file.read()).hexdigest()
+
+    def test_product_research_requires_dry_run_before_write_for_new_source(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            with self.assertRaisesRegex(WorkflowPreflightError, "dry-run"):
+                run_product_research(catalog, database_path=db_path, top_n=1)
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            write_result = run_product_research(catalog, database_path=db_path, top_n=1)
+
+            self.assertEqual(write_result["mode"], "write")
+            self.assertEqual(write_result["selected_count"], 1)
+
+    def test_product_research_blocks_write_when_catalog_hash_changes_without_new_dry_run(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            run_product_research(catalog, database_path=db_path, top_n=1)
+
+            original_hash = self.source_freshness_hash(catalog)
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,50,2,85,30\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(WorkflowPreflightError, "dry-run"):
+                run_product_research(catalog, database_path=db_path, top_n=1)
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            changed = run_product_research(catalog, database_path=db_path, top_n=1)
+            self.assertEqual(changed["mode"], "write")
+            self.assertNotEqual(self.source_freshness_hash(catalog), original_hash)
+
+    def test_product_research_reuses_existing_candidates_by_business_key(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Tumbler,Supplier North,34,4,90,20\n"
+                "Aero Tumbler,Supplier North,40,4,90,20\n"
+                "Aero Tumbler,Supplier North,50,4,90,20\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(catalog, db_path, top_n=1, min_viability_score=0.0)
+            first = run_product_research(catalog, database_path=db_path, top_n=1, min_viability_score=0.0)
+
+            self.assertEqual(first["selected_count"], 1)
+            self.assertEqual(len(first["written"]), 1)
+
+            second = run_product_research(
+                catalog,
+                database_path=db_path,
+                top_n=2,
+                min_viability_score=0.0,
+            )
+            self.assertEqual(second["mode"], "write")
+
+            with CanonicalDB(db_path) as db:
+                self.assertEqual(db.connection.execute("SELECT COUNT(*) FROM entities").fetchone()[0], 1)
+                self.assertEqual(db.connection.execute("SELECT COUNT(*) FROM metrics").fetchone()[0], 8)
+                self.assertEqual(db.connection.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
+
+    def test_product_research_writes_source_preflight_telemetry(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n"
+                "Heavy Widget,Supplier B,15,21,60,90\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            summary = self.run_dry_preflight(catalog, db_path, top_n=2, min_viability_score=0.0)
+            self.assertIn("source_preflight", summary)
+            self.assertIn("status", summary["source_preflight"])
+            self.assertEqual(summary["source_preflight"]["status"], "passed")
+            self.assertIn("telemetry", summary)
+            self.assertIn("business_key_dedupe", summary["telemetry"])
+
     def test_product_research_rolls_back_every_write_when_a_metric_insert_fails(self):
         with TemporaryDirectory() as directory:
             catalog = Path(directory) / "catalog.csv"
@@ -19,6 +132,7 @@ class ProductResearchWorkflowTests(unittest.TestCase):
                 encoding="utf-8",
             )
             db_path = Path(directory) / "efficiens.db"
+            self.run_dry_preflight(catalog, db_path, top_n=1)
             original_insert_sql = CanonicalDB._insert_sql
             metric_insert_count = 0
 
@@ -50,6 +164,7 @@ class ProductResearchWorkflowTests(unittest.TestCase):
             )
             db_path = Path(directory) / "efficiens.db"
 
+            self.run_dry_preflight(catalog, db_path, top_n=1)
             first = run_product_research(catalog, database_path=db_path, top_n=1)
             self.assertIn("bundle_sha256", first)
             replayed = run_product_research(catalog, database_path=db_path, top_n=1)
@@ -76,6 +191,7 @@ class ProductResearchWorkflowTests(unittest.TestCase):
             )
             db_path = Path(directory) / "efficiens.db"
 
+            self.run_dry_preflight(catalog, db_path, top_n=1)
             first = run_product_research(catalog, database_path=db_path, top_n=1, holdout_fraction=0.0)
             second = run_product_research(
                 catalog,
@@ -100,6 +216,8 @@ class ProductResearchWorkflowTests(unittest.TestCase):
                 encoding="utf-8",
             )
             db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
 
             run_product_research(catalog, database_path=db_path, top_n=1)
             with CanonicalDB(db_path) as db:
@@ -139,6 +257,15 @@ class ProductResearchWorkflowTests(unittest.TestCase):
             )
             db_path = Path(directory) / "efficiens.db"
 
+            self.run_dry_preflight(
+                catalog,
+                db_path,
+                top_n=3,
+                min_viability_score=0.0,
+                holdout_fraction=0.3,
+                adversarial_fraction=0.1,
+            )
+
             summary = run_product_research(
                 catalog,
                 database_path=db_path,
@@ -176,6 +303,8 @@ class ProductResearchWorkflowTests(unittest.TestCase):
             )
             db_path = Path(directory) / "efficiens.db"
 
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+
             run_product_research(catalog, database_path=db_path, top_n=1)
 
             with CanonicalDB(db_path) as db:
@@ -209,6 +338,8 @@ class ProductResearchWorkflowTests(unittest.TestCase):
             )
             db_path = Path(directory) / "efficiens.db"
 
+            self.run_dry_preflight(catalog, db_path, top_n=2, min_viability_score=0.0)
+
             summary = run_product_research(catalog, database_path=db_path, top_n=2, min_viability_score=0.0)
 
             self.assertEqual(summary["mode"], "write")
@@ -236,6 +367,60 @@ class ProductResearchWorkflowTests(unittest.TestCase):
                     (written_id,),
                 ).fetchone()[0]
                 self.assertEqual(events, 1)
+
+    def test_product_research_evaluation_profile_reports_split_drift(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n"
+                "Heavy Widget,Supplier B,15,21,60,90\n"
+                "Foldable Keyboard,Supplier C,35,7,55,40\n"
+                "Hydra Headset,Supplier D,55,3,90,20\n"
+                "Mini Projector,Supplier E,40,4,70,25\n"
+                "Smart Watch,Supplier F,30,5,65,50\n"
+                "Wireless Charger,Supplier G,60,2,75,35\n"
+                "Budget Earbuds,Supplier H,20,8,50,80\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(
+                catalog,
+                db_path,
+                top_n=4,
+                min_viability_score=0.0,
+                holdout_fraction=0.25,
+                adversarial_fraction=0.125,
+            )
+            summary = run_product_research(
+                catalog,
+                database_path=db_path,
+                top_n=4,
+                min_viability_score=0.0,
+                holdout_fraction=0.25,
+                adversarial_fraction=0.125,
+            )
+
+            profile = summary["confidence_profile"]
+            self.assertIn("evaluation_profile", profile)
+            eval_profile = profile["evaluation_profile"]
+            self.assertIn("live", eval_profile)
+            self.assertIn("holdout", eval_profile)
+            self.assertIn("adversarial", eval_profile)
+            self.assertIn("mean_viability", eval_profile["live"])
+            self.assertIn("mean_disagreement", eval_profile["live"])
+            self.assertIn("sample_count", eval_profile["live"])
+            self.assertIn("drift_flag", eval_profile)
+            self.assertIsInstance(eval_profile["drift_flag"], bool)
+            self.assertIn("drift_details", eval_profile)
+
+            total_sample = (
+                eval_profile["live"]["sample_count"]
+                + eval_profile["holdout"]["sample_count"]
+                + eval_profile["adversarial"]["sample_count"]
+            )
+            self.assertEqual(total_sample, 8)
 
     def test_product_research_honors_dry_run_without_writing(self):
         with TemporaryDirectory() as directory:
@@ -279,6 +464,14 @@ class ProductResearchWorkflowTests(unittest.TestCase):
                 "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal,cost_per_unit_usd,retail_price_usd,notes\n"
                 "Aero Travel Mug,Supplier A,45,2,10,90,9.5,19.99,Great\n",
                 encoding="utf-8",
+            )
+            self.run_dry_preflight(
+                catalog,
+                db_path,
+                top_n=1,
+                min_viability_score=0.0,
+                holdout_fraction=0.0,
+                adversarial_fraction=0.0,
             )
             summary = run_product_research(catalog, database_path=db_path, top_n=1, min_viability_score=0.95)
 

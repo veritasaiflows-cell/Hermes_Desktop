@@ -867,7 +867,7 @@ class ConcurrentLaneManager:
         expired_leases: list[dict[str, str]] = []
         active_rows: list[sqlite3.Row] = []
         running_rows: list[sqlite3.Row] = []
-        terminal_without_proof: list[dict[str, Any]] = []
+        terminal_lanes: list[dict[str, Any]] = []
 
         with self._connect() as connection:
             lanes = connection.execute("SELECT * FROM lanes ORDER BY lane_id ASC").fetchall()
@@ -949,7 +949,7 @@ class ConcurrentLaneManager:
                                 "message": "Complete lanes must include proof_artifacts.",
                             }
                         )
-                    terminal_without_proof.append(
+                    terminal_lanes.append(
                         {"lane_id": lane["lane_id"], "proof_count": proof_count}
                     )
 
@@ -1034,7 +1034,7 @@ class ConcurrentLaneManager:
                 "warnings": warnings,
                 "collisions": collisions,
                 "expired_leases": expired_leases,
-                "terminal_without_proof": terminal_without_proof,
+                "terminal_lanes": terminal_lanes,
                 "active_lanes_snapshot": [self._decode_fields(row) for row in active_rows],
             }
 

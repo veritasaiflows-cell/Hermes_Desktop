@@ -1,0 +1,7 @@
+product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal,cost_per_unit_usd,retail_price_usd,notes,source_uri
+Hydra Bluetooth Headset,Supplier North,38,3,84,35,18.00,49.99,Strong demand with healthy margin,https://supplier-north.example.com/catalog-aug-2026.csv
+Aero Tumbler,Supplier X,52,5,74,22,9.50,24.99,High margin low saturation,https://supplier-x.example.com/catalog-aug-2026.csv
+Foldable Keyboard,Supplier C,35,7,55,40,14.00,49.99,Stable demand,https://supplier-c.example.com/catalog-aug-2026.csv
+Budget Tripod Stand,Supplier South,12,9,42,70,11.00,24.99,Lower priority,https://supplier-south.example.com/catalog-aug-2026.csv
+Mini Projector,Supplier North,44,4,68,28,32.00,89.99,Good margin and demand,https://supplier-north.example.com/catalog-aug-2026.csv
+Wireless Charging Pad,Supplier X,58,3,61,45,7.50,19.99,High margin moderate saturation,https://supplier-x.example.com/catalog-aug-2026.csv

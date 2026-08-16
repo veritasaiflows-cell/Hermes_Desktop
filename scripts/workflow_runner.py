@@ -19,7 +19,7 @@ from scripts import workflow_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
-DEFAULT_INDEX_PATH = PROJECT_ROOT / "tmp" / "workflow-routing-index.json"
+DEFAULT_INDEX_PATH = PROJECT_ROOT / "state" / "workflow-routing-index.json"
 DEFAULT_LANE_REGISTER = DEFAULT_STATE_DIR / "concurrent-lane-register.sqlite"
 
 
@@ -194,3 +194,7 @@ def _parse_utc(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+if __name__ == "__main__":
+    raise SystemExit(0)

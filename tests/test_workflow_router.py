@@ -195,6 +195,66 @@ class WorkflowRouterTests(unittest.TestCase):
             self.assertEqual(stale["routing_source_schema"]["alias_index"], "workflow-alias-index.v2")
             self.assertIn("Alias source schema changed since index creation.", stale["message"])
 
+    def test_routing_schema_version_mismatch_in_active_queue_is_rejected(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            active_path = root / "state" / "ACTIVE_WORKFLOWS.md"
+            active_payload = workflow_router._load_json_surface(active_path)
+            active_payload["routing_schema_version"] = "workflow-routing-index.v999"
+            active_path.write_text(
+                "# Workflow control surface\n\n```json\n"
+                + json.dumps(active_payload, indent=2)
+                + "\n```\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "routing_schema_version"):
+                workflow_router.route_workflows(
+                    selector="WF-1000",
+                    answer="summary",
+                    validate=True,
+                    write_index=False,
+                    write_capsules=False,
+                    index_path=root / "tmp" / "workflow-routing-index.json",
+                    project_root=root,
+                    state_dir=root / "state",
+                )
+
+    def test_routing_cache_key_uses_schema_version_and_selector_and_answer(self):
+        key_a = workflow_router._routing_cache_key(
+            routing_schema_version="workflow-routing-index.v1",
+            selector="WF-1000",
+            answer="summary",
+        )
+        key_b = workflow_router._routing_cache_key(
+            routing_schema_version="workflow-routing-index.v1",
+            selector="WF-1000",
+            answer="next",
+        )
+        key_c = workflow_router._routing_cache_key(
+            routing_schema_version="workflow-routing-index.v1",
+            selector=None,
+            answer="summary",
+        )
+        key_d = workflow_router._routing_cache_key(
+            routing_schema_version="workflow-routing-index.v2",
+            selector="WF-1000",
+            answer="summary",
+        )
+        self.assertNotEqual(key_a, key_b)
+        self.assertNotEqual(key_a, key_c)
+        self.assertNotEqual(key_a, key_d)
+        # Same inputs produce identical key (deterministic).
+        self.assertEqual(
+            key_a,
+            workflow_router._routing_cache_key(
+                routing_schema_version="workflow-routing-index.v1",
+                selector="WF-1000",
+                answer="summary",
+            ),
+        )
+
     def test_dependency_stalled_workflow_switches_to_monitor_only(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1,0 +1,71 @@
+{
+  "authoritative_next_action": "Do not activate until an approved ad-channel connector exists and operator approval is recorded.",
+  "authority_boundary": "review_only",
+  "authority_class": "route_only",
+  "blocker_count": 2,
+  "blockers": [
+    "No approved external connector configuration yet for phase 3.",
+    "No approved ad-channel connector for creative delivery."
+  ],
+  "commands": {
+    "dry_run": null,
+    "write": null
+  },
+  "continuity_note": "continuity\\WF-1002-Creative-Generation.md",
+  "control_override": null,
+  "current_state": "Generates ad creative and copy drafts from WF-1000 top opportunities. Internal drafts only until an ad-channel connector is approved.",
+  "default_resume_command": "python scripts/workflow_router.py WF-1002 --answer next --validate",
+  "dependency_blockers": [],
+  "depends_on": [
+    "WF-1000"
+  ],
+  "display_name": "Workflow C - Creative Generation",
+  "effective_status": "route_only",
+  "freshness_sla": "weekly",
+  "generated_at": "2026-08-16T23:00:39Z",
+  "helper_safe": false,
+  "human_approval_owner": "operator",
+  "implementation_script": null,
+  "lifecycle": "route_only",
+  "next_action": "Await operator approval and ad-channel connector configuration before activation.",
+  "owner_action_required": true,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1002.json",
+  "priority": "medium",
+  "proof_artifact": "continuity\\WF-1002-Creative-Generation.md",
+  "readiness": "route_only",
+  "required_refresh_command": "python scripts/workflow_router.py --write-index --answer summary",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v1",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1002-Creative-Generation.md"
+  ],
+  "stop_lines": [
+    "Override removal before external writes",
+    "No creative delivery without operator approval"
+  ],
+  "tier": "P2",
+  "validator_commands": [
+    "python -m unittest discover -s tests -v",
+    "python scripts/workflow_router.py WF-1002 --answer summary --validate"
+  ],
+  "workflow_id": "WF-1002"
+}

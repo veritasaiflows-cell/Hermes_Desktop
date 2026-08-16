@@ -52,6 +52,7 @@ class ProductCandidate:
     score_disagreement: float
     viability_score: float
     split: str = "live"
+    business_key: str = ""
 
 
 def run_product_research(
@@ -82,7 +83,7 @@ def run_product_research(
     if holdout_fraction + adversarial_fraction >= 1.0:
         raise ValueError("holdout_fraction and adversarial_fraction cannot sum to 1.0 or greater")
 
-    candidates = [
+    candidates_raw = [
         row
         for row in _iter_catalog(
             source_path,
@@ -90,6 +91,10 @@ def run_product_research(
             adversarial_fraction=adversarial_fraction,
         )
     ]
+    input_hash = _file_hash(source_path)
+    source_ref = str(source_path.resolve())
+    candidates, deduped_in_batch = _dedupe_candidates_by_business_key(candidates_raw)
+
     split_counts = {
         "live": 0,
         "holdout": 0,
@@ -120,15 +125,43 @@ def run_product_research(
             "disagreement_p95": 0.0,
         }
     confidence_profile["evaluation_splits"] = split_counts
+    confidence_profile["evaluation_profile"] = _build_evaluation_profile(candidates)
+
+    business_key_dedupe = {
+        "incoming_rows": len(candidates_raw),
+        "batch_deduped_rows": deduped_in_batch,
+        "batch_unique_rows": len(candidates),
+        "selected_count": len(selected),
+        "existing_reused": 0,
+        "new_candidates": 0,
+    }
 
     if dry_run:
+        source_preflight = _record_source_preflight(
+            database_path=database_path,
+            source_ref=source_ref,
+            source_hash=input_hash,
+            input_rows=len(candidates_raw),
+            selected_count=len(selected),
+            top_n=top_n,
+            min_viability_score=min_viability_score,
+            holdout_fraction=holdout_fraction,
+            adversarial_fraction=adversarial_fraction,
+            split_counts=split_counts,
+            input_dedupe_summary=business_key_dedupe,
+        )
+
         return {
             "mode": "dry_run",
-            "source_path": str(source_path.resolve()),
+            "source_path": source_ref,
             "selected_count": len(selected),
             "top_n": top_n,
             "min_viability_score": min_viability_score,
             "confidence_profile": confidence_profile,
+            "telemetry": {
+                "business_key_dedupe": business_key_dedupe,
+            },
+            "source_preflight": source_preflight,
             "selected": [
                 {
                     "source_row": candidate.source_row,
@@ -144,7 +177,6 @@ def run_product_research(
             ],
         }
 
-    input_hash = _file_hash(source_path)
     run_key = _workflow_run_key(
         input_hash=input_hash,
         top_n=top_n,
@@ -178,10 +210,17 @@ def run_product_research(
                     }
                 return replayed
 
+            source_preflight = _require_source_preflight(
+                db=db,
+                source_ref=source_ref,
+                source_hash=input_hash,
+            )
+
+            existing_candidates_by_key, existing_candidates_by_base_key = _load_existing_business_key_index(db)
             provenance_id = db.add_provenance(
                 source_type="workflow",
                 source_ref=f"workflow:product-research:{source_path}",
-                source_uri=str(source_path.resolve()),
+                source_uri=source_ref,
                 content_hash=input_hash,
                 notes="Seeded candidates from product research workflow",
                 confidence=min(1.0, 0.5 + min(0.5, len(selected) / 20)),
@@ -189,6 +228,31 @@ def run_product_research(
 
             written_rows = []
             for rank, candidate in enumerate(selected, start=1):
+                existing_candidate = _find_existing_candidate(
+                    existing_candidates_by_key,
+                    existing_candidates_by_base_key,
+                    candidate,
+                )
+                if existing_candidate is not None:
+                    business_key_dedupe["existing_reused"] += 1
+                    written_rows.append(
+                        {
+                            "action": "reused",
+                            "entity_id": existing_candidate["entity_id"],
+                            "name": candidate.name,
+                            "supplier": candidate.supplier,
+                            "viability_score": candidate.viability_score,
+                            "score_primary": candidate.score_primary,
+                            "score_secondary": candidate.score_secondary,
+                            "score_disagreement": candidate.score_disagreement,
+                            "split": candidate.split,
+                            "rank": rank,
+                            "business_key": candidate.business_key,
+                        }
+                    )
+                    continue
+
+                business_key_dedupe["new_candidates"] += 1
                 entity_id = db.insert(
                     "entities",
                     {
@@ -225,6 +289,7 @@ def run_product_research(
                                     "entity_id": entity_id,
                                     "supplier": candidate.supplier,
                                     "source_uri": candidate.source_uri,
+                                    "business_key": candidate.business_key,
                                 },
                                 sort_keys=True,
                             ),
@@ -265,6 +330,7 @@ def run_product_research(
 
                 written_rows.append(
                     {
+                        "action": "inserted",
                         "entity_id": entity_id,
                         "name": candidate.name,
                         "supplier": candidate.supplier,
@@ -274,16 +340,21 @@ def run_product_research(
                         "score_disagreement": candidate.score_disagreement,
                         "split": candidate.split,
                         "rank": rank,
+                        "business_key": candidate.business_key,
                     }
                 )
 
             result = {
                 "mode": "write",
-                "source_path": str(source_path.resolve()),
+                "source_path": source_ref,
                 "selected_count": len(selected),
                 "top_n": top_n,
                 "min_viability_score": min_viability_score,
                 "confidence_profile": confidence_profile,
+                "telemetry": {
+                    "business_key_dedupe": business_key_dedupe,
+                },
+                "source_preflight": source_preflight,
                 "database_path": database_resolved_path,
                 "written": written_rows,
             }
@@ -294,7 +365,7 @@ def run_product_research(
                     "workflow_id": WORKFLOW_ID,
                     "run_key": run_key,
                     "input_hash": input_hash,
-                    "source_uri": str(source_path.resolve()),
+                    "source_uri": source_ref,
                     "status": "completed",
                     "result_json": json.dumps(result, sort_keys=True),
                     "started_at": _utc_now(),
@@ -313,7 +384,7 @@ def run_product_research(
                 title="product_research_selection",
                 source_type="workflow",
                 source_artifact_id=workflow_run_id,
-                source_locator=str(source_path.resolve()),
+                source_locator=source_ref,
                 source_hash=input_hash,
                 freshness_ttl_seconds=7 * 24 * 60 * 60,
                 freshness_rule="ttl_seconds:604800",
@@ -325,6 +396,244 @@ def run_product_research(
             result["claim_id"] = claim_id
 
     return result
+
+
+def _build_evaluation_profile(candidates: list[ProductCandidate]) -> dict[str, Any]:
+    """Compute per-split viability statistics and a simple drift flag.
+
+    The profile compares live, holdout, and adversarial splits so operators can
+    spot distribution shifts before trusting the selected live candidates.
+    """
+    by_split: dict[str, list[ProductCandidate]] = {"live": [], "holdout": [], "adversarial": []}
+    for candidate in candidates:
+        by_split.setdefault(candidate.split, []).append(candidate)
+
+    def _split_stats(split_candidates: list[ProductCandidate]) -> dict[str, float | int]:
+        if not split_candidates:
+            return {
+                "sample_count": 0,
+                "mean_viability": 0.0,
+                "mean_disagreement": 0.0,
+                "min_viability": 0.0,
+                "max_viability": 0.0,
+            }
+        viabilities = [c.viability_score for c in split_candidates]
+        disagreements = [c.score_disagreement for c in split_candidates]
+        return {
+            "sample_count": len(split_candidates),
+            "mean_viability": round(sum(viabilities) / len(viabilities), 4),
+            "mean_disagreement": round(sum(disagreements) / len(disagreements), 4),
+            "min_viability": round(min(viabilities), 4),
+            "max_viability": round(max(viabilities), 4),
+        }
+
+    profile = {
+        "live": _split_stats(by_split.get("live", [])),
+        "holdout": _split_stats(by_split.get("holdout", [])),
+        "adversarial": _split_stats(by_split.get("adversarial", [])),
+    }
+
+    # Drift detection: flag if live mean viability differs from holdout/adversarial
+    # by more than a simple threshold relative to the overall mean.
+    live_mean = profile["live"]["mean_viability"]
+    drift_flag = False
+    drift_details: list[str] = []
+    threshold = 0.05
+    for split in ("holdout", "adversarial"):
+        split_mean = profile[split]["mean_viability"]
+        if profile[split]["sample_count"] == 0:
+            continue
+        if abs(live_mean - split_mean) > threshold:
+            drift_flag = True
+            drift_details.append(
+                f"{split} mean viability {split_mean} differs from live {live_mean} by more than {threshold}"
+            )
+
+    profile["drift_flag"] = drift_flag
+    profile["drift_details"] = drift_details
+    return profile
+
+
+def _normalize_business_key_value(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+def _build_business_key(*, name: str, supplier: str, source_uri: str | None = None) -> str:
+    parts = [
+        _normalize_business_key_value(name),
+        _normalize_business_key_value(supplier),
+    ]
+    if source_uri is not None:
+        normalized_source_uri = _normalize_business_key_value(source_uri)
+        if normalized_source_uri:
+            parts.append(normalized_source_uri)
+    return "|".join(parts)
+
+
+def _dedupe_candidates_by_business_key(
+    candidates: list[ProductCandidate],
+) -> tuple[list[ProductCandidate], int]:
+    deduped: dict[str, ProductCandidate] = {}
+    for candidate in candidates:
+        existing = deduped.get(candidate.business_key)
+        if existing is None or candidate.viability_score > existing.viability_score:
+            deduped[candidate.business_key] = candidate
+    return list(deduped.values()), len(candidates) - len(deduped)
+
+
+def _load_existing_business_key_index(db: CanonicalDB) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    by_business_key: dict[str, dict[str, str]] = {}
+    by_business_key_without_source: dict[str, dict[str, str]] = {}
+
+    rows = db.connection.execute(
+        "SELECT entity_id, name FROM entities WHERE entity_type = ?",
+        ("product_candidate",),
+    ).fetchall()
+
+    for row in rows:
+        metric = db.connection.execute(
+            "SELECT metric_value, dimensions_json FROM metrics "
+            "WHERE metric_name = 'commerce.viability_score' AND json_extract(dimensions_json, '$.entity_id') = ? "
+            "ORDER BY measured_at DESC LIMIT 1",
+            (row["entity_id"],),
+        ).fetchone()
+        if metric is None:
+            continue
+        try:
+            dimensions = json.loads(metric["dimensions_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+
+        supplier = str(dimensions.get("supplier") or "")
+        source_uri = str(dimensions.get("source_uri") or "")
+
+        with_source = _build_business_key(
+            name=row["name"],
+            supplier=supplier,
+            source_uri=source_uri,
+        )
+        without_source = _build_business_key(name=row["name"], supplier=supplier, source_uri=None)
+        payload = {
+            "entity_id": row["entity_id"],
+            "name": row["name"],
+            "supplier": supplier,
+            "source_uri": source_uri,
+            "viability_score": metric["metric_value"],
+        }
+        by_business_key[with_source] = payload
+        by_business_key_without_source.setdefault(without_source, payload)
+
+    return by_business_key, by_business_key_without_source
+
+
+def _find_existing_candidate(
+    by_business_key: dict[str, dict[str, str]],
+    by_business_key_without_source: dict[str, dict[str, str]],
+    candidate: ProductCandidate,
+) -> dict[str, str] | None:
+    direct_hit = by_business_key.get(candidate.business_key)
+    if direct_hit is not None:
+        return direct_hit
+
+    fallback_key = _build_business_key(name=candidate.name, supplier=candidate.supplier, source_uri=None)
+    return by_business_key_without_source.get(fallback_key)
+
+
+def _record_source_preflight(
+    *,
+    database_path: str | Path,
+    source_ref: str,
+    source_hash: str,
+    input_rows: int,
+    selected_count: int,
+    top_n: int,
+    min_viability_score: float,
+    holdout_fraction: float,
+    adversarial_fraction: float,
+    split_counts: dict[str, int],
+    input_dedupe_summary: dict[str, int],
+) -> dict[str, Any]:
+    check_result: dict[str, Any] = {
+        "status": "passed",
+        "mode": "dry_run",
+        "source_hash": source_hash,
+        "input_rows": input_rows,
+        "selected_count": selected_count,
+        "top_n": top_n,
+        "min_viability_score": min_viability_score,
+        "holdout_fraction": holdout_fraction,
+        "adversarial_fraction": adversarial_fraction,
+        "split_counts": split_counts,
+        "business_key_dedupe": input_dedupe_summary,
+    }
+    checked_at = _utc_now()
+    payload = json.dumps(check_result, sort_keys=True)
+
+    with CanonicalDB(database_path) as db:
+        existing = db.connection.execute(
+            "SELECT 1 FROM source_freshness WHERE source_ref = ?",
+            (source_ref,),
+        ).fetchone()
+        if existing is None:
+            db.connection.execute(
+                "INSERT INTO source_freshness (source_ref, last_checked_at, source_timestamp, freshness_status, check_result, provenance_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (source_ref, checked_at, checked_at, "passed", payload, None),
+            )
+        else:
+            db.connection.execute(
+                "UPDATE source_freshness "
+                "SET last_checked_at = ?, source_timestamp = ?, freshness_status = ?, check_result = ? "
+                "WHERE source_ref = ?",
+                (checked_at, checked_at, "passed", payload, source_ref),
+            )
+        db.connection.commit()
+
+    return {
+        "source_ref": source_ref,
+        "status": "passed",
+        "checked_at": checked_at,
+        "source_hash": source_hash,
+        "check_result": check_result,
+    }
+
+
+def _require_source_preflight(*, db: CanonicalDB, source_ref: str, source_hash: str) -> dict[str, Any]:
+    row = db.connection.execute(
+        "SELECT source_ref, last_checked_at, freshness_status, check_result "
+        "FROM source_freshness WHERE source_ref = ?",
+        (source_ref,),
+    ).fetchone()
+
+    if row is None:
+        raise WorkflowPreflightError(
+            "No dry-run preflight record found for this source. "
+            "Run the same catalog with --dry-run before writing canonical results."
+        )
+
+    if row["freshness_status"] != "passed":
+        raise WorkflowPreflightError(
+            "Source preflight did not pass for this source. "
+            "Rerun the catalog with --dry-run and then retry this write."
+        )
+
+    try:
+        check_result = json.loads(row["check_result"] or "{}") if row["check_result"] is not None else {}
+    except json.JSONDecodeError:
+        check_result = {}
+
+    if check_result.get("source_hash") != source_hash:
+        raise WorkflowPreflightError(
+            "Source content changed since the last dry-run. "
+            "Rerun the catalog with --dry-run before writing canonical results."
+        )
+
+    return {
+        "source_ref": row["source_ref"],
+        "status": row["freshness_status"],
+        "checked_at": row["last_checked_at"],
+        "source_hash": source_hash,
+        "check_result": check_result,
+    }
 
 
 def _iter_catalog(
@@ -394,6 +703,11 @@ def _iter_catalog(
                     supplier=supplier,
                     holdout_fraction=holdout_fraction,
                     adversarial_fraction=adversarial_fraction,
+                ),
+                business_key=_build_business_key(
+                    name=name,
+                    supplier=supplier,
+                    source_uri=source_uri,
                 ),
             )
 

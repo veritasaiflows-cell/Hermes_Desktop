@@ -193,4 +193,14 @@ CREATE INDEX IF NOT EXISTS idx_claims_subject ON claims(subject_type, subject_id
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_until ON claims(valid_until);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, completed_at);
+CREATE TABLE IF NOT EXISTS routing_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    source_signatures_json TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL DEFAULT 300,
+    expires_at TEXT NOT NULL,
+    provenance_id TEXT REFERENCES provenance(provenance_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_run_metrics_started ON run_metrics(started_at);

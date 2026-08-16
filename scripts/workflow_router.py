@@ -25,14 +25,18 @@ from pathlib import Path
 import sys
 from typing import Any, Iterable
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from canonical.db import CanonicalDB
+
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
 DEFAULT_TMP_DIR = PROJECT_ROOT / "tmp"
-DEFAULT_INDEX_PATH = DEFAULT_TMP_DIR / "workflow-routing-index.json"
+DEFAULT_INDEX_PATH = STATE_INDEX_PATH = DEFAULT_STATE_DIR / "workflow-routing-index.json"
+DEFAULT_CAPSULE_DIR = DEFAULT_STATE_DIR / "workflows"
+DEFAULT_ROUTING_CACHE_TTL_SECONDS = 300
+DEFAULT_ROUTING_DATABASE = PROJECT_ROOT / "canonical" / "efficiens.db"
 ACTIVE_WORKFLOW_SOURCES = [
     DEFAULT_STATE_DIR / "ACTIVE_WORKFLOWS.md",
     DEFAULT_STATE_DIR / "active_workflows.json",
@@ -133,15 +137,30 @@ def _load_active_workflow_entries(
     *, state_dir: Path = DEFAULT_STATE_DIR,
 ) -> tuple[dict[str, Path], dict[str, Any]]:
     active_path = _first_existing(
-        [state_dir / "ACTIVE_WORKFLOWS.md", state_dir / "active_workflows.json"]
+        [
+            state_dir / "active_workflows.json",
+            state_dir / "ACTIVE_WORKFLOWS.md",
+        ]
     )
     payload = _load_json_surface(active_path)
     if isinstance(payload, list):
         entries = payload
+        top_level = {}
     elif isinstance(payload, dict):
         entries = payload.get("workflows", [])
+        top_level = payload
     else:
         raise ValueError(f"Unsupported workflow payload type in {active_path}")
+
+    # Schema-version guard: if the active queue declares a routing schema
+    # version, it must match the router's expected version. This prevents
+    # silent mis-routing when the routing contract changes.
+    declared_routing_version = top_level.get("routing_schema_version")
+    if declared_routing_version is not None and declared_routing_version != ROUTER_SCHEMA:
+        raise ValueError(
+            f"Active workflow queue declares routing_schema_version={declared_routing_version!r}, "
+            f"but router expects {ROUTER_SCHEMA!r}. Regenerate the queue before routing."
+        )
 
     entries_by_id: dict[str, dict[str, Any]] = {}
     for entry in entries:
@@ -155,7 +174,13 @@ def _load_active_workflow_entries(
         entries_by_id[workflow_id] = entry
     if not entries_by_id:
         raise ValueError(f"No workflows available in {active_path}")
-    return entries_by_id, {"source": str(active_path.as_posix()), "schema": _infer_schema(payload)}
+
+    source_meta = {
+        "source": str(active_path.as_posix()),
+        "schema": _infer_schema(top_level if isinstance(payload, dict) else payload),
+        "routing_schema_version": declared_routing_version if declared_routing_version is not None else ROUTER_SCHEMA,
+    }
+    return entries_by_id, source_meta
 
 
 def _infer_schema(payload: dict[str, Any] | list[Any]) -> str:
@@ -165,7 +190,12 @@ def _infer_schema(payload: dict[str, Any] | list[Any]) -> str:
 
 
 def _load_alias_index(state_dir: Path = DEFAULT_STATE_DIR) -> tuple[dict[str, str], dict[str, Any]]:
-    alias_path = _first_existing([state_dir / "WORKFLOW_ALIAS_INDEX.md", state_dir / "workflow_alias_index.json"])
+    alias_path = _first_existing(
+        [
+            state_dir / "workflow_alias_index.json",
+            state_dir / "WORKFLOW_ALIAS_INDEX.md",
+        ]
+    )
     payload = _load_json_surface(alias_path)
     if not isinstance(payload, dict):
         raise ValueError(f"Alias index must be an object in {alias_path}")
@@ -418,6 +448,14 @@ def _build_capsule(
         "authoritative_next_action": entry.get(
             "authoritative_next_action", entry.get("next_action", "No next action recorded.")
         ),
+        "implementation_script": entry.get("implementation_script"),
+        "commands": entry.get(
+            "commands",
+            {
+                "dry_run": None,
+                "write": None,
+            },
+        ),
         "helper_safe": bool(entry.get("helper_safe", False)),
         "owner_action_required": bool(entry.get("owner_action_required", False)),
         "authority_boundary": entry.get("authority_boundary", "review_only"),
@@ -446,9 +484,11 @@ def _build_capsule(
             ],
         ),
         "default_resume_command": entry.get(
-            "default_resume_command", f"route {workflow_id} --answer next --validate"
+            "default_resume_command",
+            f"python scripts/workflow_router.py {workflow_id} --answer next --validate",
         ),
         "routing_contract": ROUTER_SCHEMA,
+        "routing_schema_version": ROUTER_SCHEMA,
         "routing_source_contracts": {
             "active_workflows": active_source["schema"],
             "alias_source": alias_source["schema"],
@@ -543,6 +583,7 @@ def build_routing_index(
 
     index_payload = {
         "schema": ROUTER_SCHEMA,
+        "routing_schema_version": ROUTER_SCHEMA,
         "generated_at": _utc_now(),
         "generated_by": "scripts/workflow_router.py",
         "source_schema": {
@@ -814,7 +855,7 @@ def check_routing_freshness(
 
 def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
     if answer == "summary":
-        return {
+        payload = {
             "workflow_id": capsule["workflow_id"],
             "display_name": capsule["display_name"],
             "lifecycle": capsule["lifecycle"],
@@ -826,6 +867,8 @@ def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
             "authority_class": capsule["authority_class"],
             "current_state": capsule["current_state"],
             "next_action": capsule["next_action"],
+            "implementation_script": capsule.get("implementation_script"),
+            "commands": capsule.get("commands"),
             "proof_artifact": capsule["proof_artifact"],
             "blocker_count": capsule["blocker_count"],
             "depends_on": capsule.get("depends_on", []),
@@ -833,12 +876,15 @@ def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
             "blockers": capsule["blockers"],
             "default_resume_command": capsule["default_resume_command"],
         }
+        return {key: value for key, value in payload.items() if value is not None}
     if answer == "next":
         return {
             "workflow_id": capsule["workflow_id"],
             "effective_status": capsule["effective_status"],
             "next_action": capsule["next_action"],
             "authoritative_next_action": capsule["authoritative_next_action"],
+            "implementation_script": capsule.get("implementation_script"),
+            "commands": capsule.get("commands"),
             "owner_action_required": capsule["owner_action_required"],
             "human_approval_owner": capsule["human_approval_owner"],
             "control_override": capsule["control_override"],
@@ -873,6 +919,8 @@ def route_workflows(
     index_path: Path = DEFAULT_INDEX_PATH,
     project_root: Path = PROJECT_ROOT,
     state_dir: Path = DEFAULT_STATE_DIR,
+    routing_cache_ttl_seconds: int = DEFAULT_ROUTING_CACHE_TTL_SECONDS,
+    routing_database_path: Path = DEFAULT_ROUTING_DATABASE,
 ) -> dict[str, Any]:
     if (selector is None and not all_workflows) or (selector is not None and all_workflows):
         raise ValueError("Use either selector or --all, not both/none")
@@ -885,6 +933,46 @@ def route_workflows(
     entries, active_source_meta = _load_active_workflow_entries(state_dir=state_dir)
     aliases, alias_source_meta = _load_alias_index(state_dir=state_dir)
     overrides, override_source_meta = _load_overrides(state_dir=state_dir)
+
+    cache_key: str | None = None
+    cached_result: dict[str, Any] | None = None
+    current_signatures: dict[str, Any] | None = None
+
+    if routing_cache_ttl_seconds > 0 and not write_index:
+        cache_key = _routing_cache_key(
+            routing_schema_version=ROUTER_SCHEMA,
+            selector=selector,
+            answer=answer,
+        )
+        try:
+            with CanonicalDB(routing_database_path) as db:
+                db.clear_expired_routing_cache()
+                cached = db.get_routing_cache(cache_key)
+                if cached is not None:
+                    current_signatures = _current_source_signatures(
+                        entries=entries,
+                        overrides=overrides,
+                        alias_source_path=Path(alias_source_meta["source"]),
+                        active_source_path=Path(active_source_meta["source"]),
+                        override_source_path=Path(override_source_meta["source"]),
+                        project_root=project_root,
+                    )
+                    if cached["source_signatures"] == current_signatures:
+                        cached_result = dict(cached["payload"])
+                        cached_result["routing_freshness"] = {
+                            "status": "cached",
+                            "generated_at": cached["generated_at"],
+                            "expires_at": cached["expires_at"],
+                            "required_refresh_command": ROUTER_REFRESH_COMMAND,
+                        }
+                    else:
+                        cached_result = None
+        except Exception:
+            # Cache is advisory; fall through to live routing on any problem.
+            cached_result = None
+
+    if cached_result is not None:
+        return cached_result
 
     index_payload: dict[str, Any] | None = None
     if validate:
@@ -995,7 +1083,75 @@ def route_workflows(
 
     if len(payloads) == 1:
         result["workflow"] = payloads[0]
+
+    if routing_cache_ttl_seconds > 0 and cache_key is not None:
+        try:
+            current_signatures = current_signatures or _current_source_signatures(
+                entries=entries,
+                overrides=overrides,
+                alias_source_path=Path(alias_source_meta["source"]),
+                active_source_path=Path(active_source_meta["source"]),
+                override_source_path=Path(override_source_meta["source"]),
+                project_root=project_root,
+            )
+            with CanonicalDB(routing_database_path) as db:
+                db.set_routing_cache(
+                    cache_key,
+                    payload=result,
+                    source_signatures=current_signatures,
+                    ttl_seconds=routing_cache_ttl_seconds,
+                )
+        except Exception:
+            pass
+
     return result
+
+
+def _routing_cache_key(
+    *,
+    routing_schema_version: str,
+    selector: str | None,
+    answer: str,
+) -> str:
+    """Build a deterministic cache key for a routing query.
+
+    The key intentionally does NOT include validate or all_workflows flags:
+    those affect whether a stale index is refreshed, not the cached routing
+    answer for a given workflow and answer mode. Dropping them reduces cache
+    fragmentation and improves hit rate.
+    """
+    target = "all" if selector is None else selector.upper()
+    payload = "|".join([routing_schema_version, target, answer])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _current_source_signatures(
+    *,
+    entries: dict[str, dict[str, Any]],
+    overrides: dict[str, dict[str, Any]],
+    alias_source_path: Path,
+    active_source_path: Path,
+    override_source_path: Path,
+    project_root: Path,
+) -> dict[str, Any]:
+    """Return a compact, deterministic signature set for cache validation."""
+    raw = _fingerprint_sources(
+        entries=entries,
+        overrides=overrides,
+        alias_source_path=alias_source_path,
+        active_source_path=active_source_path,
+        override_source_path=override_source_path,
+        project_root=project_root,
+    )
+    return {
+        path: {
+            "sha256": sig["sha256"],
+            "size": sig["size"],
+            "modified_at": sig["modified_at"],
+            "exists": sig["exists"],
+        }
+        for path, sig in sorted(raw.items())
+    }
 
 
 def _parse_args() -> argparse.Namespace:
@@ -1037,7 +1193,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--index-path",
         default=str(DEFAULT_INDEX_PATH),
-        help="Route-index file path (default: tmp/workflow-routing-index.json)",
+        help="Route-index file path (default: state/workflow-routing-index.json)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Skip the routing cache and always recompute the result.",
+    )
+    parser.add_argument(
+        "--aliases",
+        action="store_true",
+        help="List all workflow aliases and exit.",
     )
     return parser.parse_args()
 
@@ -1045,6 +1211,22 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     try:
+        if args.aliases:
+            aliases = _load_alias_index(state_dir=DEFAULT_STATE_DIR)[0]
+            print(
+                json.dumps(
+                    {
+                        "aliases": {
+                            alias: workflow_id
+                            for alias, workflow_id in sorted(aliases.items())
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
+
         index_path = Path(args.index_path)
         if not index_path.is_absolute():
             index_path = PROJECT_ROOT / args.index_path
@@ -1057,6 +1239,7 @@ def main() -> int:
             write_index=args.write_index,
             write_capsules=args.write_capsules,
             index_path=index_path,
+            routing_cache_ttl_seconds=0 if args.no_cache else DEFAULT_ROUTING_CACHE_TTL_SECONDS,
         )
     except (ValueError, KeyError, FileNotFoundError) as exc:
         print(json.dumps({"error": str(exc)}, indent=2))

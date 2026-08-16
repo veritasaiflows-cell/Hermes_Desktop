@@ -14,12 +14,12 @@
   - README.md: pending
 - freshness_rule: weekly
 - authority_boundary: review_only
-- promotion_path: AGENTS.md -> references/operating-procedures.md -> prompts/hermes-trustworthy-work-operating-model-prompt.md
+- promotion_path: AGENTS.md -> references/operating-procedures.md
 - warnings: none
 - next_action: Keep this index and source map synchronized with authoritative owners.
 - source_map:
+  - AGENTS.md
   - references/operating-procedures.md
-  - prompts/hermes-trustworthy-work-operating-model-prompt.md
 
 ## Quick map
 

@@ -4,12 +4,27 @@
 {
   "schema": "workflow-alias-index.v1",
   "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-08-15T00:00:00Z",
+  "generated_at": "2026-08-16T04:10:00Z",
   "aliases": {
     "workflow-a": "WF-1000",
     "product research": "WF-1000",
     "product-research": "WF-1000",
-    "workflow a": "WF-1000"
+    "workflow a": "WF-1000",
+    "workflow-b": "WF-1001",
+    "listing drafts": "WF-1001",
+    "listing-drafts": "WF-1001",
+    "listings": "WF-1001",
+    "workflow b": "WF-1001",
+    "workflow-c": "WF-1002",
+    "creative generation": "WF-1002",
+    "creative-generation": "WF-1002",
+    "creatives": "WF-1002",
+    "workflow c": "WF-1002",
+    "workflow-d": "WF-1003",
+    "campaign execution": "WF-1003",
+    "campaign-execution": "WF-1003",
+    "campaigns": "WF-1003",
+    "workflow d": "WF-1003"
   }
 }
 ```

@@ -1,4 +1,5 @@
-# Secrets and local credentials
+# Secrets and local credentials — NEVER commit anything under this directory
+canonical/secrets/
 .env
 *.pem
 *.key
@@ -16,6 +17,8 @@ wiki/.lkg/bootstrap-manifest.*Z.json
 # Generated indexes and derived caches
 vector/indexes/
 derived/cache/
+state/workflow-routing-index.json
+derived/
 
 # Runtime logs and temporary files
 telemetry/runtime/

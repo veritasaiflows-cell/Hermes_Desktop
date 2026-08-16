@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
-"""Cron-friendly health check used by the green-gate watchdog (A2).
+"""Cron-friendly operational health gate (A2).
 
-Runs three bounded, deterministic checks and prints a single short line
-to stdout on success or a multi-line diagnostic block on failure. Exits 0
-on green, non-zero on any failure. Designed for `no_agent` cron use:
+Runs bounded, deterministic operational checks and prints a single short
+line to stderr on success or a multi-line diagnostic block on stdout on
+failure. Exits 0 on green, non-zero on any failure. Designed for `no_agent`
+cron use:
 
     silent when green -> nothing delivered
     alerts on any error -> the message is the diagnostic
 
 Checks performed:
-  1. python scripts/run_checks.py --skip-smoke   (test suite)
+  1. python scripts/workflow_router.py WF-1000 --answer summary --validate
   2. python scripts/wiki_bootstrap.py validate  (wiki manifest integrity)
+  3. python scripts/cron_alias_sweep.py  (alias consistency)
+  4. python scripts/cron_registration_validator.py  (cron targets exist)
+
+This is NOT a code-correctness gate. The full unit/smoke suite is run by
+cron_test_gate.py (separate schedule). A2 is a fast operational liveness
+probe for the live control plane.
 
 Stale wiki is NOT a hard failure on the watchdog path -- it is reported
 as a soft "stale" status so the daily A1 regen can correct it without
-alerting. Hard failures are test errors and uncaught exceptions.
+alerting. Hard failures are routing errors, alias drift, and uncaught
+exceptions.
 """
 from __future__ import annotations
 
@@ -54,15 +62,24 @@ def main() -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     results: list[dict] = []
 
-    # 1. Test suite -- hard gate.
-    checks = _run("run_checks", ["scripts/run_checks.py", "--skip-smoke"])
-    code, err = checks["exit"], checks["stderr"]
+    # 1. Routing freshness -- lightweight hard gate.
+    routing = _run(
+        "routing",
+        ["scripts/workflow_router.py", "WF-1000", "--answer", "summary", "--validate"],
+    )
+    routing_status = "unknown"
+    if routing["exit"] == 0 and routing["stdout"].strip():
+        try:
+            routing_status = json.loads(routing["stdout"]).get("routing_freshness", {}).get("status")
+        except json.JSONDecodeError:
+            pass
     results.append(
         {
-            "check": "run_checks",
-            "exit": code,
-            "passed": code == 0,
-            "stderr_tail": err.strip().splitlines()[-5:] if err.strip() else [],
+            "check": "routing",
+            "exit": routing["exit"],
+            "passed": routing["exit"] == 0 and routing_status in {"fresh", "cached"},
+            "routing_status": routing_status,
+            "stderr_tail": routing["stderr"].strip().splitlines()[-3:] if routing["stderr"].strip() else [],
         }
     )
 
@@ -85,7 +102,31 @@ def main() -> int:
         }
     )
 
-    hard_fail = [r for r in results if not r["passed"] and r["check"] == "run_checks"]
+    # 3. Alias consistency -- hard gate (dead alias = routing drift).
+    aliases = _run("alias_sweep", ["scripts/cron_alias_sweep.py"])
+    alias_code = aliases["exit"]
+    results.append(
+        {
+            "check": "alias_sweep",
+            "exit": alias_code,
+            "passed": alias_code == 0,
+            "stderr_tail": aliases["stderr"].strip().splitlines()[-3:] if aliases["stderr"].strip() else [],
+        }
+    )
+
+    # 4. Cron registration validator -- hard gate (missing targets alert before a job fires).
+    cron_reg = _run("cron_registration", ["scripts/cron_registration_validator.py"])
+    cron_reg_code = cron_reg["exit"]
+    results.append(
+        {
+            "check": "cron_registration",
+            "exit": cron_reg_code,
+            "passed": cron_reg_code == 0,
+            "stderr_tail": cron_reg["stderr"].strip().splitlines()[-3:] if cron_reg["stderr"].strip() else [],
+        }
+    )
+
+    hard_fail = [r for r in results if not r["passed"] and r["check"] in {"routing", "alias_sweep", "cron_registration"}]
     soft_warn = [r for r in results if r["check"] == "wiki_validate" and wiki_status == "stale"]
 
     if hard_fail:
@@ -96,8 +137,6 @@ def main() -> int:
     # Green path: keep STDOUT EMPTY so a no_agent cron stays silent. The OK
     # line goes to stderr for log trails only (not delivered).
     if soft_warn:
-        # Green tests + stale wiki -> still green for the watchdog;
-        # A1 daily regen will repair the wiki.
         print(f"HEALTH OK (wiki stale) {now}", file=sys.stderr)
         return 0
 

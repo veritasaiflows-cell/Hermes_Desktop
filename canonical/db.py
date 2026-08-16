@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import re
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
@@ -500,6 +501,171 @@ class CanonicalDB:
             self.integrity_check()
         return str(values[self._primary_key(table)])
 
+    def record_run(
+        self,
+        *,
+        request_type: str,
+        route_selected: str | None = None,
+        tools_json: list[str] | dict[str, Any] | None = None,
+        model_or_agent: str | None = None,
+        input_size: int | None = None,
+        handoff_size: int | None = None,
+        duration_ms: int | None = None,
+        resource_usage_json: dict[str, Any] | None = None,
+        errors_json: list[str] | dict[str, Any] | None = None,
+        retries: int = 0,
+        verification_result: str | None = None,
+        user_correction: str | None = None,
+        final_outcome: str | None = None,
+        acceptance_status: str | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        provenance_id: str | None = None,
+        run_id: str | None = None,
+    ) -> str:
+        """Append one metadata-only run telemetry row to the canonical ledger.
+
+        No raw prompts, tool payloads, credentials, or sensitive file contents
+        are accepted. Free-text fields (user_correction, final_outcome) are
+        redacted to category-only tokens unless explicitly marked safe.
+        """
+        if not request_type or not request_type.strip():
+            raise ValueError("request_type is required")
+
+        now = _utc_now()
+        row: dict[str, Any] = {
+            "run_id": run_id or str(uuid4()),
+            "request_type": request_type.strip(),
+            "route_selected": _redact_free_text(route_selected),
+            "tools_json": _serialize_json(tools_json),
+            "model_or_agent": _redact_free_text(model_or_agent),
+            "input_size": _non_negative_int(input_size),
+            "handoff_size": _non_negative_int(handoff_size),
+            "duration_ms": _non_negative_int(duration_ms),
+            "resource_usage_json": _serialize_json(resource_usage_json),
+            "errors_json": _serialize_json(errors_json),
+            "retries": max(0, retries),
+            "verification_result": _redact_free_text(verification_result),
+            "user_correction": _redact_free_text(user_correction),
+            "final_outcome": _redact_free_text(final_outcome),
+            "acceptance_status": _redact_free_text(acceptance_status),
+            "started_at": started_at or now,
+            "completed_at": completed_at,
+        }
+        return self.insert("run_metrics", row, provenance_id=provenance_id)
+
+    def get_run_metrics(
+        self,
+        *,
+        request_type: str | None = None,
+        since: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return recent run telemetry rows ordered by start time descending."""
+        filters: list[str] = ["1=1"]
+        parameters: list[Any] = []
+        if request_type:
+            filters.append("request_type = ?")
+            parameters.append(request_type)
+        if since:
+            filters.append("started_at >= ?")
+            parameters.append(since)
+
+        query = (
+            "SELECT * FROM run_metrics WHERE "
+            + " AND ".join(filters)
+            + " ORDER BY started_at DESC LIMIT ?"
+        )
+        parameters.append(max(1, limit))
+        rows = self.connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_routing_cache(
+        self,
+        cache_key: str,
+        *,
+        now: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch a non-expired routing cache entry by key."""
+        row = self.connection.execute(
+            "SELECT * FROM routing_cache WHERE cache_key = ? AND expires_at >= ?",
+            (cache_key, now or _utc_now()),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "cache_key": row["cache_key"],
+            "payload": json.loads(row["payload_json"]),
+            "source_signatures": json.loads(row["source_signatures_json"]),
+            "generated_at": row["generated_at"],
+            "ttl_seconds": row["ttl_seconds"],
+            "expires_at": row["expires_at"],
+        }
+
+    def set_routing_cache(
+        self,
+        cache_key: str,
+        *,
+        payload: dict[str, Any],
+        source_signatures: dict[str, Any],
+        ttl_seconds: int = 300,
+        provenance_id: str | None = None,
+    ) -> str:
+        """Upsert a routing cache entry with an explicit TTL."""
+        now = _utc_now_datetime()
+        expires = now + timedelta(seconds=ttl_seconds)
+        row = {
+            "cache_key": cache_key,
+            "payload_json": json.dumps(payload, sort_keys=True),
+            "source_signatures_json": json.dumps(source_signatures, sort_keys=True),
+            "generated_at": _to_iso8601(now),
+            "ttl_seconds": ttl_seconds,
+            "expires_at": _to_iso8601(expires),
+            "provenance_id": provenance_id,
+        }
+        return self._insert("routing_cache", row)
+
+    def clear_expired_routing_cache(
+        self,
+        *,
+        now: str | None = None,
+    ) -> int:
+        """Delete expired routing cache entries and return the deleted count."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "DELETE FROM routing_cache WHERE expires_at < ?",
+                (now or _utc_now(),),
+            )
+        return cursor.rowcount
+
+    def delete_routing_cache_with_mismatched_signatures(
+        self,
+        *,
+        current_signatures: dict[str, Any],
+    ) -> int:
+        """Delete rows whose cached source_signatures no longer match.
+
+        This prevents stale cache hits between scheduled refreshes and keeps
+        the routing_cache table from growing with invalid-but-not-yet-expired
+        rows.
+        """
+        with self.connection:
+            cursor = self.connection.execute("SELECT cache_key, source_signatures_json FROM routing_cache")
+            rows = cursor.fetchall()
+            stale_keys = [
+                row["cache_key"]
+                for row in rows
+                if json.loads(row["source_signatures_json"]) != current_signatures
+            ]
+            if not stale_keys:
+                return 0
+            placeholders = ",".join("?" * len(stale_keys))
+            deleted = self.connection.execute(
+                f"DELETE FROM routing_cache WHERE cache_key IN ({placeholders})",
+                stale_keys,
+            )
+        return deleted.rowcount
+
     def _insert_provenance_in_transaction(self, values: Mapping[str, Any]) -> str:
         row = {
             "provenance_id": values.get("provenance_id", str(uuid4())),
@@ -550,6 +716,71 @@ def _quote_identifier(identifier: str) -> str:
     if not identifier.replace("_", "").isalnum() or identifier[0].isdigit():
         raise ValueError(f"Invalid SQL identifier: {identifier}")
     return '"' + identifier.replace('"', '""') + '"'
+
+
+def _redact_free_text(value: str | None) -> str | None:
+    """Redact free-form text to a category token to avoid leaking content.
+
+    Allowed values are short category tokens: lowercase letters, digits,
+    hyphens, underscores, periods, and colons. Anything else is summarized to
+    "redacted:content". A token containing a secret-like pattern is rejected.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    token = stripped.replace(" ", "_")
+    if _looks_like_secret(token):
+        return "redacted:secret"
+    if len(token) > 40 or not re.fullmatch(r"[a-z0-9_.:\-]+", token):
+        return "redacted:content"
+    return token
+
+
+def _looks_like_secret(token: str) -> bool:
+    """Detect common secret-bearing prefixes or high-entropy fragments."""
+    lowered = token.lower()
+    secret_prefixes = (
+        "api_key",
+        "apikey",
+        "secret",
+        "token",
+        "password",
+        "passwd",
+        "credential",
+        "private_key",
+        "bearer",
+        "sk-",
+        "ghp_",
+        "pat-",
+    )
+    return any(
+        lowered.startswith(prefix)
+        or f"_{prefix}" in lowered
+        or f"={prefix}" in lowered
+        or f":{prefix}" in lowered
+        for prefix in secret_prefixes
+    )
+
+
+def _serialize_json(value: Any) -> str | None:
+    """Serialize structured metadata to compact canonical JSON, or null."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return json.dumps({"value": _redact_free_text(value)}, sort_keys=True)
+        return json.dumps(parsed, sort_keys=True)
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _non_negative_int(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return max(0, int(value))
 
 
 def _utc_now() -> str:

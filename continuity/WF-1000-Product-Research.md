@@ -7,13 +7,25 @@ Build and harden Workflow A before enabling any new monetization workflows.
 `Workflow A - Product Research` is implemented in `scripts/product_research_workflow.py`.
 Canonical proof exists via `tests/test_product_research_workflow.py` and `tests/test_db.py`.
 
+Phase-3 hardening is complete:
+- Business-key dedupe (product + supplier + source_uri) within and across runs.
+- Mandatory dry-run preflight per source before any canonical write.
+- WF-A summary telemetry (business_key_dedupe, source_preflight, confidence_profile).
+- Idempotent run-key replay with bundle integrity hashes.
+
+Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
+- WF-1001 Listing Drafts (blocked on storefront connector approval)
+- WF-1002 Creative Generation (blocked on ad-channel connector approval)
+- WF-1003 Campaign Execution (blocked on connector + spend-cap approval)
+
 ## Last meaningful progress
-- Added phase-0/1/2 workflow scaffolding.
-- Added control-plane skeleton files in `state/` and `continuity/`.
+- Phase 1A hardening: dedupe, dry-run preflight enforcement, telemetry, regression tests (13 tests green).
+- Phase-3 queue scaffolding: WF-1001/1002/1003 registered with blockers and stop lines.
 
 ## In-scope
 - In-place controls for workflow ownership, state, aliases, overrides, and freshness.
 - Route command for validation (`workflow_router.py`).
+- Canonical candidate writes through leased lanes with dry-run-first policy.
 
 ## Out of scope
 - External connector implementations (phase 3).
@@ -26,21 +38,25 @@ Canonical proof exists via `tests/test_product_research_workflow.py` and `tests/
 
 ## Execution posture
 - Run preflight checks using `python scripts/workflow_router.py WF-1000 --answer summary --validate --write-index`.
+- Canonical writes require: dry-run first, then plan/lease/start lane, then write with `--lane-id`/`--lane-owner`.
 
 ## Acceptance gates
 - Route/index freshness checks pass.
 - Workflow remains in `active` lifecycle.
 - No stale control artifacts when execution decisions are made.
+- Dedupe and replay checks pass on repeated same-source reruns.
 
 ## Exit/closeout checklist
-- [ ] Active workflow owner verified.
-- [ ] Override state checked.
-- [ ] Capsule and index generated and fresh.
-- [ ] Control-plane validation checks pass.
+- [x] Active workflow owner verified.
+- [x] Override state checked.
+- [x] Capsule and index generated and fresh.
+- [x] Control-plane validation checks pass.
+- [x] Phase-3 downstream workflows scaffolded as route_only.
 
 ## Next pass
-- Validate route command in repository checks (`run_checks.py`).
-- Promote control-plane surfaces to canonical storage if needed.
+- Ingest an approved production catalog through dry-run + lane write.
+- Emit `derived/research/top-opportunities-*.json` handoff packets.
+- Await operator approval for WF-1001/1002/1003 activation.
 
 ## Next safe action
 Run:

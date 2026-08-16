@@ -7,11 +7,11 @@
 - source_artifacts:
   - references/operating-procedures.md
   - references/memory-routing.md
-  - prompts/hermes-trustworthy-work-operating-model-prompt.md
+  - AGENTS.md
 - source_hashes:
   - references/operating-procedures.md: pending
   - references/memory-routing.md: pending
-  - prompts/hermes-trustworthy-work-operating-model-prompt.md: pending
+  - AGENTS.md: pending
 - freshness_rule: weekly
 - authority_boundary: review_only
 - promotion_path: references/operating-procedures.md -> references/workflow-routing-control-plane.md
@@ -19,7 +19,7 @@
 - next_action: Reconcile this synthesis whenever a control-plane procedure changes.
 - source_map:
   - references/operating-procedures.md
-  - prompts/hermes-trustworthy-work-operating-model-prompt.md
+  - AGENTS.md
 
 ## System map (durable)
 

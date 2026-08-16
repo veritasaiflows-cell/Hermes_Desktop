@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
 import json
+import os
 import sqlite3
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,14 +14,163 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "canonical" / "schema.sql"
 
 
+def _schema_path():
+    """Return the canonical schema path, allowing env override for CI."""
+    return Path(os.environ.get("EFFICIENS_SCHEMA_PATH", SCHEMA))
+
+
 class CanonicalDBTests(unittest.TestCase):
+    def _make_db(self):
+        directory = TemporaryDirectory(ignore_cleanup_errors=True)
+        db = CanonicalDB(Path(directory.name) / "test.db", schema_path=_schema_path())
+        self.addCleanup(db.close)
+        self.addCleanup(directory.cleanup)
+        return db
+
+    def test_record_run_writes_metadata_row(self):
+        db = self._make_db()
+        run_id = db.record_run(
+            request_type="test_request",
+            route_selected="deterministic",
+            tools_json=["tool_a", "tool_b"],
+            model_or_agent="kimi-k2.7-code",
+            duration_ms=1234,
+            errors_json=[],
+            verification_result="pass",
+            final_outcome="accepted",
+            acceptance_status="accepted",
+        )
+        self.assertTrue(run_id)
+        row = db.connection.execute(
+            "SELECT * FROM run_metrics WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["request_type"], "test_request")
+        self.assertEqual(row["route_selected"], "deterministic")
+        self.assertEqual(json.loads(row["tools_json"]), ["tool_a", "tool_b"])
+        self.assertEqual(row["model_or_agent"], "kimi-k2.7-code")
+        self.assertEqual(row["duration_ms"], 1234)
+        self.assertEqual(row["verification_result"], "pass")
+        self.assertEqual(row["final_outcome"], "accepted")
+        self.assertEqual(row["acceptance_status"], "accepted")
+
+    def test_record_run_redacts_free_text_fields(self):
+        db = self._make_db()
+        run_id = db.record_run(
+            request_type="test_request",
+            user_correction="You should fix the parser to handle nested JSON",
+            final_outcome="The workflow completed after I fixed the routing bug",
+            route_selected="ok_value",
+        )
+        row = db.connection.execute(
+            "SELECT user_correction, final_outcome, route_selected FROM run_metrics WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        self.assertEqual(row["user_correction"], "redacted:content")
+        self.assertEqual(row["final_outcome"], "redacted:content")
+        # Short tokens survive redaction.
+        self.assertEqual(row["route_selected"], "ok_value")
+
+    def test_record_run_redacts_secret_like_tokens(self):
+        db = self._make_db()
+        run_id = db.record_run(
+            request_type="test_request",
+            model_or_agent="token=ghp_abc123secret",
+            final_outcome="api_key leaked somehow",
+        )
+        row = db.connection.execute(
+            "SELECT model_or_agent, final_outcome FROM run_metrics WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        self.assertEqual(row["model_or_agent"], "redacted:secret")
+        self.assertEqual(row["final_outcome"], "redacted:secret")
+
+    def test_record_run_get_run_metrics_filters_by_request_type(self):
+        db = self._make_db()
+        first = db.record_run(request_type="type_a")
+        second = db.record_run(request_type="type_b")
+        a_rows = db.get_run_metrics(request_type="type_a", limit=10)
+        self.assertEqual(len(a_rows), 1)
+        self.assertEqual(a_rows[0]["run_id"], first)
+        all_rows = db.get_run_metrics(limit=10)
+        self.assertEqual(len(all_rows), 2)
+        ids = {row["run_id"] for row in all_rows}
+        self.assertEqual(ids, {first, second})
+
+    def test_record_run_rejects_empty_request_type(self):
+        db = self._make_db()
+        with self.assertRaisesRegex(ValueError, "request_type is required"):
+            db.record_run(request_type="")
+        with self.assertRaisesRegex(ValueError, "request_type is required"):
+            db.record_run(request_type="   ")
+        with self.assertRaisesRegex(ValueError, "request_type is required"):
+            db.record_run(request_type=None)  # type: ignore[arg-type]
+
     def test_connection_enables_foreign_keys_and_initializes_schema(self):
         with TemporaryDirectory() as directory:
             db = CanonicalDB(Path(directory) / "test.db", schema_path=SCHEMA)
             self.assertEqual(db.connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertIn("entities", db.tables())
+            self.assertIn("routing_cache", db.tables())
             self.assertEqual(db.integrity_check(), "ok")
             db.close()
+
+    def test_routing_cache_round_trip_and_expiry(self):
+        with TemporaryDirectory() as directory:
+            db = CanonicalDB(Path(directory) / "test.db", schema_path=SCHEMA)
+            self.assertIsNone(db.get_routing_cache("missing"))
+            db.set_routing_cache(
+                "wf-1000|summary",
+                payload={"workflow_id": "WF-1000"},
+                source_signatures={"state/active.json": {"sha256": "abc"}},
+                ttl_seconds=60,
+            )
+            cached = db.get_routing_cache("wf-1000|summary")
+            self.assertIsNotNone(cached)
+            self.assertEqual(cached["payload"]["workflow_id"], "WF-1000")
+            db.close()
+
+    def test_delete_routing_cache_with_mismatched_signatures(self):
+        with TemporaryDirectory() as directory:
+            db = CanonicalDB(Path(directory) / "test.db", schema_path=SCHEMA)
+            db.set_routing_cache(
+                "wf-1000|summary",
+                payload={"workflow_id": "WF-1000"},
+                source_signatures={"state/active.json": {"sha256": "abc"}},
+                ttl_seconds=300,
+            )
+            db.set_routing_cache(
+                "wf-1001|summary",
+                payload={"workflow_id": "WF-1001"},
+                source_signatures={"state/active.json": {"sha256": "def"}},
+                ttl_seconds=300,
+            )
+            deleted = db.delete_routing_cache_with_mismatched_signatures(
+                current_signatures={"state/active.json": {"sha256": "abc"}}
+            )
+            self.assertEqual(deleted, 1)
+            self.assertIsNotNone(db.get_routing_cache("wf-1000|summary"))
+            self.assertIsNone(db.get_routing_cache("wf-1001|summary"))
+            db.close()
+
+    def test_quote_identifier_rejects_dangerous_names(self):
+        from canonical.db import _quote_identifier
+
+        valid = ("entities", "workflow_id", "_private", "table1")
+        for name in valid:
+            self.assertTrue(_quote_identifier(name).startswith('"'))
+
+        invalid = (
+            "table; DROP TABLE entities;--",
+            "column name",
+            "1st_column",
+            'quote"attack',
+            " hyphen ",
+        )
+        for name in invalid:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    _quote_identifier(name)
 
     def test_insert_records_provenance_and_timestamps(self):
         with TemporaryDirectory() as directory:

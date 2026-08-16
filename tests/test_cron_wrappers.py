@@ -18,68 +18,106 @@ from scripts import cron_health_check, cron_wiki_regen
 
 
 class HealthCheckLogicTests(unittest.TestCase):
-    def test_green_when_run_checks_passes_and_wiki_fresh(self):
-        fake_run_checks = {"exit": 0, "stdout": "", "stderr": ""}
+    def test_green_when_routing_and_alias_and_wiki_fresh(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
         fake_wiki = {
             "exit": 0,
             "stdout": json.dumps({"status": "fresh"}),
             "stderr": "",
         }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_run_checks, fake_wiki],
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
         ) as run_mock:
             rc = cron_health_check.main()
         self.assertEqual(rc, 0)
-        self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(run_mock.call_count, 4)
 
-    def test_hard_fail_when_run_checks_fails(self):
-        fake_run_checks = {
-            "exit": 1,
-            "stdout": "",
-            "stderr": "Traceback...\nAssertionError: 1 != 0",
-        }
+    def test_hard_fail_when_routing_stale(self):
+        fake_routing = {"exit": 3, "stdout": json.dumps({"routing_freshness": {"status": "stale"}}), "stderr": ""}
         fake_wiki = {
             "exit": 0,
             "stdout": json.dumps({"status": "fresh"}),
             "stderr": "",
         }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_run_checks, fake_wiki],
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+    def test_hard_fail_when_alias_sweep_fails(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        fake_aliases = {"exit": 1, "stdout": "ALIAS SWEEP DEGRADED", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+    def test_hard_fail_when_cron_registration_fails(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 1, "stdout": "CRON REGISTRATION FAIL", "stderr": ""}
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)
 
     def test_stale_wiki_is_soft_warning_not_hard_fail(self):
         # A2 contract: stale wiki is recoverable by A1, must not page.
-        fake_run_checks = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
         fake_wiki = {
             "exit": 2,
             "stdout": json.dumps({"status": "stale", "issues": [{"type": "stale_freshness"}]}),
             "stderr": "",
         }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_run_checks, fake_wiki],
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 0)
 
-    def test_timeout_treated_as_hard_fail(self):
-        fake_run_checks = {"exit": 124, "stdout": "", "stderr": "timeout after 300s"}
+    def test_routing_timeout_treated_as_hard_fail(self):
+        fake_routing = {"exit": 124, "stdout": "", "stderr": "timeout after 300s"}
         fake_wiki = {
             "exit": 0,
             "stdout": json.dumps({"status": "fresh"}),
             "stderr": "",
         }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_run_checks, fake_wiki],
+            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)
