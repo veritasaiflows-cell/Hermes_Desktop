@@ -56,6 +56,11 @@ EXCLUDED_SUFFIXES = frozenset({".db", ".key", ".log", ".pem", ".pyc", ".tmp"})
 VALID_RETRIEVAL_MODES = frozenset({"full_text", "semantic", "hybrid"})
 DEFAULT_RETRIEVAL_MODE = "full_text"
 
+# Conservative ceiling for embedding providers. Ollama + nomic-embed-text rejects
+# payloads beyond ~8,800 chars. We chunk at a character boundary smaller than that
+# to keep calls safe and then average chunk embeddings for the document vector.
+DEFAULT_EMBED_CHUNK_CHAR_LIMIT = 6000
+
 # In-process LRU cache for *query* embeddings only (never document embeddings).
 # Keyed on (text, provider, model, base_url). Cleared on every build_index().
 _QUERY_EMBEDDING_CACHE: "OrderedDict[tuple[str, str, str, str], list[float]]" = OrderedDict()
@@ -179,8 +184,9 @@ def build_index(
             if disable_embedding:
                 embedding = None
             else:
-                embedding = _safe_embedding_for_text(
+                embedding = _embed_text_with_chunking(
                     content,
+                    chunk_char_limit=DEFAULT_EMBED_CHUNK_CHAR_LIMIT,
                     provider=embedding_provider,
                     model=embedding_model,
                     ollama_base_url=ollama_base_url,
@@ -415,6 +421,58 @@ def get_index_entry(index_path: Path | str, source_path: str) -> dict[str, objec
         if row is None:
             return None
         return dict(row)
+    finally:
+        connection.close()
+
+
+def index_status(index_path: Path | str) -> dict[str, object]:
+    """Return a lightweight status summary for the memory index.
+
+    Useful for cron/health checks: reports document count, presence of the
+    index file, and the most recent indexed timestamp. Does not block on a
+    missing index; instead returns ``available=False`` so callers can decide
+    whether an empty/missing index is an error.
+    """
+    resolved = Path(index_path)
+    if not resolved.is_file():
+        return {
+            "index_path": str(resolved),
+            "available": False,
+            "document_count": 0,
+            "indexed_at": None,
+            "stale_source_count": 0,
+        }
+
+    connection = sqlite3.connect(
+        f"file:{resolved.resolve().as_posix()}?mode=ro",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        columns = _table_columns(connection, "memory_memories")
+        count_row = connection.execute(
+            "SELECT COUNT(*) AS document_count, MAX(indexed_at) AS indexed_at FROM memory_memories"
+        ).fetchone()
+        stale_count = 0
+        if "source_hash" in columns:
+            # Count documents whose current disk hash differs from indexed hash.
+            # This is a best-effort freshness signal without requiring full reindex.
+            rows = connection.execute(
+                "SELECT source_path, source_hash FROM memory_memories"
+            ).fetchall()
+            for row in rows:
+                path = Path(row["source_path"])
+                if path.exists():
+                    current_hash = _content_hash(path.read_text(encoding="utf-8"))
+                    if current_hash != row["source_hash"]:
+                        stale_count += 1
+        return {
+            "index_path": str(resolved),
+            "available": True,
+            "document_count": count_row["document_count"] or 0,
+            "indexed_at": count_row["indexed_at"],
+            "stale_source_count": stale_count,
+        }
     finally:
         connection.close()
 
@@ -806,6 +864,51 @@ def _safe_embedding_for_text(
         return None
 
 
+def _embed_text_with_chunking(
+    text: str,
+    *,
+    chunk_char_limit: int,
+    provider: str,
+    model: str,
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL,
+    timeout: float = 20.0,
+) -> list[float] | None:
+    """Return a single embedding for a possibly oversized document.
+
+    If the document fits under ``chunk_char_limit`` it is embedded in one call.
+    Otherwise the text is split into overlapping chunks, each chunk is embedded,
+    and the resulting vectors are averaged. Any chunk failure causes the whole
+    document to be treated as an embedding error.
+    """
+
+    if not text.strip():
+        return None
+
+    chunks = _chunk_text(text, chunk_char_limit)
+    if not chunks:
+        return None
+
+    chunk_vectors: list[list[float]] = []
+    for chunk in chunks:
+        vector = _safe_embedding_for_text(
+            chunk,
+            provider=provider,
+            model=model,
+            ollama_base_url=ollama_base_url,
+            timeout=timeout,
+        )
+        if vector is None:
+            return None
+        chunk_vectors.append(vector)
+
+    dimensions = max(len(vector) for vector in chunk_vectors)
+    sums = [0.0] * dimensions
+    for vector in chunk_vectors:
+        for i, value in enumerate(vector):
+            sums[i] += value
+    return [total / len(chunk_vectors) for total in sums]
+
+
 def _build_query_embedding(
     text: str,
     *,
@@ -953,6 +1056,23 @@ def _to_fts_query(query: str, *, exact: bool = False) -> str:
     if exact:
         return f'"{" ".join(terms).replace(chr(34), chr(34) * 2)}"'
     return " AND ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+
+
+def _chunk_text(text: str, chunk_char_limit: int) -> list[str]:
+    """Return a list of overlapping character-bounded chunks for long documents."""
+
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= chunk_char_limit:
+        return [text]
+    step = chunk_char_limit // 2
+    chunks: list[str] = []
+    for start in range(0, len(text), step):
+        chunk = text[start : start + chunk_char_limit]
+        if chunk.strip():
+            chunks.append(chunk)
+    return chunks
 
 
 def _freshness(path: Path, expected_hash: str) -> tuple[str, list[str]]:
@@ -1109,6 +1229,12 @@ def _command_get(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _command_status(arguments: argparse.Namespace) -> int:
+    summary = index_status(arguments.index)
+    print(json.dumps({"status": "ok", "generated_at": _utc_now(), **summary}, sort_keys=True))
+    return 0
+
+
 def _parse_arguments() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -1146,6 +1272,10 @@ def _parse_arguments() -> argparse.ArgumentParser:
     )
     index.add_argument("--disable-embedding", action="store_true", help="Skip embedding generation")
     index.set_defaults(handler=_command_index)
+
+    status = subcommands.add_parser("status", help="Report index availability and document count")
+    status.add_argument("--index", type=Path, default=DEFAULT_INDEX_PATH)
+    status.set_defaults(handler=_command_status)
 
     _configure_search_parser(
         subcommands,

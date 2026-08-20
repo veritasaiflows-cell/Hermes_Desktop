@@ -1,17 +1,41 @@
 from pathlib import Path
 import hashlib
 import json
+import os
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import sqlite3
 import unittest
 
 from canonical.db import CanonicalDB
-from scripts.product_research_workflow import run_product_research
+from scripts import product_research_workflow
+from scripts.product_research_workflow import run_product_research, run_product_research_with_telemetry
 from scripts.workflow_runner import WorkflowPreflightError
 
 
 class ProductResearchWorkflowTests(unittest.TestCase):
+
+    def setUp(self):
+        self._orig_model = os.environ.get("HERMES_ACTIVE_MODEL")
+        self._orig_runtime_model = os.environ.get("HERMES_RUNTIME_MODEL")
+        self._orig_runtime_provider = os.environ.get("HERMES_RUNTIME_PROVIDER")
+        os.environ.pop("HERMES_RUNTIME_MODEL", None)
+        os.environ.pop("HERMES_RUNTIME_PROVIDER", None)
+        os.environ["HERMES_ACTIVE_MODEL"] = "test-model"
+
+    def tearDown(self):
+        if self._orig_model is None:
+            os.environ.pop("HERMES_ACTIVE_MODEL", None)
+        else:
+            os.environ["HERMES_ACTIVE_MODEL"] = self._orig_model
+        if self._orig_runtime_model is None:
+            os.environ.pop("HERMES_RUNTIME_MODEL", None)
+        else:
+            os.environ["HERMES_RUNTIME_MODEL"] = self._orig_runtime_model
+        if self._orig_runtime_provider is None:
+            os.environ.pop("HERMES_RUNTIME_PROVIDER", None)
+        else:
+            os.environ["HERMES_RUNTIME_PROVIDER"] = self._orig_runtime_provider
 
     def run_dry_preflight(
         self,
@@ -46,6 +70,118 @@ class ProductResearchWorkflowTests(unittest.TestCase):
 
             self.assertEqual(write_result["mode"], "write")
             self.assertEqual(write_result["selected_count"], 1)
+
+    def test_product_research_writes_run_metrics_telemetry(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            run_product_research_with_telemetry(catalog, database_path=db_path, top_n=1)
+
+            with CanonicalDB(db_path) as db:
+                rows = db.get_run_metrics(request_type="product_research", limit=1)
+                self.assertEqual(len(rows), 1)
+                row = rows[0]
+                self.assertEqual(row["request_type"], "product_research")
+                self.assertEqual(row["model_or_agent"], "test-model")
+                self.assertEqual(row["route_selected"], "product_research")
+                self.assertEqual(row["verification_result"], "pass")
+                self.assertEqual(row["input_size"], 1)
+                self.assertEqual(row["handoff_size"], 1)
+                resource = json.loads(row["resource_usage_json"])
+                self.assertEqual(resource["selected_count"], 1)
+                self.assertEqual(resource["incoming_rows"], 1)
+                self.assertEqual(resource["new_candidates"], 1)
+
+    def test_product_research_dry_run_writes_run_metrics_telemetry(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            # A dry-run must still create a source_freshness row so the
+            # workflow can proceed; otherwise the inner run_product_research
+            # will reject it.
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            run_product_research_with_telemetry(catalog, database_path=db_path, top_n=1, dry_run=True)
+
+            with CanonicalDB(db_path) as db:
+                rows = db.get_run_metrics(request_type="product_research", limit=1)
+                self.assertEqual(len(rows), 1)
+                resource = json.loads(rows[0]["resource_usage_json"])
+                self.assertTrue(resource["dry_run"])
+
+    def test_product_research_replay_writes_run_metrics_telemetry(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            self.run_dry_preflight(catalog, db_path, top_n=1)
+            first = run_product_research_with_telemetry(catalog, database_path=db_path, top_n=1)
+            replayed = run_product_research_with_telemetry(catalog, database_path=db_path, top_n=1)
+
+            self.assertTrue(replayed.get("mode", "").startswith("replayed"))
+            with CanonicalDB(db_path) as db:
+                rows = db.get_run_metrics(request_type="product_research", limit=5)
+                self.assertGreaterEqual(len(rows), 2)
+                replayed_row = rows[0]
+                self.assertTrue(json.loads(replayed_row["resource_usage_json"]).get("replayed", False))
+                first_row = rows[1]
+                self.assertFalse(json.loads(first_row["resource_usage_json"]).get("replayed", False))
+
+    def test_product_research_telemetry_tags_drift_flag(self):
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.csv"
+            catalog.write_text(
+                "product_name,supplier_name,margin_percent,shipping_days,demand_signal,saturation_signal\n"
+                "Aero Travel Mug,Supplier A,0,2,0,100\n"
+                "Premium Widget,Supplier B,45,2,80,30\n",
+                encoding="utf-8",
+            )
+            db_path = Path(directory) / "efficiens.db"
+
+            # Split assignment is hash-based on the source path, which is
+            # non-deterministic across temp dirs. Force a deterministic split:
+            # row 1 → live (viability 0.0), row 2 → holdout (viability ~0.7),
+            # producing a cross-split gap that triggers drift_flag.
+            def forced_split(*, source_row: int, **_: object) -> str:
+                return "holdout" if source_row == 2 else "live"
+
+            with patch.object(
+                product_research_workflow,
+                "_assign_candidate_split",
+                side_effect=forced_split,
+            ):
+                self.run_dry_preflight(
+                    catalog, db_path, top_n=2, holdout_fraction=0.5
+                )
+                run_product_research_with_telemetry(
+                    catalog,
+                    database_path=db_path,
+                    top_n=2,
+                    holdout_fraction=0.5,
+                )
+
+            with CanonicalDB(db_path) as db:
+                rows = db.get_run_metrics(request_type="product_research", limit=1)
+                self.assertEqual(len(rows), 1)
+                errors = json.loads(rows[0]["errors_json"])
+                self.assertIn("drift_flag", errors)
 
     def test_product_research_blocks_write_when_catalog_hash_changes_without_new_dry_run(self):
         with TemporaryDirectory() as directory:

@@ -1,0 +1,6 @@
+# Development-only dependencies for the Efficiens workspace.
+#
+# The workspace itself is pure standard library (no runtime third-party deps).
+# pytest is an optional test-runner convenience: scripts/run_checks.py prefers
+# it when present and falls back to unittest discovery otherwise.
+pytest>=8.0

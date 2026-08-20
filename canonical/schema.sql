@@ -166,6 +166,16 @@ CREATE TABLE IF NOT EXISTS version_history (
     UNIQUE(subject_type, subject_id, version_number)
 );
 
+-- Telemetry rows are metadata-only; no raw prompts, tool payloads, or
+-- credentials are ever stored here. See CanonicalDB.record_run in
+-- canonical/db.py for the single write path.
+--
+-- input_size / handoff_size semantics vary by request_type:
+--   run_checks       → byte-size of the JSON metadata payloads
+--   product_research → row counts (incoming catalog rows / selected candidates)
+--
+-- Other request types MAY adopt their own conventions; consumers MUST
+-- inspect request_type before comparing these fields across rows.
 CREATE TABLE IF NOT EXISTS run_metrics (
     run_id TEXT PRIMARY KEY,
     request_type TEXT,
@@ -204,3 +214,30 @@ CREATE TABLE IF NOT EXISTS routing_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_run_metrics_started ON run_metrics(started_at);
+
+-- Durable graph layer: asserted relationships between canonical records.
+-- Edges link records by identifier; they never re-state facts. The canonical
+-- record remains authoritative. See references/graph-memory.md.
+CREATE TABLE IF NOT EXISTS relationships (
+    rel_id TEXT PRIMARY KEY,
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'invalidated')),
+    confidence REAL CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
+    valid_from TEXT NOT NULL,
+    valid_until TEXT,
+    superseded_by TEXT REFERENCES relationships(rel_id),
+    provenance_id TEXT REFERENCES provenance(provenance_id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_relationships_subject ON relationships(subject_type, subject_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_object ON relationships(object_type, object_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relationships_unique_active
+ON relationships(subject_type, subject_id, predicate, object_type, object_id)
+WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_relationships_status ON relationships(status);

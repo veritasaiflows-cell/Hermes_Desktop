@@ -1,6 +1,6 @@
-# Memory routing contract — SQL and vector execution path
+# Memory routing contract — SQL, graph, and vector execution path
 
-Authoritative owner of retrieval-route selection for this workspace. It governs when to use exact structured retrieval, local semantic retrieval, or a bounded hybrid, using concrete commands.
+Authoritative owner of retrieval-route selection for this workspace. It governs when to use exact structured retrieval, durable graph traversal, local semantic retrieval, or a bounded hybrid, using concrete commands.
 
 ## Scope and adapter availability
 
@@ -9,6 +9,7 @@ Hermes native memory stores approved durable facts and user preferences. The can
 The workspace adapters named below are concrete and executable:
 
 - exact full-text route: `scripts/workspace_index.py`
+- graph route: `scripts/graph_memory.py` (affected / path / neighbors / validate)
 - semantic route: `scripts/vector_memory_index.py memory_search`
 - metadata route: `scripts/vector_memory_index.py memory_get`
 
@@ -55,6 +56,28 @@ python scripts/vector_memory_index.py memory_search \
   --query "your natural-language question"
 ```
 
+### Use graph retrieval first when the request is about relationships
+
+Use the durable graph layer when the request asks how records relate:
+
+- “What depends on X?”
+- “Who owns Y?”
+- “What did Z affect or contradict?”
+- “How are A and B connected?”
+- Dependency chains, ownership, impact, or supersession questions
+
+Execute via the graph adapter:
+
+```bash
+python scripts/graph_memory.py affected --object-type entities --object-id <id>
+python scripts/graph_memory.py path --start-type entities --start-id <a> --end-type tasks --end-id <b>
+python scripts/graph_memory.py neighbors --subject-type entities --subject-id <id>
+```
+
+Graph edges are asserted relationships with provenance. They are recall aids,
+not proof: verify the cited canonical record before making a consequential
+claim. The full graph contract is owned by `references/graph-memory.md`.
+
 ### Use hybrid retrieval only when both are necessary
 
 Use SQL plus semantic search when the request contains an exact anchor and requires surrounding reasoning or context.
@@ -85,14 +108,20 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
 
    - `python scripts/workspace_index.py query --index tmp/workspace-index.sqlite --query "..."`
 
-3. If no strong anchors exist, run:
+3. If the request is about relationships (dependencies, ownership, impact, supersession), run:
+
+   - `python scripts/graph_memory.py affected --object-type <type> --object-id <id>`
+   - `python scripts/graph_memory.py path --start-type <type> --start-id <a> --end-type <type> --end-id <b>`
+   - `python scripts/graph_memory.py neighbors --subject-type <type> --subject-id <id>`
+
+4. If no strong anchors exist, run:
 
    - `python scripts/vector_memory_index.py memory_search --index tmp/vector-memory.sqlite --query "..."`
 
-4. If the first route returns no useful result, run the fallback route as bounded secondary pass.
-5. If both routes are used, deduplicate by source path and record ID.
-6. Open every high-confidence candidate and verify freshness.
-7. For each selected result, validate against source with `memory_get`:
+5. If the first route returns no useful result, run the fallback route as bounded secondary pass.
+6. If multiple routes are used, deduplicate by source path and record ID.
+7. Open every high-confidence candidate and verify freshness.
+8. For each selected result, validate against source with `memory_get`:
 
    ```bash
    python scripts/vector_memory_index.py memory_get \
@@ -100,8 +129,8 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
      --source-path "/absolute/path/to/source.md"
    ```
 
-8. Merge verified evidence and rank by authority, freshness, exactness, and confidence.
-9. Return the answer with explicit freshness and degraded-retrieval markers.
+9. Merge verified evidence and rank by authority, freshness, exactness, and confidence.
+10. Return the answer with explicit freshness and degraded-retrieval markers.
 
 Never treat the highest similarity score as the correct answer.
 
@@ -232,9 +261,11 @@ Do not optimize only for speed, result count, or similarity score.
 
 Use this sequence:
 
-`classify -> choose SQL or vector -> fallback only if needed -> open source -> verify -> answer`
+`classify -> choose SQL, graph, or vector -> fallback only if needed -> open source -> verify -> answer`
 
 SQL finds exact structure.
+
+Graph finds relationships.
 
 Vector search finds meaning.
 
@@ -244,3 +275,5 @@ The source record establishes truth.
 
 - v1 — Installed as the authoritative workspace memory-routing contract when Hermes native memory was enabled.
 - v1.1 — Replaced routing placeholders with executable commands (`memory_search`, `memory_get`) and local-ollama-backed hybrid retrieval.
+- v1.2 — Added the graph route (`scripts/graph_memory.py`) for relationship-shaped questions; routing order is now SQL → graph → vector.
+- v1.3 — Added the graph branch to the default routing algorithm and the adapter list; title now covers SQL, graph, and vector.

@@ -17,6 +17,7 @@ import argparse
 import csv
 import hashlib
 import json
+import time
 from typing import Any
 import sys
 
@@ -30,6 +31,7 @@ WORKFLOW_RUN_CONFIG_VERSION = "v2"
 
 from canonical.db import CanonicalDB
 from scripts.workflow_runner import WorkflowPreflightError, preflight_workflow
+from scripts.runtime_metadata import detect_active_model
 
 
 @dataclass(frozen=True)
@@ -396,6 +398,123 @@ def run_product_research(
             result["claim_id"] = claim_id
 
     return result
+
+
+def run_product_research_with_telemetry(
+    catalog_path: str | Path,
+    *,
+    database_path: str | Path = "canonical/efficiens.db",
+    top_n: int = 5,
+    min_viability_score: float = 0.0,
+    holdout_fraction: float = 0.0,
+    adversarial_fraction: float = 0.0,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Run Workflow A and also persist a run_metrics telemetry row.
+
+    This is a thin wrapper around `run_product_research` that opens a separate
+    connection for telemetry so it never interferes with the main workflow
+    transaction.
+    """
+    started_at = _utc_now()
+    run_start = time.perf_counter_ns()
+    result = run_product_research(
+        catalog_path,
+        database_path=database_path,
+        top_n=top_n,
+        min_viability_score=min_viability_score,
+        holdout_fraction=holdout_fraction,
+        adversarial_fraction=adversarial_fraction,
+        dry_run=dry_run,
+    )
+    duration_ms = (time.perf_counter_ns() - run_start) // 1_000_000
+    with CanonicalDB(database_path) as db:
+        _record_workflow_run_telemetry(
+            db,
+            workflow_id=WORKFLOW_ID,
+            run_key=_workflow_run_key(
+                input_hash=_file_hash(Path(catalog_path)),
+                top_n=top_n,
+                min_viability_score=min_viability_score,
+                holdout_fraction=holdout_fraction,
+                adversarial_fraction=adversarial_fraction,
+            ),
+            source_ref=str(Path(catalog_path).resolve()),
+            result=result,
+            started_at=started_at,
+            completed_at=_utc_now(),
+            duration_ms=duration_ms,
+            dry_run=dry_run,
+            replayed=result.get("mode", "").startswith("replayed"),
+        )
+    return result
+
+
+def _record_workflow_run_telemetry(
+    db: CanonicalDB,
+    *,
+    workflow_id: str,
+    run_key: str,
+    source_ref: str,
+    result: dict[str, Any],
+    started_at: str,
+    completed_at: str,
+    duration_ms: int,
+    dry_run: bool,
+    replayed: bool,
+) -> str:
+    """Persist a metadata-only run_metrics row for a workflow run.
+
+    Captures summary telemetry (dedupe, confidence profile, preflight) without
+    raw candidate details so the row stays small and privacy-safe.
+    """
+    telemetry = result.get("telemetry", {})
+    business_key_dedupe = telemetry.get("business_key_dedupe", {})
+    confidence_profile = result.get("confidence_profile", {})
+    evaluation_profile = confidence_profile.get("evaluation_profile", {})
+    source_preflight = result.get("source_preflight", {})
+    selected_count = result.get("selected_count", 0)
+
+    errors: list[str] = []
+    if evaluation_profile.get("drift_flag"):
+        errors.append("drift_flag")
+    if source_preflight.get("status") != "passed":
+        errors.append("source_preflight_failed")
+
+    resource_usage = {
+        "workflow_id": workflow_id,
+        "run_key": run_key,
+        "dry_run": dry_run,
+        "replayed": replayed,
+        "selected_count": selected_count,
+        "incoming_rows": business_key_dedupe.get("incoming_rows", 0),
+        "batch_unique_rows": business_key_dedupe.get("batch_unique_rows", 0),
+        "existing_reused": business_key_dedupe.get("existing_reused", 0),
+        "new_candidates": business_key_dedupe.get("new_candidates", 0),
+        "disagreement_mean": confidence_profile.get("disagreement_mean", 0.0),
+        "abstention_count": confidence_profile.get("abstention_count", 0),
+    }
+
+    return db.record_run(
+        request_type="product_research",
+        route_selected=workflow_id,
+        tools_json=["product_research_workflow", "canonical_db"],
+        model_or_agent=detect_active_model(),
+        input_size=business_key_dedupe.get("incoming_rows", 0),
+        handoff_size=selected_count,
+        duration_ms=duration_ms,
+        resource_usage_json=resource_usage,
+        errors_json=errors,
+        retries=0,
+        verification_result="pass" if not errors else "fail",
+        final_outcome="accepted" if not errors else "rejected",
+        acceptance_status="accepted" if not errors else "rejected",
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+
+
+
 
 
 def _build_evaluation_profile(candidates: list[ProductCandidate]) -> dict[str, Any]:
@@ -900,7 +1019,7 @@ def main() -> int:
                 write_targets=(arguments.database,),
                 lane_register_path=Path(arguments.lane_register),
             )
-        summary = run_product_research(
+        summary = run_product_research_with_telemetry(
             arguments.catalog,
             database_path=arguments.database,
             top_n=arguments.top_n,

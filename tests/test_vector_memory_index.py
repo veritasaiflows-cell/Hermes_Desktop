@@ -8,7 +8,7 @@ import subprocess
 import unittest
 
 import scripts.vector_memory_index as vector_memory_index
-from scripts.vector_memory_index import SourceSpec, build_index, get_index_entry, search_index
+from scripts.vector_memory_index import SourceSpec, build_index, get_index_entry, search_index, index_status
 
 
 class VectorMemoryIndexTests(unittest.TestCase):
@@ -116,6 +116,41 @@ class VectorMemoryIndexTests(unittest.TestCase):
 
             self.assertEqual(len(search_index(index_path, "approved evidence")), 1)
             self.assertEqual(search_index(index_path, "unapproved evidence"), [])
+
+    def test_oversized_document_is_chunked_and_embedded(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "approved"
+            root.mkdir()
+            note = root / "long.md"
+            # Create a document longer than the embedding chunk limit to exercise
+            # the chunking path. The content is split across chunks but is all
+            # about the same topic, so semantic search should still rank it.
+            paragraph = "semantic retrieval finds notes by meaning rather than exact wording. " * 200
+            note.write_text(paragraph, encoding="utf-8")
+            index_path = Path(directory) / "vector-memory.sqlite"
+
+            def fake_embedding(text: str, **_: object) -> list[float]:
+                lower = text.lower()
+                # Distinct vectors for topic content vs unrelated content.
+                if "semantic retrieval" in lower:
+                    return [0.9, 0.1, 0.0]
+                return [0.1, 0.1, 0.1]
+
+            with patch.object(vector_memory_index, "_safe_embedding_for_text", side_effect=fake_embedding):
+                summary = build_index(index_path, [SourceSpec(note)])
+                self.assertEqual(summary.indexed_documents, 1)
+                self.assertEqual(summary.embedded_documents, 1)
+                self.assertEqual(summary.embedding_errors, 0)
+
+                results = search_index(
+                    index_path,
+                    "semantic retrieval",
+                    limit=1,
+                    retrieval_mode="semantic",
+                )
+                self.assertEqual(len(results), 1)
+                self.assertTrue(results[0].source_path.endswith("long.md"))
+                self.assertGreater(results[0].score, 0.0)
 
     def test_indexing_excludes_sensitive_and_configuration_directories(self):
         with TemporaryDirectory() as directory:
@@ -324,6 +359,41 @@ class VectorMemoryIndexTests(unittest.TestCase):
 
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].freshness_state, "stale")
+
+    def test_index_status_reports_available_and_document_count(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("semantic recall is driven by local embeddings", encoding="utf-8")
+            index_path = Path(directory) / "vector-memory.sqlite"
+
+            build_index(index_path, [SourceSpec(note)])
+            summary = index_status(index_path)
+
+            self.assertTrue(summary["available"])
+            self.assertEqual(summary["document_count"], 1)
+            self.assertEqual(summary["stale_source_count"], 0)
+            self.assertEqual(summary["index_path"], str(index_path.resolve()))
+
+    def test_index_status_reports_unavailable_for_missing_index(self):
+        with TemporaryDirectory() as directory:
+            index_path = Path(directory) / "missing.sqlite"
+            summary = index_status(index_path)
+
+            self.assertFalse(summary["available"])
+            self.assertEqual(summary["document_count"], 0)
+            self.assertIsNone(summary["indexed_at"])
+
+    def test_index_status_counts_stale_sources(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("fresh baseline fact", encoding="utf-8")
+            index_path = Path(directory) / "vector-memory.sqlite"
+
+            build_index(index_path, [SourceSpec(note)])
+            note.write_text("changed after indexing", encoding="utf-8")
+            summary = index_status(index_path)
+
+            self.assertEqual(summary["stale_source_count"], 1)
 
 
 if __name__ == "__main__":

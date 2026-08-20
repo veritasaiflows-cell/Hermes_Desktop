@@ -106,6 +106,40 @@ class CanonicalDBTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "request_type is required"):
             db.record_run(request_type=None)  # type: ignore[arg-type]
 
+    def test_record_user_correction_attaches_token_to_latest_run(self):
+        db = self._make_db()
+        first = db.record_run(request_type="type_a")
+        second = db.record_run(request_type="type_b")
+
+        updated = db.record_user_correction("wrong_route", request_type="type_b")
+        self.assertEqual(updated, second)
+
+        row = db.connection.execute(
+            "SELECT user_correction FROM run_metrics WHERE run_id = ?", (second,)
+        ).fetchone()
+        self.assertEqual(row["user_correction"], "wrong_route")
+        untouched = db.connection.execute(
+            "SELECT user_correction FROM run_metrics WHERE run_id = ?", (first,)
+        ).fetchone()
+        self.assertIsNone(untouched["user_correction"])
+
+    def test_record_user_correction_redacts_free_text(self):
+        db = self._make_db()
+        run_id = db.record_run(request_type="type_a")
+        updated = db.record_user_correction(
+            "Please stop using the wrong parser for nested JSON", run_id=run_id
+        )
+        self.assertEqual(updated, run_id)
+        row = db.connection.execute(
+            "SELECT user_correction FROM run_metrics WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        self.assertEqual(row["user_correction"], "redacted:content")
+
+    def test_record_user_correction_returns_none_when_no_matching_run(self):
+        db = self._make_db()
+        self.assertIsNone(db.record_user_correction("wrong_route"))
+        self.assertIsNone(db.record_user_correction("wrong_route", run_id="missing-id"))
+
     def test_connection_enables_foreign_keys_and_initializes_schema(self):
         with TemporaryDirectory() as directory:
             db = CanonicalDB(Path(directory) / "test.db", schema_path=SCHEMA)

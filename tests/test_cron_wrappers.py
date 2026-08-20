@@ -27,14 +27,25 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
         fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ) as run_mock:
             rc = cron_health_check.main()
         self.assertEqual(rc, 0)
-        self.assertEqual(run_mock.call_count, 4)
+        self.assertEqual(run_mock.call_count, 7)
 
     def test_hard_fail_when_routing_stale(self):
         fake_routing = {"exit": 3, "stdout": json.dumps({"routing_freshness": {"status": "stale"}}), "stderr": ""}
@@ -45,10 +56,21 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
         fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)
@@ -62,10 +84,21 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 1, "stdout": "ALIAS SWEEP DEGRADED", "stderr": ""}
         fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)
@@ -79,10 +112,21 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
         fake_cron_reg = {"exit": 1, "stdout": "CRON REGISTRATION FAIL", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)
@@ -97,13 +141,108 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
         fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 0)
+
+    def test_hard_fail_when_graph_validate_fails(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 1, "stdout": "GRAPH ISSUES", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+    def test_hard_fail_when_graph_freshness_fails(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 1, "stdout": "GRAPH FRESHNESS DEGRADED", "stderr": ""}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
+
+    def test_hard_fail_when_vector_memory_index_empty(self):
+        fake_routing = {"exit": 0, "stdout": json.dumps({"routing_freshness": {"status": "fresh"}}), "stderr": ""}
+        fake_wiki = {
+            "exit": 0,
+            "stdout": json.dumps({"status": "fresh"}),
+            "stderr": "",
+        }
+        fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 0}), "stderr": ""}
+        with patch.object(
+            cron_health_check,
+            "_run",
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
+        ):
+            rc = cron_health_check.main()
+        self.assertEqual(rc, 1)
 
     def test_routing_timeout_treated_as_hard_fail(self):
         fake_routing = {"exit": 124, "stdout": "", "stderr": "timeout after 300s"}
@@ -114,10 +253,21 @@ class HealthCheckLogicTests(unittest.TestCase):
         }
         fake_aliases = {"exit": 0, "stdout": "", "stderr": ""}
         fake_cron_reg = {"exit": 0, "stdout": "CRON REGISTRATION OK", "stderr": ""}
+        fake_graph = {"exit": 0, "stdout": "", "stderr": ""}
+        fake_graph_freshness = {"exit": 0, "stdout": "", "stderr": "GRAPH FRESHNESS OK"}
+        fake_vector = {"exit": 0, "stdout": json.dumps({"document_count": 5}), "stderr": ""}
         with patch.object(
             cron_health_check,
             "_run",
-            side_effect=[fake_routing, fake_wiki, fake_aliases, fake_cron_reg],
+            side_effect=[
+                fake_routing,
+                fake_wiki,
+                fake_aliases,
+                fake_cron_reg,
+                fake_graph,
+                fake_graph_freshness,
+                fake_vector,
+            ],
         ):
             rc = cron_health_check.main()
         self.assertEqual(rc, 1)

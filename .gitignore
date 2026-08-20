@@ -20,6 +20,9 @@ derived/cache/
 state/workflow-routing-index.json
 derived/
 
+# Graphify knowledge-graph artifacts (disposable derived output)
+graphify-out/
+
 # Runtime logs and temporary files
 telemetry/runtime/
 *.log
@@ -28,3 +31,6 @@ __pycache__/
 *.pyc
 
 tmp/
+
+# Windows null-device artifact from bad redirections
+nul

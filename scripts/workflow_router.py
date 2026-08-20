@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,7 @@ DEFAULT_INDEX_PATH = STATE_INDEX_PATH = DEFAULT_STATE_DIR / "workflow-routing-in
 DEFAULT_CAPSULE_DIR = DEFAULT_STATE_DIR / "workflows"
 DEFAULT_ROUTING_CACHE_TTL_SECONDS = 300
 DEFAULT_ROUTING_DATABASE = PROJECT_ROOT / "canonical" / "efficiens.db"
+VECTOR_INDEX_PATH = PROJECT_ROOT / "tmp" / "vector-memory.sqlite"
 ACTIVE_WORKFLOW_SOURCES = [
     DEFAULT_STATE_DIR / "ACTIVE_WORKFLOWS.md",
     DEFAULT_STATE_DIR / "active_workflows.json",
@@ -104,7 +106,7 @@ def _first_existing(paths: Iterable[Path]) -> Path:
     )
 
 
-def _source_fingerprint(path: Path) -> SourceFingerprint:
+def _source_fingerprint(path: Path, *, use_lightweight: bool = False) -> SourceFingerprint:
     if not path.exists():
         return SourceFingerprint(
             path=str(path.as_posix()),
@@ -114,13 +116,17 @@ def _source_fingerprint(path: Path) -> SourceFingerprint:
             exists=False,
         )
     stat = path.stat()
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 16), b""):
-            digest.update(chunk)
+    if use_lightweight:
+        sha_value = f"L:{stat.st_size}:{int(stat.st_mtime)}"
+    else:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 16), b""):
+                digest.update(chunk)
+        sha_value = digest.hexdigest()
     return SourceFingerprint(
         path=str(path.as_posix()),
-        sha256=digest.hexdigest(),
+        sha256=sha_value,
         size=stat.st_size,
         modified_at=_utc_datetime_from_timestamp(stat.st_mtime).isoformat(timespec="seconds").replace(
             "+00:00", "Z"
@@ -313,12 +319,178 @@ def _dependency_graph(entries: dict[str, dict[str, Any]]) -> dict[str, list[str]
     }
 
 
+def _dependency_chain_from_graph(
+    db: CanonicalDB,
+    workflow_id: str,
+    *,
+    max_depth: int = 8,
+) -> tuple[list[str], list[str]]:
+    """Return the transitive dependency chain from the durable graph.
+
+    Uses active `workflows -> depends_on -> workflows` edges. Returns the chain
+    in dependency-first order and any cycle/blocker messages encountered.
+    """
+    chain: list[str] = []
+    issues: list[str] = []
+    seen: set[str] = set()
+    frontier: set[str] = {workflow_id}
+    depth = 0
+
+    while frontier and depth < max_depth:
+        depth += 1
+        next_frontier: set[str] = set()
+        for node in frontier:
+            for edge in db.list_relationships(
+                subject_type="workflows",
+                subject_id=node,
+                predicate="depends_on",
+                object_type="workflows",
+                status="active",
+            ):
+                target = edge["object_id"]
+                if target == workflow_id:
+                    issues.append(
+                        f"Graph dependency cycle detected: {workflow_id} depends on itself via {node}."
+                    )
+                    continue
+                if target not in seen:
+                    seen.add(target)
+                    chain.append(target)
+                    next_frontier.add(target)
+        frontier = next_frontier
+
+    if frontier:
+        issues.append(
+            f"Dependency chain for {workflow_id} exceeds max depth ({max_depth}); "
+            "graph may contain a cycle or very deep DAG."
+        )
+
+    return chain, issues
+
+
+def _dependency_entry_status_blockers(
+    dependency_id: str,
+    dependency_entry: dict[str, Any] | None,
+) -> list[str]:
+    """Return blocker strings for a single dependency entry."""
+    blockers: list[str] = []
+    if dependency_entry is None:
+        blockers.append(f"Dependency {dependency_id} exists but has no workflow entry.")
+        return blockers
+    dependency_status = (
+        dependency_entry.get("effective_status")
+        or dependency_entry.get("lifecycle")
+        or "route_only"
+    )
+    if dependency_status != "active":
+        blockers.append(
+            f"Dependency {dependency_id} is not active for downstream execution "
+            f"(status={dependency_status!r})."
+        )
+    if dependency_entry.get("owner_action_required"):
+        blockers.append(
+            f"Dependency {dependency_id} requires owner action before downstream execution."
+        )
+    if dependency_entry.get("blockers"):
+        blockers.append(
+            f"Dependency {dependency_id} reports blockers: "
+            + ", ".join(str(item) for item in dependency_entry.get("blockers", []))
+        )
+    if dependency_entry.get("stop_lines"):
+        blockers.append(f"Dependency {dependency_id} has active stop-lines.")
+    return blockers
+
+
+def _graph_primary_dependency_analysis(
+    db: CanonicalDB | None,
+    workflow_id: str,
+    entry: dict[str, Any],
+    all_entries: dict[str, dict[str, Any]],
+    *,
+    max_depth: int = 8,
+) -> tuple[list[str], list[str], list[str]]:
+    """Graph-primary dependency analysis.
+
+    Returns:
+        - blockers: actionable dependency-derived blockers (downgrades status)
+        - chain: graph-derived transitive dependency chain
+        - graph_blockers: graph/markdown consistency issues (also blockers)
+    """
+    markdown_blockers, markdown_chain = _dependency_blockers(
+        workflow_id, entry, all_entries
+    )
+    if db is None:
+        # Fallback to markdown-only when no graph database is available.
+        return markdown_blockers, markdown_chain, []
+
+    graph_chain, graph_issues = _dependency_chain_from_graph(
+        db, workflow_id, max_depth=max_depth
+    )
+
+    declared = set(
+        _normalize_dependency_list(entry.get("depends_on"), owner=workflow_id)
+    )
+    graph_direct = {
+        edge["object_id"]
+        for edge in db.list_relationships(
+            subject_type="workflows",
+            subject_id=workflow_id,
+            predicate="depends_on",
+            object_type="workflows",
+            status="active",
+        )
+    }
+
+    consistency_issues: list[str] = []
+    for dependency in declared:
+        if dependency not in graph_direct:
+            consistency_issues.append(
+                f"Dependency {dependency} is declared but not mirrored in the graph "
+                "(run `python scripts/graph_backfill.py`)."
+            )
+    for dependency in graph_direct:
+        if dependency not in declared:
+            consistency_issues.append(
+                f"Dependency {dependency} is in the graph but not declared in ACTIVE_WORKFLOWS.md."
+            )
+
+    transitive_from_markdown = set(markdown_chain)
+    transitive_from_markdown = {
+        wid for wid in transitive_from_markdown if wid in all_entries
+    }
+    graph_transitive = set(graph_chain)
+
+    if graph_transitive != transitive_from_markdown:
+        only_in_graph = sorted(graph_transitive - transitive_from_markdown)
+        only_in_markdown = sorted(transitive_from_markdown - graph_transitive)
+        if only_in_graph:
+            consistency_issues.append(
+                f"Graph transitive closure includes dependencies not in markdown: "
+                f"{', '.join(only_in_graph)}."
+            )
+        if only_in_markdown:
+            consistency_issues.append(
+                f"Markdown transitive closure includes dependencies not in graph: "
+                f"{', '.join(only_in_markdown)}."
+            )
+
+    blockers: list[str] = [*graph_issues, *consistency_issues]
+    for dependency in graph_chain:
+        blockers.extend(
+            _dependency_entry_status_blockers(
+                dependency, all_entries.get(dependency)
+            )
+        )
+
+    return blockers, graph_chain, consistency_issues
+
+
 def _dependency_blockers(
     workflow_id: str,
     entry: dict[str, Any],
     all_entries: dict[str, dict[str, Any]],
 ) -> tuple[list[str], list[str]]:
-    """Return dependency-derived blockers and a dependency chain for this workflow."""
+    """Markdown-only dependency analysis (fallback when graph is unavailable)."""
 
     direct_dependencies = _normalize_dependency_list(entry.get("depends_on"), owner=workflow_id)
     blockers: list[str] = []
@@ -344,24 +516,9 @@ def _dependency_blockers(
             seen.add(current_id)
             flattened.append(current_id)
 
-        dependency_status = (
-            dependency_entry.get("effective_status")
-            or dependency_entry.get("lifecycle")
-            or "route_only"
+        blockers.extend(
+            _dependency_entry_status_blockers(current_id, dependency_entry)
         )
-        if dependency_status != "active":
-            blockers.append(
-                f"Dependency {current_id} is not active for downstream execution (status={dependency_status!r})."
-            )
-        if dependency_entry.get("owner_action_required"):
-            blockers.append(f"Dependency {current_id} requires owner action before downstream execution.")
-        if dependency_entry.get("blockers"):
-            blockers.append(
-                f"Dependency {current_id} reports blockers: "
-                + ", ".join(str(item) for item in dependency_entry.get("blockers", []))
-            )
-        if dependency_entry.get("stop_lines"):
-            blockers.append(f"Dependency {current_id} has active stop-lines.")
 
         for child_id in _normalize_dependency_list(
             dependency_entry.get("depends_on"),
@@ -378,6 +535,9 @@ def _dependency_blockers(
         walk(dependency, (workflow_id,))
 
     return blockers, flattened
+
+
+
 
 
 def _apply_override(entry: dict[str, Any], override: dict[str, Any] | None) -> tuple[str, list[str]]:
@@ -414,6 +574,8 @@ def _build_capsule(
     active_source: dict[str, Any],
     alias_source: dict[str, Any],
     override_source: dict[str, Any],
+    routing_database_path: Path = DEFAULT_ROUTING_DATABASE,
+    vector_index_path: Path | None = VECTOR_INDEX_PATH,
 ) -> dict[str, Any]:
     workflow_id = _normalize_workflow_id(entry["workflow_id"])
     continuity_note = entry.get("continuity_note") or entry.get("proof_artifact")
@@ -422,15 +584,40 @@ def _build_capsule(
     else:
         continuity_path = ""
 
-    dependency_blockers, dependency_chain = _dependency_blockers(
-        workflow_id=workflow_id,
-        entry=entry,
-        all_entries=all_entries,
-    )
+    if routing_database_path.exists():
+        try:
+            with CanonicalDB(routing_database_path) as db:
+                (
+                    dependency_blockers,
+                    dependency_chain,
+                    graph_dependency_blockers,
+                ) = _graph_primary_dependency_analysis(
+                    db, workflow_id, entry, all_entries
+                )
+        except Exception:
+            warnings.warn(
+                f"Graph-primary dependency analysis failed for {workflow_id}; "
+                "falling back to markdown. Run `python scripts/graph_memory.py validate` "
+                "and `python scripts/graph_backfill.py` to verify the graph layer.",
+                RuntimeWarning,
+            )
+            dependency_blockers, dependency_chain = _dependency_blockers(
+                workflow_id, entry, all_entries
+            )
+            graph_dependency_blockers = []
+    else:
+        dependency_blockers, dependency_chain = _dependency_blockers(
+            workflow_id, entry, all_entries
+        )
+        graph_dependency_blockers = []
+
     effective_status, blockers, stop_lines, control_override = _apply_override(entry, override)
     if dependency_blockers and effective_status == "active":
         effective_status = "monitor_only"
     blockers.extend(dependency_blockers)
+    for graph_blocker in graph_dependency_blockers:
+        if graph_blocker not in blockers:
+            blockers.append(graph_blocker)
 
     blocker_count = len(blockers)
 
@@ -470,6 +657,13 @@ def _build_capsule(
         "continuity_note": continuity_path,
         "depends_on": dependency_chain,
         "dependency_blockers": dependency_blockers,
+        "graph_dependency_blockers": graph_dependency_blockers,
+        "recall_context": _recall_context_for_workflow(
+            workflow_id,
+            dependency_chain,
+            entry,
+            vector_index_path=vector_index_path,
+        ),
         "primary_route_artifact": f"state/workflows/{workflow_id}.json",
         "secondary_artifacts": [
             active_source["source"],
@@ -507,6 +701,87 @@ def _build_capsule(
     }
 
 
+def _recall_context_for_workflow(
+    workflow_id: str,
+    dependency_chain: list[str],
+    entry: dict[str, Any],
+    *,
+    vector_index_path: Path | None = VECTOR_INDEX_PATH,
+    limit: int = 3,
+) -> dict[str, Any]:
+    """Build a vector-memory recall context for a workflow and its dependencies.
+
+    Queries the local vector index for the workflow ID, its dependency IDs, and
+    the workflow's current_state text. Returns a structured packet with the top
+    results so the router can surface relevant notes alongside the capsule.
+    """
+    if vector_index_path is None:
+        return {
+            "available": False,
+            "reason": "recall context disabled",
+            "index_path": "",
+            "results": [],
+        }
+    if not vector_index_path.is_file():
+        return {
+            "available": False,
+            "reason": "vector index not found",
+            "index_path": str(vector_index_path),
+            "results": [],
+        }
+
+    terms: list[str] = [workflow_id]
+    terms.extend(dependency_chain)
+    state_description = entry.get("state_description", "")
+    current_state = entry.get("current_state", "")
+    if state_description:
+        terms.append(state_description[:120])
+    elif current_state:
+        terms.append(current_state[:120])
+
+    query = " ".join(terms).strip()
+    if not query:
+        return {
+            "available": True,
+            "index_path": str(vector_index_path),
+            "reason": "no recall terms",
+            "results": [],
+        }
+
+    try:
+        from scripts import vector_memory_index
+
+        packet = vector_memory_index.build_query_packet(
+            vector_index_path,
+            query,
+            limit=limit,
+            retrieval_mode="hybrid",
+        )
+        return {
+            "available": True,
+            "index_path": str(vector_index_path),
+            "result_count": packet["result_count"],
+            "results": [
+                {
+                    "source_path": result["source_path"],
+                    "citation": result["citation"],
+                    "score": result["score"],
+                    "excerpt": result["excerpt"],
+                    "freshness_state": result["freshness_state"],
+                    "retrieval_mode": result["retrieval_mode"],
+                }
+                for result in packet["results"]
+            ],
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "index_path": str(vector_index_path),
+            "reason": str(exc),
+            "results": [],
+        }
+
+
 def _fingerprint_sources(
     entries: dict[str, dict[str, Any]],
     overrides: dict[str, dict[str, Any]],
@@ -514,6 +789,7 @@ def _fingerprint_sources(
     active_source_path: Path,
     override_source_path: Path,
     project_root: Path,
+    vector_index_path: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
     source_paths = {
         active_source_path,
@@ -525,15 +801,20 @@ def _fingerprint_sources(
             if not candidate:
                 continue
             source_paths.add(project_root / candidate)
+    if vector_index_path is not None:
+        source_paths.add(vector_index_path)
 
     fingerprints: dict[str, dict[str, Any]] = {}
     for path in sorted(source_paths, key=lambda item: item.as_posix()):
-        signature = _source_fingerprint(path)
-        fingerprints[signature.path] = {
-            "sha256": signature.sha256,
-            "size": signature.size,
-            "modified_at": signature.modified_at,
-            "exists": signature.exists,
+        if path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
+            fingerprint = _source_fingerprint(path, use_lightweight=True)
+        else:
+            fingerprint = _source_fingerprint(path)
+        fingerprints[fingerprint.path] = {
+            "sha256": fingerprint.sha256,
+            "size": fingerprint.size,
+            "modified_at": fingerprint.modified_at,
+            "exists": fingerprint.exists,
         }
 
     # Keep override presence visible in index for stale diagnostics.
@@ -551,7 +832,10 @@ def build_routing_index(
     project_root: Path = PROJECT_ROOT,
     state_dir: Path = DEFAULT_STATE_DIR,
     index_path: Path = DEFAULT_INDEX_PATH,
+    routing_database_path: Path | None = None,
+    vector_index_path: Path | None = VECTOR_INDEX_PATH,
 ) -> dict[str, Any]:
+    routing_database_path = routing_database_path or project_root / "canonical" / "efficiens.db"
     entries, active_source_meta = _load_active_workflow_entries(state_dir=state_dir)
     aliases, alias_source_meta = _load_alias_index(state_dir=state_dir)
     overrides, override_source_meta = _load_overrides(state_dir=state_dir)
@@ -566,6 +850,7 @@ def build_routing_index(
         active_source_path=active_source_path,
         override_source_path=override_source_path,
         project_root=project_root,
+        vector_index_path=vector_index_path or VECTOR_INDEX_PATH,
     )
 
     capsule_payloads = [
@@ -577,6 +862,8 @@ def build_routing_index(
             active_source=active_source_meta,
             alias_source=alias_source_meta,
             override_source=override_source_meta,
+            routing_database_path=routing_database_path,
+            vector_index_path=vector_index_path,
         )
         for workflow_id, entry in entries.items()
     ]
@@ -597,7 +884,7 @@ def build_routing_index(
         "active_workflow_source": active_source_meta["source"],
         "alias_source": alias_source_meta["source"],
         "override_source": override_source_meta["source"],
-        "dependency_graph": _dependency_graph(entries),
+        "dependency_graph": _dependency_graph_from_database(entries, routing_database_path),
         "workflows": [
             {
                 "workflow_id": payload["workflow_id"],
@@ -658,7 +945,10 @@ def check_routing_freshness(
     state_dir: Path = DEFAULT_STATE_DIR,
     index_path: Path = DEFAULT_INDEX_PATH,
     project_root: Path = PROJECT_ROOT,
+    routing_database_path: Path | None = None,
+    vector_index_path: Path | None = VECTOR_INDEX_PATH,
 ) -> tuple[bool, dict[str, Any]]:
+    routing_database_path = routing_database_path or project_root / "canonical" / "efficiens.db"
     current_source_contracts = {
         "active_workflows": None,
         "alias_index": None,
@@ -767,6 +1057,7 @@ def check_routing_freshness(
         active_source_path=active_source,
         override_source_path=override_source,
         project_root=project_root,
+        vector_index_path=vector_index_path or VECTOR_INDEX_PATH,
     )
 
     current_signatures = {
@@ -834,7 +1125,7 @@ def check_routing_freshness(
             current_source_contracts=current_source_contracts,
         )
 
-    expected_dependency_graph = _dependency_graph(entries)
+    expected_dependency_graph = _dependency_graph_from_database(entries, routing_database_path)
     if expected_dependency_graph != index_payload.get("dependency_graph"):
         return True, _build_stale_result(
             index_payload,
@@ -851,6 +1142,45 @@ def check_routing_freshness(
         )
 
     return False, index_payload
+
+
+def _dependency_graph_from_database(
+    entries: dict[str, dict[str, Any]],
+    routing_database_path: Path = DEFAULT_ROUTING_DATABASE,
+) -> dict[str, list[str]]:
+    """Return the resolved dependency graph, preferring the durable database.
+
+    Reads all active workflow dependency edges in a single query under a single
+    connection and groups them by subject_id in Python, avoiding N separate
+    list_relationships calls when the workflow queue grows.
+    """
+    if not routing_database_path.exists():
+        return _dependency_graph(entries)
+    try:
+        with CanonicalDB(routing_database_path) as db:
+            edges = db.list_relationships(
+                subject_type="workflows",
+                predicate="depends_on",
+                object_type="workflows",
+                status="active",
+            )
+            graph: dict[str, set[str]] = {wid: set() for wid in entries}
+            for edge in edges:
+                subject = edge["subject_id"]
+                if subject in graph:
+                    graph[subject].add(edge["object_id"])
+            return {
+                workflow_id: sorted(deps)
+                for workflow_id, deps in sorted(graph.items())
+            }
+    except Exception as exc:
+        warnings.warn(
+            f"Graph DB dependency lookup failed ({routing_database_path}): {exc}. "
+            "Falling back to markdown dependency graph for index freshness.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return _dependency_graph(entries)
 
 
 def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
@@ -873,6 +1203,8 @@ def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
             "blocker_count": capsule["blocker_count"],
             "depends_on": capsule.get("depends_on", []),
             "dependency_blockers": capsule.get("dependency_blockers", []),
+            "graph_dependency_blockers": capsule.get("graph_dependency_blockers", []),
+            "recall_context": capsule.get("recall_context", {"available": False, "results": []}),
             "blockers": capsule["blockers"],
             "default_resume_command": capsule["default_resume_command"],
         }
@@ -920,10 +1252,13 @@ def route_workflows(
     project_root: Path = PROJECT_ROOT,
     state_dir: Path = DEFAULT_STATE_DIR,
     routing_cache_ttl_seconds: int = DEFAULT_ROUTING_CACHE_TTL_SECONDS,
-    routing_database_path: Path = DEFAULT_ROUTING_DATABASE,
+    routing_database_path: Path | None = None,
+    vector_index_path: Path | None = VECTOR_INDEX_PATH,
 ) -> dict[str, Any]:
     if (selector is None and not all_workflows) or (selector is not None and all_workflows):
         raise ValueError("Use either selector or --all, not both/none")
+
+    routing_database_path = routing_database_path or project_root / "canonical" / "efficiens.db"
 
     # Keep derived workflow capsules in sync whenever the routing index is
     # regenerated. Most callers invoke `--write-index` as part of workflow
@@ -938,7 +1273,7 @@ def route_workflows(
     cached_result: dict[str, Any] | None = None
     current_signatures: dict[str, Any] | None = None
 
-    if routing_cache_ttl_seconds > 0 and not write_index:
+    if routing_cache_ttl_seconds > 0 and not write_index and vector_index_path is not None:
         cache_key = _routing_cache_key(
             routing_schema_version=ROUTER_SCHEMA,
             selector=selector,
@@ -956,6 +1291,8 @@ def route_workflows(
                         active_source_path=Path(active_source_meta["source"]),
                         override_source_path=Path(override_source_meta["source"]),
                         project_root=project_root,
+                        routing_database_path=routing_database_path,
+                        vector_index_path=vector_index_path,
                     )
                     if cached["source_signatures"] == current_signatures:
                         cached_result = dict(cached["payload"])
@@ -980,6 +1317,8 @@ def route_workflows(
             state_dir=state_dir,
             index_path=index_path,
             project_root=project_root,
+            routing_database_path=routing_database_path,
+            vector_index_path=vector_index_path,
         )
         if stale:
             if write_index:
@@ -987,6 +1326,8 @@ def route_workflows(
                     project_root=project_root,
                     state_dir=state_dir,
                     index_path=index_path,
+                    routing_database_path=routing_database_path,
+                    vector_index_path=vector_index_path,
                 )
             else:
                 stale_payload.setdefault("routing_index_schema", ROUTER_SCHEMA)
@@ -1029,6 +1370,8 @@ def route_workflows(
             active_source=active_source_meta,
             alias_source=alias_source_meta,
             override_source=override_source_meta,
+            routing_database_path=routing_database_path,
+            vector_index_path=vector_index_path,
         )
 
         if write_capsules:
@@ -1093,6 +1436,8 @@ def route_workflows(
                 active_source_path=Path(active_source_meta["source"]),
                 override_source_path=Path(override_source_meta["source"]),
                 project_root=project_root,
+                routing_database_path=routing_database_path,
+                vector_index_path=vector_index_path,
             )
             with CanonicalDB(routing_database_path) as db:
                 db.set_routing_cache(
@@ -1133,6 +1478,8 @@ def _current_source_signatures(
     active_source_path: Path,
     override_source_path: Path,
     project_root: Path,
+    routing_database_path: Path | None = None,
+    vector_index_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return a compact, deterministic signature set for cache validation."""
     raw = _fingerprint_sources(
@@ -1142,8 +1489,9 @@ def _current_source_signatures(
         active_source_path=active_source_path,
         override_source_path=override_source_path,
         project_root=project_root,
+        vector_index_path=vector_index_path or VECTOR_INDEX_PATH,
     )
-    return {
+    signatures = {
         path: {
             "sha256": sig["sha256"],
             "size": sig["size"],
@@ -1152,6 +1500,17 @@ def _current_source_signatures(
         }
         for path, sig in sorted(raw.items())
     }
+    if routing_database_path is not None:
+        graph = _dependency_graph_from_database(entries, routing_database_path)
+        signatures["__routing_dependency_graph__"] = {
+            "sha256": hashlib.sha256(
+                json.dumps(graph, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            "size": len(graph),
+            "modified_at": "",
+            "exists": routing_database_path.exists(),
+        }
+    return signatures
 
 
 def _parse_args() -> argparse.Namespace:
@@ -1205,6 +1564,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="List all workflow aliases and exit.",
     )
+    parser.add_argument(
+        "--vector-index-path",
+        default=str(VECTOR_INDEX_PATH),
+        help="Vector memory index path for recall_context (default: tmp/vector-memory.sqlite)",
+    )
+    parser.add_argument(
+        "--skip-recall-context",
+        action="store_true",
+        help="Skip vector memory recall_context lookup for faster routing.",
+    )
     return parser.parse_args()
 
 
@@ -1240,6 +1609,7 @@ def main() -> int:
             write_capsules=args.write_capsules,
             index_path=index_path,
             routing_cache_ttl_seconds=0 if args.no_cache else DEFAULT_ROUTING_CACHE_TTL_SECONDS,
+            vector_index_path=Path(args.vector_index_path) if not args.skip_recall_context else None,
         )
     except (ValueError, KeyError, FileNotFoundError) as exc:
         print(json.dumps({"error": str(exc)}, indent=2))

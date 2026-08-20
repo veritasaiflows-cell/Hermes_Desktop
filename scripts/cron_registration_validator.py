@@ -25,6 +25,8 @@ EXPECTED_JOBS = [
     ("a7_queue_hygiene.py", PROJECT_ROOT / "scripts" / "cron_queue_hygiene.py"),
     ("a8_telemetry_harvest.py", PROJECT_ROOT / "scripts" / "cron_telemetry_harvest.py"),
     ("a9_claim_drift_check.py", PROJECT_ROOT / "scripts" / "cron_claim_drift_check.py"),
+    ("a10_graph_freshness.py", PROJECT_ROOT / "scripts" / "cron_graph_freshness.py"),
+    ("a11_workspace_status.py", PROJECT_ROOT / "scripts" / "workspace_status.py"),
 ]
 
 DIRECT_REPO_JOBS: list[tuple[str, Path]] = []

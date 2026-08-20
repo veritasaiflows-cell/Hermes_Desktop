@@ -8,6 +8,7 @@ This layer is the authoritative structured state for the workspace.
 - Do not silently overwrite important records.
 - Validate derived or retrieved claims against this layer and the original source layer.
 - Use `claims` for explicit, evidence-level assertions with optional source hashes, validity windows, authority class, and invalidation history.
+- Use `relationships` for asserted graph edges between canonical records (dependencies, ownership, impact, contradictions, supersession). Edges link records by identifier and never re-state facts; the graph contract is `references/graph-memory.md`.
 - Enable foreign-key enforcement on every connection with `PRAGMA foreign_keys = ON`; SQLite does not persist this setting per database file.
 
 ## Access utility

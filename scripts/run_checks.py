@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import json
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ from canonical.db import CanonicalDB, DEFAULT_DATABASE_PATH
 from scripts import workflow_router
 from scripts import wiki_bootstrap
 from scripts.product_research_workflow import run_product_research
+from scripts.runtime_metadata import detect_active_model
 
 
 def build_test_suite() -> unittest.TestSuite:
@@ -140,6 +142,7 @@ def run_routing_smoke(
     project_root: Path = PROJECT_ROOT,
     state_dir: Path = PROJECT_ROOT / "state",
     index_path: Path = PROJECT_ROOT / "state" / "workflow-routing-index.json",
+    database_path: Path = DEFAULT_DATABASE_PATH,
 ) -> dict:
     """Regenerate and validate the workflow routing surface."""
     start = time.perf_counter_ns()
@@ -153,6 +156,7 @@ def run_routing_smoke(
             project_root=project_root,
             state_dir=state_dir,
             index_path=index_path,
+            routing_database_path=database_path,
         )
         elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
         return {
@@ -203,6 +207,7 @@ def run_isolated_smoke() -> dict:
             project_root=isolated_root,
             state_dir=state_dir,
             index_path=isolated_root / "state" / "workflow-routing-index.json",
+            database_path=database_path,
         )
         return {
             "database": str(database_path),
@@ -221,6 +226,8 @@ def _record_run_check(
     smoke: dict,
     routing: dict,
     wiki: dict,
+    model_or_agent: str | None = None,
+    started_at: str | None = None,
 ) -> None:
     """Write a metadata-only telemetry row for the run_checks invocation."""
     target = Path(database_path) if database_path else DEFAULT_DATABASE_PATH
@@ -238,22 +245,84 @@ def _record_run_check(
     total_duration += routing.get("duration_ms", 0)
     total_duration += wiki.get("duration_ms", 0)
 
+    resource_usage = {
+        "test_count": len(test_failures) + (1 if tests_ok else 0),
+        "test_failure_count": len(test_failures),
+        "smoke_duration_ms": smoke.get("duration_ms", 0),
+        "routing_duration_ms": routing.get("duration_ms", 0),
+        "wiki_duration_ms": wiki.get("duration_ms", 0),
+        "unit_test_duration_ms": test_duration_ms,
+        "smoke_entities_delta": smoke.get("delta_entities", 0),
+        "smoke_metrics_delta": smoke.get("delta_metrics", 0),
+    }
+
+    # Sizes are byte counts of the metadata-only inputs and handoff payloads.
+    # Payload contents are never stored in run_metrics.
+    input_size = _json_payload_size(
+        {"tests_ok": tests_ok, "test_failures": test_failures}
+    )
+    handoff_size = _json_payload_size(
+        {"smoke": smoke, "routing": routing, "wiki": wiki}
+    )
+    resource_usage["input_payload_bytes"] = input_size
+    resource_usage["handoff_payload_bytes"] = handoff_size
+
     try:
         with CanonicalDB(target) as db:
+            retries = _previous_retry_count(db)
             db.record_run(
                 request_type="run_checks",
                 route_selected="deterministic",
                 tools_json=["unittest", "phase0_smoke", "routing_smoke", "wiki_smoke"],
+                model_or_agent=model_or_agent,
+                input_size=input_size,
+                handoff_size=handoff_size,
                 duration_ms=total_duration,
+                resource_usage_json=resource_usage,
                 errors_json=errors,
+                retries=retries,
                 verification_result="pass" if not errors else "fail",
                 final_outcome="accepted" if not errors else "rejected",
                 acceptance_status="accepted" if not errors else "rejected",
-                resource_usage_json={"test_count": len(test_failures) + (1 if tests_ok else 0)},
+                started_at=started_at,
+                completed_at=_utc_now(),
             )
     except Exception:
         # Telemetry must never break the caller's original result.
         pass
+
+
+def _json_payload_size(payload: object) -> int:
+    """Return the UTF-8 byte size of a metadata payload without persisting it."""
+    return len(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _previous_retry_count(db: CanonicalDB) -> int:
+    """Return the retry count for this run based on the most recent prior row.
+
+    If the most recent prior run_checks row was rejected, this run is a retry:
+    return prior retries + 1. If the prior run was accepted (or no prior row
+    exists), the retry chain resets to 0. This gives downstream consumers a
+    signal of how many consecutive failures preceded a given telemetry row.
+    """
+    row = db.connection.execute(
+        "SELECT retries, acceptance_status FROM run_metrics"
+        " WHERE request_type = 'run_checks'"
+        " ORDER BY started_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return 0
+    prior_retries, prior_status = row[0] or 0, row[1]
+    if prior_status == "rejected":
+        return prior_retries + 1
+    return 0
+
+
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -282,6 +351,8 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     arguments = _parse_args()
+    started_at = _utc_now()
+    active_model = detect_active_model()
     tests_ok, test_failures, test_duration_ms = run_tests()
     if not tests_ok:
         if arguments.record_telemetry:
@@ -293,6 +364,8 @@ def main() -> int:
                 smoke={},
                 routing={},
                 wiki={},
+                model_or_agent=active_model,
+                started_at=started_at,
             )
         return 1
 
@@ -306,6 +379,8 @@ def main() -> int:
                 smoke={},
                 routing={},
                 wiki={},
+                model_or_agent=active_model,
+                started_at=started_at,
             )
         return 0
 
@@ -313,7 +388,7 @@ def main() -> int:
         if not arguments.database:
             raise ValueError("--persistent-smoke requires --database")
         smoke = run_phase0_smoke(Path(arguments.database))
-        routing_smoke = run_routing_smoke()
+        routing_smoke = run_routing_smoke(database_path=Path(arguments.database))
         wiki_smoke = run_wiki_smoke()
     else:
         if arguments.database:
@@ -336,6 +411,8 @@ def main() -> int:
             smoke=smoke,
             routing=routing_smoke,
             wiki=wiki_smoke,
+            model_or_agent=active_model,
+            started_at=started_at,
         )
 
     return (

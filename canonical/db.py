@@ -580,6 +580,47 @@ class CanonicalDB:
         rows = self.connection.execute(query, parameters).fetchall()
         return [dict(row) for row in rows]
 
+    def record_user_correction(
+        self,
+        correction: str,
+        *,
+        request_type: str | None = None,
+        run_id: str | None = None,
+    ) -> str | None:
+        """Attach a user-correction token to a run_metrics row.
+
+        This is the deterministic path an agent calls when the user steers
+        mid-turn. Callers should pass a short category token (e.g.
+        ``wrong_route``, ``scope_too_broad``) rather than raw user text; the
+        value is redacted to a category token before storage (same policy as
+        ``record_run``), so no raw user content is persisted. Returns the
+        updated run_id, or None when no matching row exists.
+        """
+        token = _redact_free_text(correction)
+        if token is None:
+            return None
+        if run_id is not None:
+            row = self.connection.execute(
+                "SELECT run_id FROM run_metrics WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        else:
+            filters = ["1=1"]
+            parameters: list[Any] = []
+            if request_type:
+                filters.append("request_type = ?")
+                parameters.append(request_type)
+            row = self.connection.execute(
+                "SELECT run_id FROM run_metrics WHERE "
+                + " AND ".join(filters)
+                + " ORDER BY started_at DESC, rowid DESC LIMIT 1",
+                parameters,
+            ).fetchone()
+        if row is None:
+            return None
+        target_run_id = row[0]
+        self.update("run_metrics", target_run_id, {"user_correction": token})
+        return target_run_id
+
     def get_routing_cache(
         self,
         cache_key: str,
@@ -665,6 +706,224 @@ class CanonicalDB:
                 stale_keys,
             )
         return deleted.rowcount
+
+    def add_relationship(
+        self,
+        subject_type: str,
+        subject_id: str,
+        predicate: str,
+        object_type: str,
+        object_id: str,
+        *,
+        confidence: float | None = None,
+        valid_from: str | None = None,
+        valid_until: str | None = None,
+        provenance_id: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        rel_id: str | None = None,
+    ) -> str:
+        """Insert one asserted relationship edge and return its stable identifier.
+
+        Edges link canonical records by identifier; they never re-state facts.
+        Every edge carries a provenance reference so the graph stays auditable.
+        """
+        if not subject_type.strip() or not subject_id.strip():
+            raise ValueError("subject_type and subject_id are required")
+        if not predicate.strip():
+            raise ValueError("predicate is required")
+        if not object_type.strip() or not object_id.strip():
+            raise ValueError("object_type and object_id are required")
+        if provenance_id and provenance:
+            raise ValueError("Provide provenance_id or provenance, not both")
+
+        valid_from_ts = _parse_utc_timestamp(valid_from)
+        valid_until_ts = _parse_utc_timestamp(valid_until) if valid_until is not None else None
+        if valid_until_ts is not None and valid_until_ts < valid_from_ts:
+            raise ValueError("valid_until cannot be before valid_from")
+
+        row = {
+            "subject_type": subject_type.strip(),
+            "subject_id": subject_id.strip(),
+            "predicate": predicate.strip(),
+            "object_type": object_type.strip(),
+            "object_id": object_id.strip(),
+            "status": "active",
+            "confidence": confidence,
+            "valid_from": _to_iso8601(valid_from_ts),
+            "valid_until": _to_iso8601(valid_until_ts) if valid_until_ts else None,
+            "superseded_by": None,
+        }
+        return self.insert(
+            "relationships",
+            row,
+            record_id=rel_id,
+            provenance_id=provenance_id,
+            provenance=provenance,
+        )
+
+    def list_relationships(
+        self,
+        *,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        predicate: str | None = None,
+        object_type: str | None = None,
+        object_id: str | None = None,
+        status: str | None = "active",
+        include_expired: bool = False,
+        now: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List relationship edges matching filters, newest first."""
+        filters: list[str] = ["1=1"]
+        parameters: list[Any] = []
+
+        if subject_type is not None:
+            filters.append("subject_type = ?")
+            parameters.append(subject_type)
+        if subject_id is not None:
+            filters.append("subject_id = ?")
+            parameters.append(subject_id)
+        if predicate is not None:
+            filters.append("predicate = ?")
+            parameters.append(predicate)
+        if object_type is not None:
+            filters.append("object_type = ?")
+            parameters.append(object_type)
+        if object_id is not None:
+            filters.append("object_id = ?")
+            parameters.append(object_id)
+        if status is not None:
+            filters.append("status = ?")
+            parameters.append(status)
+
+        if not include_expired:
+            filters.append("(valid_until IS NULL OR valid_until >= ?)")
+            parameters.append(now or _utc_now())
+
+        query = (
+            "SELECT * FROM relationships WHERE "
+            + " AND ".join(filters)
+            + " ORDER BY created_at DESC"
+        )
+        rows = self.connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_relationship(self, rel_id: str) -> dict[str, Any] | None:
+        """Fetch one relationship edge by identifier."""
+        row = self.connection.execute(
+            "SELECT * FROM relationships WHERE rel_id = ?", (rel_id,)
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def supersede_relationship(
+        self,
+        rel_id: str,
+        *,
+        reason: str,
+        superseded_by: str | None = None,
+        provenance_id: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Mark one relationship edge superseded while preserving the audit trail."""
+        if not reason.strip():
+            raise ValueError("reason is required")
+        updates = {
+            "status": "superseded",
+            "superseded_by": superseded_by,
+        }
+        self.update(
+            "relationships",
+            rel_id,
+            updates,
+            provenance_id=provenance_id,
+            provenance=provenance,
+        )
+
+    def find_path(
+        self,
+        start_type: str,
+        start_id: str,
+        end_type: str,
+        end_id: str,
+        *,
+        max_depth: int = 8,
+        now: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Return the shortest active edge path between two canonical records.
+
+        Breadth-first traversal over active, non-expired relationship edges.
+        Returns a list of edge dictionaries from start to end, or None when no
+        path exists within max_depth.
+        """
+        if max_depth < 1:
+            raise ValueError("max_depth must be at least 1")
+        now_ts = now or _utc_now()
+        start = (start_type, start_id)
+        end = (end_type, end_id)
+        if start == end:
+            return []
+        queue: list[tuple[tuple[str, str], list[dict[str, Any]]]] = [(start, [])]
+        visited: set[tuple[str, str]] = {start}
+        while queue:
+            node, path = queue.pop(0)
+            if len(path) >= max_depth:
+                continue
+            edges = self.list_relationships(
+                subject_type=node[0],
+                subject_id=node[1],
+                status="active",
+                include_expired=False,
+                now=now_ts,
+            )
+            for edge in edges:
+                neighbor = (edge["object_type"], edge["object_id"])
+                new_path = [*path, edge]
+                if neighbor == end:
+                    return new_path
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, new_path))
+        return None
+
+    def affected(
+        self,
+        object_type: str,
+        object_id: str,
+        *,
+        max_depth: int = 2,
+        now: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return active edges that point at a record (reverse traversal).
+
+        Answers "what depends on X": all active relationships whose object is
+        the given record, up to max_depth hops.
+        """
+        if max_depth < 1:
+            raise ValueError("max_depth must be at least 1")
+        now_ts = now or _utc_now()
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        frontier: list[tuple[str, str]] = [(object_type, object_id)]
+        for _ in range(max_depth):
+            next_frontier: list[tuple[str, str]] = []
+            for node in frontier:
+                edges = self.list_relationships(
+                    object_type=node[0],
+                    object_id=node[1],
+                    status="active",
+                    include_expired=False,
+                    now=now_ts,
+                )
+                for edge in edges:
+                    if edge["rel_id"] in seen:
+                        continue
+                    seen.add(edge["rel_id"])
+                    results.append(edge)
+                    next_frontier.append((edge["subject_type"], edge["subject_id"]))
+            frontier = next_frontier
+            if not frontier:
+                break
+        return results
 
     def _insert_provenance_in_transaction(self, values: Mapping[str, Any]) -> str:
         row = {

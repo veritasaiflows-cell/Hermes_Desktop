@@ -22,6 +22,8 @@ This reference captures:
 | Alias index | Human-friendly workflow names -> stable IDs | `state/workflow_alias_index.json` |
 | Overrides | Pause/halt/gate controls | `state/workflow-control-overrides.json` |
 | Continuity notes | Human-readable resume context per workflow | `continuity/` |
+| Dependency graph | Canonical `workflows -> depends_on -> workflows` edges | `canonical/efficiens.db` |
+| Vector memory | Optional cited context for a workflow and its graph dependencies | `tmp/vector-memory.sqlite` |
 | Route index | Generated freshness artifact | `state/workflow-routing-index.json` |
 | Capsules | Generated per-workflow control summary | `state/workflows/WF-<ID>.json` |
 
@@ -61,8 +63,8 @@ python scripts/run_checks.py
 
 Revalidated routing queries are cached in `canonical/efficiens.db` (`routing_cache`)
 for 300 seconds. The cache is keyed by selector, answer mode, validation flag, and
-source signatures; if any control-plane source changes, the next call regenerates.
-Use `--no-cache` to force a fresh computation.
+source signatures; control-plane files, the vector index, and the resolved dependency
+graph are rechecked before a cached answer is used. Use `--no-cache` to force a fresh computation.
 
 Before meaningful work:
 
@@ -79,11 +81,24 @@ Each generated capsule (`state/workflows/WF-<ID>.json`) includes:
 - `implementation_script`: the canonical script entry point
 - `commands`: `dry_run` and `write` command templates
 - `blockers`, `stop_lines`, `owner_action_required`
+- `depends_on` and `dependency_blockers`, resolved from the canonical graph when it is available
+- `graph_dependency_blockers`, which makes declaration/graph drift a hard routing blocker
+- `recall_context`, up to three cited hybrid-retrieval results scoped by the workflow and its graph dependencies
 - `default_resume_command`: the router command to get the next safe action
 - `validator_commands`: checks that must pass before the workflow advances
 
 Use these fields instead of parsing free-text `next_action` when selecting
 which script to run.
+
+`ACTIVE_WORKFLOWS.md` declares dependency intent and supplies workflow metadata. The
+canonical graph is the primary source for dependency traversal; when a declared edge is
+absent from the graph, the router returns a `graph_dependency_blockers` item and will
+not leave an otherwise active workflow executable. Refresh graph edges with:
+
+```bash
+python scripts/graph_backfill.py
+python scripts/workflow_router.py --all --answer summary --validate --write-index
+```
 
 ## Mandatory write preflight
 

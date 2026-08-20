@@ -1,7 +1,7 @@
 # Workspace automation layer
 
-Automation IDs A1-A9. A1, A2, A2-full, A3, A4, A5, A6, A7, A8, A9 are implemented
-as scheduled jobs; A10+ remain deferred until additional workspace maturity.
+Automation IDs A1-A11. A1, A2, A2-full, A3, A4, A5, A6, A7, A8, A9, A10, A11 are implemented
+as scheduled jobs; A12+ remain deferred until additional workspace maturity.
 
 ## Authoritative code (version-controlled)
 
@@ -15,10 +15,14 @@ as scheduled jobs; A10+ remain deferred until additional workspace maturity.
 - `scripts/cron_queue_hygiene.py` — A7 logic (removes terminal-state workflows older than 30 days from the authoritative queue and archives them)
 - `scripts/cron_telemetry_harvest.py` — A8 logic (runs `run_checks.py --record-telemetry` daily to populate `run_metrics`)
 - `scripts/cron_claim_drift_check.py` — A9 logic (monitors expiring claims, tampered workflow runs, and stale replays)
+- `scripts/cron_graph_freshness.py` — A10 logic (graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges)
+- `scripts/workspace_status.py` — A11 logic (single-command JSON operating brief; runs all gates in parallel)
+- `scripts/graph_backfill.py` — one-time idempotent backfill of durable graph edges from pre-graph canonical records
 - `scripts/cron_registration_validator.py` — verifies every cron wrapper resolves to an existing repo script (run by tests and A2)
 - `tests/test_cron_wrappers.py` — pins the exit-code + output contract for A1 and A2 wrappers
 - `tests/test_queue_hygiene.py` — pins A7 and A2-full wrapper contracts
 - `tests/test_cron_registration_validator.py` — pins the A9 wrapper + registration contract
+- `tests/test_workspace_status.py` — pins A11 healthy/degraded/warning contracts
 
 ## Cron launchers (in ~/AppData/Local/hermes/scripts/, required location for cron)
 
@@ -32,6 +36,8 @@ as scheduled jobs; A10+ remain deferred until additional workspace maturity.
 - `a7_queue_hygiene.py` -> execs `scripts/cron_queue_hygiene.py`
 - `a8_telemetry_harvest.py` -> execs `scripts/cron_telemetry_harvest.py`
 - `a9_claim_drift_check.py` -> execs `scripts/cron_claim_drift_check.py`
+- `a10_graph_freshness.py` -> execs `scripts/cron_graph_freshness.py`
+- `a11_workspace_status.py` -> execs `scripts/workspace_status.py`
 
 These are thin launchers so the real logic stays in the repo. Launchers fall
 back to a repo root discovered from the launcher path if the hardcoded `TARGET`
@@ -51,6 +57,8 @@ is missing.
 | A7 | authoritative queue hygiene | weekly Sunday 11:00 | removes terminal workflows older than 30 days from `active_workflows.json`; archives them |
 | A8 | telemetry harvest | daily 06:30 | runs `run_checks.py --record-telemetry` to populate `run_metrics` |
 | A9 | claim-drift check | hourly at :45 | monitors expiring claims, tampered workflow runs, and stale replays |
+| A10 | graph freshness | hourly at :15 | graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges |
+| A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
 
 All are `no_agent` (no LLM) and print to STDOUT only on failure/degraded, so a healthy
 run delivers nothing.
@@ -67,12 +75,9 @@ or `deliver='all'`) once a channel is wired.
 - **WF-1000 scheduled resume.** Blocked: "No approved external connector
   configuration yet for phase 3." Wrap `default_resume_command` in a cron only
   after an approved source catalog + connector exists.
-- **A10 — Telemetry scorecard report.** Needs 1-2 weeks of A8 data before the
-  weekly scorecard is meaningful. Build `scripts/cron_telemetry_scorecard.py` once
-  there are 10+ `run_metrics` rows.
-- **A11 — Improvement signal sweep.** Needs a `follow_ups` table in
+- **A12 — Improvement signal sweep.** Needs a `follow_ups` table in
   `canonical/schema.sql` and enough historical telemetry to detect recurring
   patterns.
-- **A12 — Scorecard review / promotion gate.** Model-driven weekly synthesis of
-  the scorecard + open follow-ups into routed proposals. Defer until A11 is
+- **A13 — Scorecard review / promotion gate.** Model-driven weekly synthesis of
+  the scorecard + open follow-ups into routed proposals. Defer until A12 is
   producing real signals.

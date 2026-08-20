@@ -24,6 +24,7 @@ class SchemaCurrentTests(unittest.TestCase):
         "version_history",
         "run_metrics",
         "routing_cache",
+        "relationships",
     }
 
     EXPECTED_INDICES = {
@@ -35,6 +36,10 @@ class SchemaCurrentTests(unittest.TestCase):
         "idx_claims_valid_until",
         "idx_workflow_runs_workflow",
         "idx_run_metrics_started",
+        "idx_relationships_subject",
+        "idx_relationships_object",
+        "idx_relationships_unique_active",
+        "idx_relationships_status",
     }
 
     REQUIRED_COLUMNS = {
@@ -42,6 +47,7 @@ class SchemaCurrentTests(unittest.TestCase):
         "metrics": {"metric_id", "metric_name", "metric_value", "unit", "dimensions_json", "provenance_id", "measured_at"},
         "claims": {"claim_id", "subject_type", "subject_id", "title", "claim_text", "source_type", "source_artifact_id", "source_locator", "source_hash", "source_version", "observed_at", "valid_from", "valid_until", "freshness_rule", "confidence", "authority_class", "verification_method", "status", "contradiction_notes", "superseded_by", "invalidated_by", "invalidated_reason", "provenance_id", "created_at", "updated_at"},
         "workflow_runs": {"run_id", "workflow_id", "run_key", "input_hash", "source_uri", "status", "result_json", "started_at", "completed_at", "provenance_id"},
+        "relationships": {"rel_id", "subject_type", "subject_id", "predicate", "object_type", "object_id", "status", "confidence", "valid_from", "valid_until", "superseded_by", "provenance_id", "created_at", "updated_at"},
     }
 
     def test_schema_file_exists_and_is_readable(self):

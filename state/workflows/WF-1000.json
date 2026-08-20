@@ -17,7 +17,8 @@
   "display_name": "Workflow A - Product Research",
   "effective_status": "active",
   "freshness_sla": "daily",
-  "generated_at": "2026-08-16T23:00:39Z",
+  "generated_at": "2026-08-20T01:00:52Z",
+  "graph_dependency_blockers": [],
   "helper_safe": true,
   "human_approval_owner": "operator",
   "implementation_script": "scripts/product_research_workflow.py",
@@ -29,6 +30,37 @@
   "priority": "high",
   "proof_artifact": "continuity\\WF-1000-Product-Research.md",
   "readiness": "active",
+  "recall_context": {
+    "available": true,
+    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\tmp\\vector-memory.sqlite",
+    "result_count": 3,
+    "results": [
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L1-L1",
+        "excerpt": "# Workflow A \u2014 Product Research (phase-2 scaffold)\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.7263574735784889,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L1-L1",
+        "excerpt": "# Commerce data model (Phase 1)\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6803459940244267,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md:L28-L28",
+        "excerpt": "| Route index | Generated freshness artifact | `state/workflow-routing-index.json` |\n| Capsules | Generated per-workflow control summary | `state/workflows/WF-<ID>.json` |\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.642741377602038,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md"
+      }
+    ]
+  },
   "required_refresh_command": "python scripts/workflow_router.py --write-index --answer summary",
   "routing_contract": "workflow-routing-index.v1",
   "routing_schema_version": "workflow-routing-index.v1",

@@ -2,6 +2,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from scripts import workflow_router, workflow_runner
 from scripts.concurrent_lane_manager import ConcurrentLaneManager
@@ -23,7 +24,13 @@ def _write_markdown_json(path: Path, payload: dict) -> None:
     )
 
 
-def _build_control_plane_with_workflows(root: Path, workflows: list[dict], aliases: dict[str, str]) -> None:
+def _build_control_plane_with_workflows(
+    root: Path,
+    workflows: list[dict],
+    aliases: dict[str, str],
+    *,
+    mirror_dependencies_to_graph: bool = True,
+) -> None:
     _write_markdown_json(
         root / "state" / "ACTIVE_WORKFLOWS.md",
         {
@@ -41,6 +48,19 @@ def _build_control_plane_with_workflows(root: Path, workflows: list[dict], alias
         },
     )
 
+    (root / "canonical").mkdir(parents=True, exist_ok=True)
+    from canonical.db import CanonicalDB
+
+    with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+        if mirror_dependencies_to_graph:
+            for workflow in workflows:
+                workflow_id = workflow["workflow_id"]
+                for dependency in workflow_router._normalize_dependency_list(
+                    workflow.get("depends_on"), owner=workflow_id
+                ):
+                    db.add_relationship(
+                        "workflows", workflow_id, "depends_on", "workflows", dependency
+                    )
 
 def _build_control_plane(root: Path) -> None:
     _build_control_plane_with_workflows(
@@ -314,6 +334,261 @@ class WorkflowRouterTests(unittest.TestCase):
             self.assertEqual(result["workflow"]["depends_on"], ["WF-1000"])
             self.assertTrue(any("Dependency WF-1000" in item for item in result["workflow"]["blockers"]))
 
+    def test_graph_dependency_audit_flags_missing_graph_edge(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane_with_workflows(
+                root,
+                workflows=[
+                    {
+                        "workflow_id": "WF-1000",
+                        "display_name": "Workflow A",
+                        "effective_status": "active",
+                        "owner_action_required": False,
+                        "proof_artifact": "continuity/WF-1000.md",
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                    {
+                        "workflow_id": "WF-2000",
+                        "display_name": "Workflow B - Dependent",
+                        "effective_status": "active",
+                        "depends_on": ["WF-1000"],
+                        "owner_action_required": False,
+                        "proof_artifact": "continuity/WF-2000.md",
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                ],
+                aliases={},
+                mirror_dependencies_to_graph=False,
+            )
+
+            continuity_root = root / "continuity"
+            continuity_root.mkdir(parents=True, exist_ok=True)
+            (continuity_root / "WF-1000.md").write_text("# continuity\n", encoding="utf-8")
+            (continuity_root / "WF-2000.md").write_text("# continuity\n", encoding="utf-8")
+
+            result = workflow_router.route_workflows(
+                selector="WF-2000",
+                answer="summary",
+                validate=True,
+                write_index=True,
+                write_capsules=False,
+                index_path=root / "tmp" / "workflow-routing-index.json",
+                project_root=root,
+                state_dir=root / "state",
+            )
+
+            self.assertIn("graph_dependency_blockers", result["workflow"])
+            self.assertTrue(
+                any(
+                    "declared but not mirrored in the graph" in item
+                    for item in result["workflow"]["graph_dependency_blockers"]
+                )
+            )
+            self.assertEqual(result["workflow"]["depends_on"], [])
+            self.assertEqual(result["workflow"]["effective_status"], "monitor_only")
+
+    def test_summary_includes_vector_recall_context_for_graph_dependencies(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane_with_workflows(
+                root,
+                workflows=[
+                    {
+                        "workflow_id": "WF-1000",
+                        "display_name": "Upstream",
+                        "effective_status": "active",
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                    {
+                        "workflow_id": "WF-2000",
+                        "display_name": "Dependent",
+                        "effective_status": "active",
+                        "state_description": "Prepare the campaign evidence packet.",
+                        "depends_on": ["WF-1000"],
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                ],
+                aliases={},
+            )
+            vector_index_path = root / "tmp" / "vector-memory.sqlite"
+            vector_index_path.parent.mkdir(parents=True, exist_ok=True)
+            vector_index_path.touch()
+            packet = {
+                "result_count": 1,
+                "results": [
+                    {
+                        "source_path": "notes/campaign.md",
+                        "citation": "notes/campaign.md:L4-L8",
+                        "score": 0.82,
+                        "excerpt": "Campaign evidence is ready for review.",
+                        "freshness_state": "fresh",
+                        "retrieval_mode": "hybrid",
+                    }
+                ],
+            }
+            with patch("scripts.vector_memory_index.build_query_packet", return_value=packet) as query:
+                result = workflow_router.route_workflows(
+                    selector="WF-2000",
+                    answer="summary",
+                    validate=True,
+                    write_index=True,
+                    project_root=root,
+                    state_dir=root / "state",
+                    index_path=root / "tmp" / "workflow-routing-index.json",
+                    vector_index_path=vector_index_path,
+                )
+
+            recall = result["workflow"]["recall_context"]
+            self.assertTrue(recall["available"])
+            self.assertEqual(recall["result_count"], 1)
+            self.assertEqual(recall["results"][0]["citation"], "notes/campaign.md:L4-L8")
+            self.assertIn("WF-2000 WF-1000", query.call_args.args[1])
+
+    def test_transitive_closure_mismatch_between_graph_and_markdown_is_flagged(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Graph edge: WF-2000 -> WF-1000 (direct only)
+            # Markdown: WF-2000 -> WF-1000 -> WF-0500 (transitive chain differs)
+            _build_control_plane_with_workflows(
+                root,
+                workflows=[
+                    {
+                        "workflow_id": "WF-0500",
+                        "display_name": "Deep upstream",
+                        "effective_status": "active",
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                    {
+                        "workflow_id": "WF-1000",
+                        "display_name": "Upstream",
+                        "effective_status": "active",
+                        "depends_on": ["WF-0500"],
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                    {
+                        "workflow_id": "WF-2000",
+                        "display_name": "Dependent",
+                        "effective_status": "active",
+                        "depends_on": ["WF-1000"],
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                ],
+                aliases={},
+            )
+
+            # Now add an extra graph edge that is NOT declared in markdown,
+            # so the transitive closure differs.
+            from canonical.db import CanonicalDB
+            with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                db.add_relationship(
+                    "workflows", "WF-2000", "depends_on", "workflows", "WF-0500"
+                )
+
+            result = workflow_router.route_workflows(
+                selector="WF-2000",
+                answer="summary",
+                validate=True,
+                write_index=True,
+                write_capsules=False,
+                index_path=root / "tmp" / "workflow-routing-index.json",
+                project_root=root,
+                state_dir=root / "state",
+            )
+
+            blockers = result["workflow"]["graph_dependency_blockers"]
+            # Graph has WF-2000 -> WF-0500 directly, but markdown only has WF-2000 -> WF-1000 -> WF-0500.
+            # The graph closure includes WF-0500 in a way that doesn't match markdown's transitive set.
+            self.assertTrue(
+                any("Graph transitive closure" in item for item in blockers)
+                or any("in the graph but not declared" in item for item in blockers)
+            )
+
+    def test_graph_dependency_failure_triggers_markdown_fallback_with_warning(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane_with_workflows(
+                root,
+                workflows=[
+                    {
+                        "workflow_id": "WF-1000",
+                        "display_name": "Upstream",
+                        "effective_status": "active",
+                        "owner_action_required": False,
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                    {
+                        "workflow_id": "WF-2000",
+                        "display_name": "Dependent",
+                        "effective_status": "active",
+                        "depends_on": ["WF-1000"],
+                        "owner_action_required": False,
+                        "proof_artifact": "continuity/WF-2000.md",
+                        "blockers": [],
+                        "stop_lines": [],
+                    },
+                ],
+                aliases={},
+            )
+
+            (root / "continuity").mkdir(parents=True, exist_ok=True)
+            (root / "continuity" / "WF-2000.md").write_text("# continuity\n", encoding="utf-8")
+
+            import warnings
+            # Replace CanonicalDB at module level so the capsule builder gets a
+            # connection that fails immediately — reproducing a broken-DB scenario
+            # without leaving a corrupt file behind.
+            fake_db_path = root / "canonical" / "efficiens.db"
+            from canonical import db as canonical_db_module
+            original_init = canonical_db_module.CanonicalDB.__init__
+
+            def broken_init(self, path, *args, **kwargs):
+                if str(Path(path).resolve()) == str(fake_db_path.resolve()):
+                    # Trigger the capsule builder's except-Exception path gracefully.
+                    raise sqlite3.OperationalError("simulated graph-primary failure")
+                original_init(self, path, *args, **kwargs)
+
+            import sqlite3
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                canonical_db_module.CanonicalDB.__init__ = broken_init
+                try:
+                    result = workflow_router.route_workflows(
+                        selector="WF-2000",
+                        answer="summary",
+                        validate=True,
+                        write_index=True,
+                        write_capsules=False,
+                        index_path=root / "tmp" / "workflow-routing-index.json",
+                        project_root=root,
+                        state_dir=root / "state",
+                    )
+                finally:
+                    canonical_db_module.CanonicalDB.__init__ = original_init
+
+            graph_warnings = [
+                w for w in caught
+                if "Graph-primary dependency analysis failed" in str(w.message)
+            ]
+            self.assertTrue(len(graph_warnings) >= 1, "Expected a RuntimeWarning about graph failure")
+            # Falls back to markdown: depends_on should still be resolved.
+            self.assertEqual(result["workflow"]["depends_on"], ["WF-1000"])
+            # WF-1000 is active with no blockers, so WF-2000 stays active under markdown fallback.
+            self.assertEqual(result["workflow"]["effective_status"], "active")
+
     def test_dependency_graph_change_triggers_stale_validation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -574,6 +849,83 @@ class WorkflowRouterTests(unittest.TestCase):
                     index_path=index_path,
                     lane_register_path=register_path,
                 )
+
+
+    def test_skip_recall_context_bypasses_routing_cache(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane_with_workflows(
+                root,
+                workflows=[
+                    {
+                        "workflow_id": "WF-2000",
+                        "display_name": "Recall Context Test",
+                        "tier": "P1",
+                        "priority": "high",
+                        "lifecycle": "active",
+                        "readiness": "active",
+                        "effective_status": "active",
+                        "state_description": "Testing recall context isolation",
+                        "next_action": "Run smoke.",
+                        "authoritative_next_action": "Run smoke with review.",
+                        "helper_safe": True,
+                        "owner_action_required": False,
+                        "proof_artifact": "continuity/WF-2000.md",
+                        "freshness_sla": "daily",
+                        "blockers": [],
+                        "stop_lines": [],
+                    }
+                ],
+                aliases={},
+            )
+            # Create an empty vector index so the normal path attempts recall and reports why it failed.
+            vector_path = root / "tmp" / "vector-memory.sqlite"
+            vector_path.parent.mkdir(parents=True, exist_ok=True)
+            vector_path.write_bytes(b"")
+
+            # Build the index first so validation doesn't short-circuit on missing index.
+            workflow_router.build_routing_index(
+                state_dir=root / "state",
+                project_root=root,
+                index_path=root / "state" / "WORKFLOW_ROUTING_INDEX.json",
+                routing_database_path=root / "canonical" / "efficiens.db",
+                vector_index_path=vector_path,
+            )
+
+            # Normal call: should produce recall_context payload.
+            normal = workflow_router.route_workflows(
+                "WF-2000",
+                state_dir=root / "state",
+                project_root=root,
+                index_path=root / "state" / "WORKFLOW_ROUTING_INDEX.json",
+                answer="summary",
+                validate=False,
+                write_index=False,
+                routing_cache_ttl_seconds=0,
+                routing_database_path=root / "canonical" / "efficiens.db",
+                vector_index_path=vector_path,
+            )["workflow"]
+
+            # Skip-recall call: must return available=False.
+            skipped = workflow_router.route_workflows(
+                "WF-2000",
+                state_dir=root / "state",
+                project_root=root,
+                index_path=root / "state" / "WORKFLOW_ROUTING_INDEX.json",
+                answer="summary",
+                validate=False,
+                write_index=False,
+                routing_cache_ttl_seconds=0,
+                routing_database_path=root / "canonical" / "efficiens.db",
+                vector_index_path=None,
+            )["workflow"]
+
+            self.assertTrue(normal["recall_context"].get("available") or normal["recall_context"].get("reason"))
+            self.assertFalse(skipped["recall_context"].get("available", True))
+            self.assertEqual(
+                skipped["recall_context"].get("reason"),
+                "recall context disabled",
+            )
 
 
 if __name__ == "__main__":
