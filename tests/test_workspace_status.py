@@ -13,6 +13,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from canonical.db import CanonicalDB
+from scripts import workspace_status
+from scripts.workspace_fingerprint import correctness_snapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +33,51 @@ def _gate_env(gate_scripts: dict[str, str]) -> str:
 
 
 class WorkspaceStatusTests(unittest.TestCase):
+    def test_default_routing_gate_requires_freshness_validation(self) -> None:
+        routing = next(gate for gate in workspace_status.DEFAULT_GATES if gate[0] == "routing")
+        self.assertIn("--validate", routing[1])
+        self.assertIn("--no-cache", routing[1])
+        self.assertIn("--skip-recall-context", routing[1])
+
+    def test_default_archive_gate_is_check_only(self) -> None:
+        archive = next(
+            gate for gate in workspace_status.DEFAULT_GATES if gate[0] == "archive_stale"
+        )
+        self.assertIn("--check-only", archive[1])
+
+    def test_gate_runner_executes_gates_serially_in_declared_order(self) -> None:
+        calls = []
+        def fake_run(label, args, timeout, project_root):
+            calls.append(label)
+            return {"label": label, "exit": 0, "elapsed_ms": 1}
+
+        gates = [
+            ("first", ["scripts/first.py"], 30),
+            ("second", ["scripts/second.py"], 30),
+        ]
+        with patch.object(workspace_status, "_run", side_effect=fake_run):
+            result = workspace_status._run_gates(gates, project_root=PROJECT_ROOT)
+
+        self.assertEqual(list(result), ["first", "second"])
+        self.assertEqual(calls, ["first", "second"])
+
+    def test_direct_script_entrypoint_resolves_project_imports(self) -> None:
+        env = os.environ.copy()
+        env["WORKSPACE_STATUS_GATES"] = "[]"
+
+        completed = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "scripts" / "workspace_status.py")],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+
+        self.assertNotIn("ModuleNotFoundError", completed.stderr)
+        self.assertTrue(completed.stdout.strip(), completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["schema"], "workspace-status.v1")
+
     def _run_workspace_status(self, project_root: Path, gate_scripts: dict[str, str]) -> tuple[int, dict]:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(PROJECT_ROOT)
@@ -100,7 +150,7 @@ class WorkspaceStatusTests(unittest.TestCase):
 
         return root
 
-    def test_healthy_project_returns_healthy(self) -> None:
+    def test_missing_correctness_evidence_returns_warning(self) -> None:
         gate_scripts = {
             "routing": 'import json,sys\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
             "wiki": 'import json,sys\nprint(json.dumps({"status": "fresh"}))',
@@ -110,14 +160,17 @@ class WorkspaceStatusTests(unittest.TestCase):
             "graph_integrity": 'import json\nprint(json.dumps({"status": "ok", "count": 0, "issues": []}))',
             "graph_freshness": 'import sys\nprint("OK", file=sys.stderr)',
             "vector_memory": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True, "issues": []}))',
             "archive_stale": 'import sys\nprint("OK", file=sys.stderr)',
         }
         root = self._make_minimal_project(gate_scripts)
         code, brief = self._run_workspace_status(root, gate_scripts)
         self.assertEqual(code, 0, brief)
-        self.assertEqual(brief["health"]["status"], "healthy")
+        self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
         self.assertEqual(brief["health"]["hard_failures"], [])
-        self.assertEqual(brief["health"]["warnings"], [])
+        self.assertIn("correctness_unavailable", brief["health"]["warnings"])
+        self.assertIn("cron_test_gate.py", brief["recommended_next_action"])
         self.assertEqual(brief["schema"], "workspace-status.v1")
 
     def test_routing_failure_returns_degraded(self) -> None:
@@ -130,6 +183,8 @@ class WorkspaceStatusTests(unittest.TestCase):
             "graph_integrity": 'import json\nprint(json.dumps({"status": "ok", "count": 0, "issues": []}))',
             "graph_freshness": 'import sys\nprint("OK", file=sys.stderr)',
             "vector_memory": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True, "issues": []}))',
             "archive_stale": 'import sys\nprint("OK", file=sys.stderr)',
         }
         root = self._make_minimal_project(gate_scripts)
@@ -148,6 +203,8 @@ class WorkspaceStatusTests(unittest.TestCase):
             "graph_integrity": 'import json\nprint(json.dumps({"status": "ok", "count": 0, "issues": []}))',
             "graph_freshness": 'import sys\nprint("OK", file=sys.stderr)',
             "vector_memory": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True, "issues": []}))',
             "archive_stale": 'import sys\nprint("OK", file=sys.stderr)',
         }
         root = self._make_minimal_project(gate_scripts)
@@ -166,6 +223,8 @@ class WorkspaceStatusTests(unittest.TestCase):
             "graph_integrity": 'import json\nprint(json.dumps({"status": "ok", "count": 0, "issues": []}))',
             "graph_freshness": 'import sys\nprint("OK", file=sys.stderr)',
             "vector_memory": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "document_count": 5, "status": "ok"}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True, "issues": []}))',
             "archive_stale": 'import sys\nprint("OK", file=sys.stderr)',
         }
         root = self._make_minimal_project(gate_scripts)
@@ -173,6 +232,267 @@ class WorkspaceStatusTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
         self.assertIn("claim_drift", brief["health"]["warnings"])
+
+    def test_organization_failure_returns_degraded(self) -> None:
+        gate_scripts = {
+            "routing": 'import json\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
+            "wiki": 'import json\nprint(json.dumps({"status": "fresh"}))',
+            "alias": 'print("OK")',
+            "cron_registration": 'print("OK")',
+            "claim_drift": 'print("OK")',
+            "graph_integrity": 'import json\nprint(json.dumps({"status": "ok"}))',
+            "graph_freshness": 'print("OK")',
+            "vector_memory": 'import json\nprint(json.dumps({"available": True, "stale_source_count": 0}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "stale_source_count": 0}))',
+            "organization": 'import sys\nsys.exit(1)',
+            "archive_stale": 'print("OK")',
+        }
+        root = self._make_minimal_project(gate_scripts)
+
+        code, brief = self._run_workspace_status(root, gate_scripts)
+
+        self.assertEqual(code, 1)
+        self.assertIn("organization", brief["health"]["hard_failures"])
+
+    def test_graphify_stale_returns_warning_not_failure(self) -> None:
+        gate_scripts = {
+            "routing": 'import json\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
+            "wiki": 'import json\nprint(json.dumps({"status": "fresh"}))',
+            "alias": 'print("OK")',
+            "cron_registration": 'print("OK")',
+            "claim_drift": 'print("OK")',
+            "graph_integrity": 'import json\nprint(json.dumps({"status": "ok"}))',
+            "graph_freshness": 'print("OK")',
+            "graphify_freshness": 'import json,sys\nprint(json.dumps({"status": "stale"})); sys.exit(1)',
+            "vector_memory": 'import json\nprint(json.dumps({"available": True, "stale_source_count": 0}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True, "stale_source_count": 0}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True, "issues": []}))',
+            "archive_stale": 'print("OK")',
+        }
+        root = self._make_minimal_project(gate_scripts)
+
+        code, brief = self._run_workspace_status(root, gate_scripts)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
+        self.assertIn("graphify_stale", brief["health"]["warnings"])
+
+    def test_current_correctness_run_is_surfaced(self) -> None:
+        gate_scripts = {
+            "routing": 'import json\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
+            "wiki": 'import json\nprint(json.dumps({"status": "fresh"}))',
+            "alias": 'print("OK")',
+            "cron_registration": 'print("OK")',
+            "claim_drift": 'print("OK")',
+            "graph_integrity": 'import json\nprint(json.dumps({"status": "ok"}))',
+            "graph_freshness": 'print("OK")',
+            "vector_memory": 'import json\nprint(json.dumps({"available": True}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True}))',
+            "archive_stale": 'print("OK")',
+        }
+        root = self._make_minimal_project(gate_scripts)
+        snapshot = correctness_snapshot(root)
+        with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+            db.record_run(
+                request_type="run_checks",
+                route_selected="deterministic",
+                duration_ms=1234,
+                resource_usage_json={
+                    "test_count": 176,
+                    "test_failure_count": 0,
+                    **snapshot,
+                },
+                verification_result="pass",
+                final_outcome="accepted",
+                acceptance_status="accepted",
+                started_at="2026-08-20T04:00:00Z",
+                completed_at="2026-08-20T04:00:02Z",
+            )
+
+        code, brief = self._run_workspace_status(root, gate_scripts)
+
+        self.assertEqual(code, 0, brief)
+        self.assertEqual(brief["correctness"]["status"], "current")
+        self.assertEqual(brief["correctness"]["test_count"], 176)
+        self.assertEqual(brief["correctness"]["completed_at"], "2026-08-20T04:00:02Z")
+        self.assertFalse(brief["correctness"]["stale"])
+        self.assertEqual(brief["health"]["status"], "healthy")
+
+    def test_non_object_correctness_telemetry_returns_unavailable_warning(self) -> None:
+        gate_scripts = {
+            "routing": 'import json\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
+            "wiki": 'import json\nprint(json.dumps({"status": "fresh"}))',
+            "alias": 'print("OK")',
+            "cron_registration": 'print("OK")',
+            "claim_drift": 'print("OK")',
+            "graph_integrity": 'import json\nprint(json.dumps({"status": "ok"}))',
+            "graph_freshness": 'print("OK")',
+            "vector_memory": 'import json\nprint(json.dumps({"available": True}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True}))',
+            "archive_stale": 'print("OK")',
+        }
+        root = self._make_minimal_project(gate_scripts)
+        with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+            db.record_run(
+                request_type="run_checks",
+                route_selected="deterministic",
+                resource_usage_json=[],
+                verification_result="pass",
+                final_outcome="accepted",
+                acceptance_status="accepted",
+                started_at="2026-08-20T04:00:00Z",
+                completed_at="2026-08-20T04:00:02Z",
+            )
+
+        code, brief = self._run_workspace_status(root, gate_scripts)
+
+        self.assertEqual(code, 0, brief)
+        self.assertEqual(brief["correctness"]["status"], "unavailable")
+        self.assertIn("correctness_unavailable", brief["health"]["warnings"])
+
+    def test_incomplete_correctness_telemetry_returns_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            snapshot = correctness_snapshot(root)
+            with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                db.record_run(
+                    request_type="run_checks",
+                    route_selected="deterministic",
+                    resource_usage_json={
+                        "source_fingerprint": snapshot["source_fingerprint"],
+                    },
+                    verification_result="pass",
+                    final_outcome="accepted",
+                    acceptance_status="accepted",
+                    completed_at="2026-08-20T04:00:02Z",
+                )
+
+            status = workspace_status._correctness_status(root)
+
+        self.assertEqual(status["status"], "unavailable")
+        self.assertEqual(status["reason"], "correctness_telemetry_incomplete")
+
+    def test_inconsistent_accepted_correctness_telemetry_is_not_current(self) -> None:
+        invalid_overrides = [
+            {"test_count": 0},
+            {"test_failure_count": 1},
+            {"source_file_count": 999},
+        ]
+        for overrides in invalid_overrides:
+            with self.subTest(overrides=overrides), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "canonical").mkdir()
+                (root / "scripts").mkdir()
+                (root / "scripts" / "example.py").write_text(
+                    "VALUE = 1\n",
+                    encoding="utf-8",
+                )
+                snapshot = correctness_snapshot(root)
+                resource = {
+                    "source_fingerprint": snapshot["source_fingerprint"],
+                    "test_count": 1,
+                    "test_failure_count": 0,
+                    "source_file_count": snapshot["source_file_count"],
+                    "tested_commit": snapshot["tested_commit"],
+                    **overrides,
+                }
+                with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                    db.record_run(
+                        request_type="run_checks",
+                        route_selected="deterministic",
+                        resource_usage_json=resource,
+                        verification_result="pass",
+                        final_outcome="accepted",
+                        acceptance_status="accepted",
+                        completed_at="2026-08-20T04:00:02Z",
+                    )
+
+                status = workspace_status._correctness_status(root)
+
+            self.assertEqual(status["status"], "unavailable")
+            self.assertEqual(status["reason"], "correctness_telemetry_inconsistent")
+
+    def test_fingerprint_error_returns_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                db.record_run(
+                    request_type="run_checks",
+                    route_selected="deterministic",
+                    resource_usage_json={
+                        "source_fingerprint": "0" * 64,
+                        "test_count": 1,
+                        "test_failure_count": 0,
+                        "source_file_count": 0,
+                        "tested_commit": None,
+                    },
+                    verification_result="pass",
+                    final_outcome="accepted",
+                    acceptance_status="accepted",
+                    completed_at="2026-08-20T04:00:02Z",
+                )
+            with patch.object(
+                workspace_status,
+                "correctness_snapshot",
+                side_effect=OSError("locked source"),
+            ):
+                status = workspace_status._correctness_status(root)
+
+        self.assertEqual(status["status"], "unavailable")
+        self.assertIn("fingerprint", status["reason"])
+
+    def test_source_change_marks_correctness_stale_and_warns(self) -> None:
+        gate_scripts = {
+            "routing": 'import json\nprint(json.dumps({"workflows": [], "routing_index_stale": False, "unsafe_to_trust": False}))',
+            "wiki": 'import json\nprint(json.dumps({"status": "fresh"}))',
+            "alias": 'print("OK")',
+            "cron_registration": 'print("OK")',
+            "claim_drift": 'print("OK")',
+            "graph_integrity": 'import json\nprint(json.dumps({"status": "ok"}))',
+            "graph_freshness": 'print("OK")',
+            "vector_memory": 'import json\nprint(json.dumps({"available": True}))',
+            "workspace_index": 'import json\nprint(json.dumps({"available": True}))',
+            "organization": 'import json\nprint(json.dumps({"ok": True}))',
+            "archive_stale": 'print("OK")',
+        }
+        root = self._make_minimal_project(gate_scripts)
+        snapshot = correctness_snapshot(root)
+        with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+            db.record_run(
+                request_type="run_checks",
+                route_selected="deterministic",
+                resource_usage_json={
+                    "test_count": 176,
+                    "test_failure_count": 0,
+                    **snapshot,
+                },
+                verification_result="pass",
+                final_outcome="accepted",
+                acceptance_status="accepted",
+                started_at="2026-08-20T04:00:00Z",
+                completed_at="2026-08-20T04:00:02Z",
+            )
+        routing_script = root / "scripts" / "routing.py"
+        routing_script.write_text(
+            routing_script.read_text(encoding="utf-8") + "\n# changed after tests\n",
+            encoding="utf-8",
+        )
+
+        code, brief = self._run_workspace_status(root, gate_scripts)
+
+        self.assertEqual(code, 0, brief)
+        self.assertEqual(brief["correctness"]["status"], "stale")
+        self.assertTrue(brief["correctness"]["stale"])
+        self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
+        self.assertIn("correctness_stale", brief["health"]["warnings"])
+        self.assertIn(
+            "python scripts/cron_test_gate.py",
+            brief["recommended_next_action"],
+        )
 
 
 if __name__ == "__main__":

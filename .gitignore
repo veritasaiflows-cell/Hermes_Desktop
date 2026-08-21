@@ -30,7 +30,9 @@ telemetry/runtime/
 __pycache__/
 *.pyc
 
-tmp/
+# Scratch workspace: keep only its retention contract in version control.
+tmp/*
+!tmp/README.md
 
 # Windows null-device artifact from bad redirections
 nul

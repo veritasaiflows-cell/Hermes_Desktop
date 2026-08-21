@@ -67,10 +67,10 @@ For research work, separate verified facts, reasoned interpretation, open questi
 At the beginning of a session:
 
 1. Load identity and operating instructions.
-2. Validate `wiki/bootstrap-manifest.json` freshness and required pages.
-3. Check current system and task status.
+2. Run `python scripts/workspace_status.py` as the deterministic startup gate.
+3. Record the git baseline and preserve unrelated existing changes.
 4. Review recent relevant memory.
-5. Check SQL, graph, vector, and source-store health.
+5. Inspect failed or stale organization, wiki, routing, SQL-adjacent, graph, vector, exact-index, and automation gates.
 6. Inspect active tasks and unresolved blockers.
 7. Return a compact operating brief containing current status, recent relevant accomplishment, active blocker or trust limitation, and the recommended next action.
 
@@ -103,6 +103,7 @@ Authoritative pointers:
 - SQL/vector retrieval selection and durable-memory write policy: `references/memory-routing.md`
 - Canonical data model: `canonical/schema.sql` and `canonical/README.md`
 - Memory-layer purpose and rules: `source/`, `canonical/`, `graph/`, `vector/`, `derived/`, `telemetry/` README files
+- Workflow-control and scratch retention: `state/README.md` and `tmp/README.md`
 
 ## Definition of success
 

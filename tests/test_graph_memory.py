@@ -149,12 +149,14 @@ class GraphMemoryAdapterTests(unittest.TestCase):
         entity_id = self.db.insert("entities", {"entity_type": "project", "name": "x"})
         task_id = self.db.insert("tasks", {"title": "t"})
         self.db.add_relationship("entities", entity_id, "owns", "tasks", task_id)
+        self.db.close()
         rc, _ = self._run(["validate"])
         self.assertEqual(rc, 0)
 
     def test_validate_detects_orphan_subject(self):
         task_id = self.db.insert("tasks", {"title": "t"})
         self.db.add_relationship("entities", "missing-entity", "owns", "tasks", task_id)
+        self.db.close()
         rc, _ = self._run(["validate"])
         self.assertEqual(rc, 1)
 

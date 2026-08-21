@@ -20,6 +20,39 @@ def _schema_path():
 
 
 class CanonicalDBTests(unittest.TestCase):
+    def test_read_only_connection_does_not_create_missing_database(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "missing" / "efficiens.db"
+
+            with self.assertRaises(FileNotFoundError):
+                CanonicalDB(database, read_only=True)
+
+            self.assertFalse(database.exists())
+
+    def test_read_only_connection_reads_but_rejects_writes(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "efficiens.db"
+            with CanonicalDB(database) as db:
+                db.insert("entities", {"entity_type": "project", "name": "alpha"})
+            artifacts = [database, Path(f"{database}-wal"), Path(f"{database}-shm")]
+            before = {
+                path.name: path.read_bytes()
+                for path in artifacts
+                if path.exists()
+            }
+
+            with CanonicalDB(database, read_only=True) as db:
+                self.assertIn("entities", db.tables())
+                with self.assertRaises(sqlite3.OperationalError):
+                    db.insert("entities", {"entity_type": "project", "name": "blocked"})
+
+            after = {
+                path.name: path.read_bytes()
+                for path in artifacts
+                if path.exists()
+            }
+            self.assertEqual(after, before)
+
     def _make_db(self):
         directory = TemporaryDirectory(ignore_cleanup_errors=True)
         db = CanonicalDB(Path(directory.name) / "test.db", schema_path=_schema_path())

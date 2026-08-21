@@ -3,10 +3,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+import scripts.workspace_index as workspace_index
 from scripts.workspace_index import SourceSpec, build_index, search_index
 
 
 class WorkspaceIndexTests(unittest.TestCase):
+    def test_default_index_is_stored_in_the_vector_layer(self):
+        self.assertEqual(
+            workspace_index.DEFAULT_INDEX_PATH,
+            workspace_index.WORKSPACE_ROOT / "vector" / "indexes" / "workspace-index.sqlite",
+        )
+
     def test_build_and_full_text_search_return_source_grounded_citation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "approved"
@@ -165,6 +172,31 @@ class WorkspaceIndexTests(unittest.TestCase):
             self.assertEqual(len(stale), 1)
             self.assertEqual(stale[0].freshness_state, "stale")
             self.assertIn("source hash changed", stale[0].warnings)
+
+    def test_status_cli_exits_nonzero_for_stale_sources(self):
+        with TemporaryDirectory() as directory:
+            document = Path(directory) / "note.md"
+            document.write_text("original retrieval policy", encoding="utf-8")
+            index_path = Path(directory) / "workspace-index.sqlite"
+            build_index(index_path, [SourceSpec(document)])
+            document.write_text("changed retrieval policy", encoding="utf-8")
+
+            completed = __import__("subprocess").run(
+                [
+                    "python",
+                    "scripts/workspace_index.py",
+                    "status",
+                    "--index",
+                    str(index_path),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertEqual(json.loads(completed.stdout)["status"], "degraded")
 
     def test_cli_query_emits_machine_readable_retrieval_packet(self):
         with TemporaryDirectory() as directory:

@@ -221,6 +221,31 @@ Classify every new instruction before storing it:
 
 Store the instruction in the narrowest correct layer.
 
+## Workspace placement map
+
+This section is the authoritative owner for persistent workspace placement and
+retention. Layer READMEs may add local detail but must not contradict this map.
+
+| Surface | Purpose and authority | Retention rule |
+|---|---|---|
+| `source/` | Preserved original evidence and approved inputs | Preserve originals; do not replace them with summaries |
+| `canonical/` | Authoritative structured state and schema | Durable; migrations and writes require validation and provenance |
+| `graph/` | Relationship-layer contract and adapters; durable edges remain canonical records | Rebuild derived views, preserve asserted edge provenance |
+| `vector/indexes/` | Rebuildable semantic and exact full-text retrieval indexes | Durable local cache, ignored by git, refresh when source hashes drift |
+| `derived/` | Generated reports, rankings, packets, dashboards, and caches | Rebuildable unless explicitly promoted with provenance |
+| `telemetry/` | Run measurements, verification outcomes, corrections, and errors | Retain according to the telemetry contract; metadata only by default |
+| `state/` | Authoritative workflow control plane plus generated routing surfaces | Preserve authoritative queue/override/lane state; refresh generated surfaces only through owner scripts |
+| `continuity/` | Human-readable resume context for major workflows | Durable while the workflow is active or historically relevant |
+| `references/` | Authoritative detailed contracts and technical guidance | Version-controlled; one authoritative owner per contract |
+| `wiki/` | Generated navigational and synthesis views | Rebuild from declared sources; manifest freshness is mandatory |
+| `scripts/` and `tests/` | Executable behavior and its verification | Version-controlled; behavior changes require tests |
+| `tmp/` | Disposable per-run scratch and query packets | Delete after use or promote to the correct governed layer; never store live indexes or authoritative state |
+
+Every persistent artifact must have an identifiable authority owner, governing
+README or contract, retention rule, and verification path. A file being ignored
+by git does not make it temporary; authority and rebuildability determine its
+layer.
+
 ## Final principle
 
 Keep the bootstrap small enough to load quickly and understand immediately.

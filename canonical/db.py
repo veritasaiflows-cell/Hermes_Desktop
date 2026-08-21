@@ -25,6 +25,19 @@ class DatabaseIntegrityError(sqlite3.DatabaseError):
     """Raised when SQLite integrity_check does not return ``ok``."""
 
 
+def read_only_database_uri(database_path: str | Path) -> str:
+    """Return an immutable SQLite URI, failing closed on uncheckpointed WAL data."""
+    path = Path(database_path)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    wal_path = Path(f"{path}-wal")
+    if wal_path.is_file() and wal_path.stat().st_size > 0:
+        raise DatabaseIntegrityError(
+            f"Cannot open immutable read while WAL contains pending data: {wal_path}"
+        )
+    return f"file:{path.resolve().as_posix()}?mode=ro&immutable=1"
+
+
 class CanonicalDB:
     """Access the canonical database without silent overwrites.
 
@@ -37,17 +50,26 @@ class CanonicalDB:
         database_path: str | Path = DEFAULT_DATABASE_PATH,
         *,
         schema_path: str | Path = DEFAULT_SCHEMA_PATH,
+        read_only: bool = False,
     ) -> None:
         self.database_path = Path(database_path)
         self.schema_path = Path(schema_path)
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.database_path)
+        self.read_only = read_only
+        if read_only:
+            uri = read_only_database_uri(self.database_path)
+            self.connection = sqlite3.connect(uri, uri=True)
+        else:
+            self.database_path.parent.mkdir(parents=True, exist_ok=True)
+            self.connection = sqlite3.connect(self.database_path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA busy_timeout = 5000")
-        self.connection.execute("PRAGMA journal_mode = WAL")
-        self.connection.executescript(self.schema_path.read_text(encoding="utf-8"))
-        self.connection.commit()
+        if read_only:
+            self.connection.execute("PRAGMA query_only = ON")
+        else:
+            self.connection.execute("PRAGMA journal_mode = WAL")
+            self.connection.executescript(self.schema_path.read_text(encoding="utf-8"))
+            self.connection.commit()
         self._transaction_depth = 0
         self.integrity_checks_run = 0
         self.integrity_check()

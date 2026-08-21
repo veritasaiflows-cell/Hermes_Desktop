@@ -19,7 +19,9 @@ import argparse
 import hashlib
 import json
 import re
+import sqlite3
 import warnings
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,15 +32,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from canonical.db import CanonicalDB
+from canonical.db import CanonicalDB, read_only_database_uri
 
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
-DEFAULT_TMP_DIR = PROJECT_ROOT / "tmp"
 DEFAULT_INDEX_PATH = STATE_INDEX_PATH = DEFAULT_STATE_DIR / "workflow-routing-index.json"
 DEFAULT_CAPSULE_DIR = DEFAULT_STATE_DIR / "workflows"
 DEFAULT_ROUTING_CACHE_TTL_SECONDS = 300
 DEFAULT_ROUTING_DATABASE = PROJECT_ROOT / "canonical" / "efficiens.db"
-VECTOR_INDEX_PATH = PROJECT_ROOT / "tmp" / "vector-memory.sqlite"
+VECTOR_INDEX_PATH = PROJECT_ROOT / "vector" / "indexes" / "vector-memory.sqlite"
 ACTIVE_WORKFLOW_SOURCES = [
     DEFAULT_STATE_DIR / "ACTIVE_WORKFLOWS.md",
     DEFAULT_STATE_DIR / "active_workflows.json",
@@ -53,7 +54,9 @@ CONTINUITY_DIR = PROJECT_ROOT / "continuity"
 
 ROUTER_SCHEMA = "workflow-routing-index.v1"
 CAPSULE_SCHEMA = "workflow_capsule.v1"
-ROUTER_REFRESH_COMMAND = "python scripts/workflow_router.py --write-index --answer summary"
+ROUTER_REFRESH_COMMAND = (
+    "python scripts/workflow_router.py --all --answer summary --validate --write-index"
+)
 
 
 @dataclass(frozen=True)
@@ -586,7 +589,7 @@ def _build_capsule(
 
     if routing_database_path.exists():
         try:
-            with CanonicalDB(routing_database_path) as db:
+            with CanonicalDB(routing_database_path, read_only=True) as db:
                 (
                     dependency_blockers,
                     dependency_chain,
@@ -1157,22 +1160,27 @@ def _dependency_graph_from_database(
     if not routing_database_path.exists():
         return _dependency_graph(entries)
     try:
-        with CanonicalDB(routing_database_path) as db:
-            edges = db.list_relationships(
-                subject_type="workflows",
-                predicate="depends_on",
-                object_type="workflows",
-                status="active",
-            )
-            graph: dict[str, set[str]] = {wid: set() for wid in entries}
-            for edge in edges:
-                subject = edge["subject_id"]
-                if subject in graph:
-                    graph[subject].add(edge["object_id"])
-            return {
-                workflow_id: sorted(deps)
-                for workflow_id, deps in sorted(graph.items())
-            }
+        uri = read_only_database_uri(routing_database_path)
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            edges = connection.execute(
+                "SELECT subject_id, object_id FROM relationships "
+                "WHERE subject_type = 'workflows' "
+                "AND predicate = 'depends_on' "
+                "AND object_type = 'workflows' "
+                "AND status = 'active' "
+                "AND (valid_until IS NULL OR valid_until >= ?)",
+                (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),),
+            ).fetchall()
+        graph: dict[str, set[str]] = {wid: set() for wid in entries}
+        for edge in edges:
+            subject = edge["subject_id"]
+            if subject in graph:
+                graph[subject].add(edge["object_id"])
+        return {
+            workflow_id: sorted(deps)
+            for workflow_id, deps in sorted(graph.items())
+        }
     except Exception as exc:
         warnings.warn(
             f"Graph DB dependency lookup failed ({routing_database_path}): {exc}. "
@@ -1240,6 +1248,38 @@ def _answer_payload(capsule: dict[str, Any], answer: str) -> dict[str, Any]:
     return dict(capsule)
 
 
+def _authoritative_workflow_payload(
+    entry: dict[str, Any],
+    override: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return queue/override truth without relying on derived routing surfaces."""
+    effective_status, blockers, stop_lines, control_override = _apply_override(entry, override)
+    next_action = entry.get("next_action") or entry.get("authoritative_next_action")
+    if override and override.get("replacement_next_action"):
+        next_action = override["replacement_next_action"]
+    return {
+        "workflow_id": _normalize_workflow_id(entry["workflow_id"]),
+        "display_name": entry.get("display_name"),
+        "lifecycle": entry.get("lifecycle"),
+        "readiness": entry.get("readiness"),
+        "effective_status": effective_status,
+        "priority": entry.get("priority"),
+        "primary_owner_lane": entry.get("primary_owner_lane", "agent-main"),
+        "authority_class": entry.get("authority_class", "route_only"),
+        "helper_safe": bool(entry.get("helper_safe", False)),
+        "owner_action_required": bool(entry.get("owner_action_required", False)),
+        "current_state": entry.get("state_description") or entry.get("current_state"),
+        "next_action": next_action,
+        "blocker_count": len(blockers),
+        "blockers": blockers,
+        "stop_lines": stop_lines,
+        "control_override": control_override,
+        "proof_artifact": entry.get("proof_artifact"),
+        "implementation_script": entry.get("implementation_script"),
+        "commands": entry.get("commands"),
+    }
+
+
 def route_workflows(
     selector: str | None = None,
     *,
@@ -1268,6 +1308,15 @@ def route_workflows(
     entries, active_source_meta = _load_active_workflow_entries(state_dir=state_dir)
     aliases, alias_source_meta = _load_alias_index(state_dir=state_dir)
     overrides, override_source_meta = _load_overrides(state_dir=state_dir)
+
+    if selector is not None:
+        workflow_id = _resolve_selector(selector, entries, aliases)
+        workflow_ids = [workflow_id]
+    else:
+        workflow_ids = sorted(entries)
+
+    if not workflow_ids:
+        raise KeyError("No workflows are currently in the active queue")
 
     cache_key: str | None = None
     cached_result: dict[str, Any] | None = None
@@ -1312,6 +1361,14 @@ def route_workflows(
         return cached_result
 
     index_payload: dict[str, Any] | None = None
+    if write_index:
+        index_payload = build_routing_index(
+            project_root=project_root,
+            state_dir=state_dir,
+            index_path=index_path,
+            routing_database_path=routing_database_path,
+            vector_index_path=vector_index_path,
+        )
     if validate:
         stale, stale_payload = check_routing_freshness(
             state_dir=state_dir,
@@ -1321,36 +1378,23 @@ def route_workflows(
             vector_index_path=vector_index_path,
         )
         if stale:
-            if write_index:
-                index_payload = build_routing_index(
-                    project_root=project_root,
-                    state_dir=state_dir,
-                    index_path=index_path,
-                    routing_database_path=routing_database_path,
-                    vector_index_path=vector_index_path,
+            stale_payload.setdefault("routing_index_schema", ROUTER_SCHEMA)
+            stale_payload.setdefault(
+                "routing_freshness",
+                {
+                    "status": "stale",
+                    "required_refresh_command": ROUTER_REFRESH_COMMAND,
+                },
+            )
+            stale_payload["requested_selector"] = selector or "--all"
+            if selector is not None:
+                stale_payload["authoritative_workflow"] = _authoritative_workflow_payload(
+                    entries[workflow_ids[0]],
+                    overrides.get(workflow_ids[0]),
                 )
-            else:
-                stale_payload.setdefault("routing_index_schema", ROUTER_SCHEMA)
-                stale_payload.setdefault(
-                    "routing_freshness",
-                    {
-                        "status": "stale",
-                        "required_refresh_command": ROUTER_REFRESH_COMMAND,
-                    },
-                )
-                stale_payload["requested_selector"] = selector or "--all"
-                return stale_payload
+            return stale_payload
         else:
             index_payload = stale_payload
-
-    if selector is not None:
-        workflow_id = _resolve_selector(selector, entries, aliases)
-        workflow_ids = [workflow_id]
-    else:
-        workflow_ids = sorted(entries)
-
-    if not workflow_ids:
-        raise KeyError("No workflows are currently in the active queue")
 
     payloads: list[dict[str, Any]] = []
     active_source_path = Path(active_source_meta["source"])
@@ -1426,6 +1470,10 @@ def route_workflows(
 
     if len(payloads) == 1:
         result["workflow"] = payloads[0]
+        result["authoritative_workflow"] = _authoritative_workflow_payload(
+            entries[workflow_ids[0]],
+            overrides.get(workflow_ids[0]),
+        )
 
     if routing_cache_ttl_seconds > 0 and cache_key is not None:
         try:
@@ -1567,14 +1615,48 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vector-index-path",
         default=str(VECTOR_INDEX_PATH),
-        help="Vector memory index path for recall_context (default: tmp/vector-memory.sqlite)",
+        help="Vector memory index path for recall_context (default: vector/indexes/vector-memory.sqlite)",
     )
     parser.add_argument(
         "--skip-recall-context",
         action="store_true",
         help="Skip vector memory recall_context lookup for faster routing.",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Compact single-workflow status (implies --validate --no-cache --skip-recall-context).",
+    )
     return parser.parse_args()
+
+
+def _compact_workflow_status(answer: dict[str, Any], selector: str) -> dict[str, Any]:
+    stale = bool(answer.get("routing_index_stale"))
+    freshness = answer.get("routing_freshness")
+    if not isinstance(freshness, dict):
+        freshness = {}
+    changed_sources = []
+    for change in answer.get("changed_sources", []):
+        if isinstance(change, dict) and change.get("path"):
+            changed_sources.append(
+                {
+                    "path": change["path"],
+                    **({"reason": change["reason"]} if change.get("reason") else {}),
+                }
+            )
+    return {
+        "schema": "workflow-status.v1",
+        "selector": selector,
+        "state": answer.get("authoritative_workflow") or answer.get("workflow"),
+        "routing_freshness": {
+            "status": "stale" if stale else freshness.get("status", "fresh"),
+            "unsafe_to_trust": bool(answer.get("unsafe_to_trust")),
+            "index_path": answer.get("index_path"),
+            "index_generated_at": answer.get("routing_index_generated_at"),
+            "changed_sources": changed_sources,
+            "required_refresh_command": answer.get("required_refresh_command"),
+        },
+    }
 
 
 def main() -> int:
@@ -1596,6 +1678,9 @@ def main() -> int:
             )
             return 0
 
+        if args.status and (not args.selector or args.all):
+            raise ValueError("--status requires exactly one workflow selector")
+
         index_path = Path(args.index_path)
         if not index_path.is_absolute():
             index_path = PROJECT_ROOT / args.index_path
@@ -1603,13 +1688,19 @@ def main() -> int:
         answer = route_workflows(
             selector=args.selector,
             all_workflows=args.all,
-            answer=args.answer,
-            validate=args.validate,
+            answer="summary" if args.status else args.answer,
+            validate=args.validate or args.status,
             write_index=args.write_index,
             write_capsules=args.write_capsules,
             index_path=index_path,
-            routing_cache_ttl_seconds=0 if args.no_cache else DEFAULT_ROUTING_CACHE_TTL_SECONDS,
-            vector_index_path=Path(args.vector_index_path) if not args.skip_recall_context else None,
+            routing_cache_ttl_seconds=(
+                0 if args.no_cache or args.status else DEFAULT_ROUTING_CACHE_TTL_SECONDS
+            ),
+            vector_index_path=(
+                None
+                if args.skip_recall_context or args.status
+                else Path(args.vector_index_path)
+            ),
         )
     except (ValueError, KeyError, FileNotFoundError) as exc:
         print(json.dumps({"error": str(exc)}, indent=2))
@@ -1618,7 +1709,10 @@ def main() -> int:
         print(json.dumps({"error": str(exc)}, indent=2))
         return 1
 
-    print(json.dumps(answer, indent=2))
+    if args.status:
+        print(json.dumps(_compact_workflow_status(answer, args.selector), sort_keys=True))
+    else:
+        print(json.dumps(answer, indent=2))
     if answer.get("routing_index_stale"):
         return 3
     return 0

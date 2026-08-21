@@ -8,6 +8,7 @@ only generated artifacts and a report are touched.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import sys
@@ -22,7 +23,7 @@ DEFAULT_STALE_DAYS = 30
 TERMINAL_STATES = {"closed", "closed_with_follow_up", "blocked", "gated", "on_hold"}
 
 
-def main() -> int:
+def main(*, check_only: bool = False) -> int:
     now = datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -63,7 +64,7 @@ def main() -> int:
             if wf_id:
                 capsule = DEFAULT_CAPSULE_DIR / f"{wf_id}.json"
                 compact = DEFAULT_CAPSULE_DIR / f"{wf_id}-capsule.json"
-                if capsule.exists() or compact.exists():
+                if not check_only and (capsule.exists() or compact.exists()):
                     archive_dir = DEFAULT_ARCHIVE_DIR / now.strftime("%Y-%m-%d")
                     archive_dir.mkdir(parents=True, exist_ok=True)
                     for src in (capsule, compact):
@@ -86,5 +87,16 @@ def main() -> int:
     return 0
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="report stale workflows without creating directories or moving capsules",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    arguments = _parse_args()
+    raise SystemExit(main(check_only=arguments.check_only))

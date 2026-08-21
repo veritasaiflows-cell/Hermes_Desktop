@@ -22,7 +22,7 @@
   "display_name": "Workflow B - Listing Drafts",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-20T01:00:53Z",
+  "generated_at": "2026-08-21T00:00:29Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -37,7 +37,7 @@
   "readiness": "route_only",
   "recall_context": {
     "available": true,
-    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\tmp\\vector-memory.sqlite",
+    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
     "result_count": 3,
     "results": [
       {
@@ -57,16 +57,16 @@
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md:L1-L1",
-        "excerpt": "# Efficiens\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md:L1-L1",
+        "excerpt": "# Workspace Status Maintenance\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5576601850677262,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md"
+        "score": 0.5547374873138248,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md"
       }
     ]
   },
-  "required_refresh_command": "python scripts/workflow_router.py --write-index --answer summary",
+  "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
   "routing_contract": "workflow-routing-index.v1",
   "routing_schema_version": "workflow-routing-index.v1",
   "routing_source_contracts": {

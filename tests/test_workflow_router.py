@@ -24,6 +24,37 @@ def _write_markdown_json(path: Path, payload: dict) -> None:
     )
 
 
+class WorkflowRouterPathContractTests(unittest.TestCase):
+    def test_default_vector_index_uses_the_vector_layer(self):
+        self.assertEqual(
+            workflow_router.VECTOR_INDEX_PATH,
+            workflow_router.PROJECT_ROOT / "vector" / "indexes" / "vector-memory.sqlite",
+        )
+
+    def test_dependency_graph_database_read_does_not_open_canonicaldb(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "efficiens.db"
+            database_adapter = workflow_router.CanonicalDB
+            with database_adapter(database) as db:
+                db.add_relationship(
+                    "workflows",
+                    "WF-1001",
+                    "depends_on",
+                    "workflows",
+                    "WF-1000",
+                )
+            entries = {"WF-1000": {}, "WF-1001": {}}
+
+            with patch.object(
+                workflow_router,
+                "CanonicalDB",
+                side_effect=AssertionError("read path must not initialize CanonicalDB"),
+            ):
+                graph = workflow_router._dependency_graph_from_database(entries, database)
+
+        self.assertEqual(graph, {"WF-1000": [], "WF-1001": ["WF-1000"]})
+
+
 def _build_control_plane_with_workflows(
     root: Path,
     workflows: list[dict],
@@ -114,6 +145,160 @@ def _build_control_plane(root: Path) -> None:
 
 
 class WorkflowRouterTests(unittest.TestCase):
+    def test_status_cli_implies_narrow_validated_uncached_route(self):
+        stale_answer = {
+            "routing_index_stale": True,
+            "unsafe_to_trust": True,
+            "authoritative_workflow": {
+                "workflow_id": "WF-1000",
+                "effective_status": "active",
+                "blockers": [],
+            },
+            "changed_sources": [{"path": "vector/indexes/vector-memory.sqlite"}],
+            "required_refresh_command": workflow_router.ROUTER_REFRESH_COMMAND,
+            "index_path": "state/workflow-routing-index.json",
+        }
+        with patch("sys.argv", ["workflow_router.py", "workflow-a", "--status"]), patch.object(
+            workflow_router,
+            "route_workflows",
+            return_value=stale_answer,
+        ) as route_mock, patch("builtins.print") as print_mock:
+            code = workflow_router.main()
+
+        self.assertEqual(code, 3)
+        call = route_mock.call_args.kwargs
+        self.assertTrue(call["validate"])
+        self.assertEqual(call["routing_cache_ttl_seconds"], 0)
+        self.assertIsNone(call["vector_index_path"])
+        payload = json.loads(print_mock.call_args.args[0])
+        self.assertEqual(payload["schema"], "workflow-status.v1")
+        self.assertEqual(payload["state"]["workflow_id"], "WF-1000")
+        self.assertEqual(payload["routing_freshness"]["status"], "stale")
+
+    def test_write_index_with_validate_fails_closed_on_post_write_staleness(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            stale_payload = {
+                "routing_index_stale": True,
+                "unsafe_to_trust": True,
+                "message": "post-write signatures still stale",
+            }
+            with patch.object(
+                workflow_router,
+                "build_routing_index",
+                return_value={"schema": workflow_router.ROUTER_SCHEMA, "source_signatures": {}},
+            ), patch.object(
+                workflow_router,
+                "check_routing_freshness",
+                return_value=(True, stale_payload),
+            ) as freshness_check:
+                result = workflow_router.route_workflows(
+                    selector="WF-1000",
+                    answer="summary",
+                    validate=True,
+                    write_index=True,
+                    index_path=root / "state" / "workflow-routing-index.json",
+                    project_root=root,
+                    state_dir=root / "state",
+                )
+
+            freshness_check.assert_called_once()
+            self.assertTrue(result["routing_index_stale"])
+            self.assertTrue(result["unsafe_to_trust"])
+
+    def test_write_index_rebuilds_source_signatures_without_validate_flag(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            index_path = root / "state" / "workflow-routing-index.json"
+            vector_path = root / "vector" / "indexes" / "vector-memory.sqlite"
+            vector_path.parent.mkdir(parents=True)
+            vector_path.write_bytes(b"first-index")
+
+            workflow_router.route_workflows(
+                selector="WF-1000",
+                answer="summary",
+                validate=True,
+                write_index=True,
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                vector_index_path=vector_path,
+            )
+            first = json.loads(index_path.read_text(encoding="utf-8"))
+            first_vector = next(
+                value
+                for path, value in first["source_signatures"].items()
+                if path.endswith("vector-memory.sqlite")
+            )
+
+            vector_path.write_bytes(b"second-index")
+            result = workflow_router.route_workflows(
+                selector="WF-1000",
+                answer="summary",
+                validate=False,
+                write_index=True,
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                vector_index_path=vector_path,
+            )
+            second = json.loads(index_path.read_text(encoding="utf-8"))
+            second_vector = next(
+                value
+                for path, value in second["source_signatures"].items()
+                if path.endswith("vector-memory.sqlite")
+            )
+
+            self.assertNotEqual(first_vector, second_vector)
+            self.assertFalse(result["routing_index_stale"])
+            stale, _ = workflow_router.check_routing_freshness(
+                state_dir=root / "state",
+                index_path=index_path,
+                project_root=root,
+                routing_database_path=root / "canonical" / "efficiens.db",
+                vector_index_path=vector_path,
+            )
+            self.assertFalse(stale)
+
+    def test_stale_response_includes_authoritative_workflow_state(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            index_path = root / "state" / "workflow-routing-index.json"
+            vector_path = root / "vector" / "indexes" / "vector-memory.sqlite"
+            vector_path.parent.mkdir(parents=True)
+            vector_path.write_bytes(b"first-index")
+            workflow_router.route_workflows(
+                selector="WF-1000",
+                answer="summary",
+                validate=True,
+                write_index=True,
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                vector_index_path=vector_path,
+            )
+            vector_path.write_bytes(b"changed-index")
+
+            stale = workflow_router.route_workflows(
+                selector="product-research",
+                answer="summary",
+                validate=True,
+                write_index=False,
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                vector_index_path=vector_path,
+            )
+
+            self.assertTrue(stale["routing_index_stale"])
+            self.assertTrue(stale["unsafe_to_trust"])
+            self.assertEqual(stale["authoritative_workflow"]["workflow_id"], "WF-1000")
+            self.assertEqual(stale["authoritative_workflow"]["effective_status"], "monitor_only")
+            self.assertEqual(stale["authoritative_workflow"]["primary_owner_lane"], "agent-main")
+
     def test_route_with_alias_and_validation_generates_capsules(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -649,7 +834,7 @@ class WorkflowRouterTests(unittest.TestCase):
             self.assertTrue(stale["routing_index_stale"])
             self.assertTrue(stale["unsafe_to_trust"])
             self.assertEqual(stale["required_refresh_command"],
-                             "python scripts/workflow_router.py --write-index --answer summary")
+                             "python scripts/workflow_router.py --all --answer summary --validate --write-index")
 
             refreshed = workflow_router.route_workflows(
                 selector="WF-1000",

@@ -23,6 +23,9 @@ class CronRegistrationValidatorTests(unittest.TestCase):
             "a8_telemetry_harvest.py",
             "a9_claim_drift_check.py",
             "a10_graph_freshness.py",
+            "a11_workspace_status.py",
+            "a12_retrieval_refresh.py",
+            "a13_canonical_integrity.py",
         }
         self.assertTrue(expected.issubset(checked_names))
 

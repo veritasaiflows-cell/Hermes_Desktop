@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-19T05:20:04Z",
+  "generated_at": "2026-08-20T07:27:54Z",
   "generated_by": "scripts/wiki_bootstrap.py",
   "lkg_manifest": "wiki/.lkg/bootstrap-manifest.json",
   "pages": {
@@ -11,8 +11,8 @@
         "references/operating-procedures.md"
       ],
       "source_hashes": {
-        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
-        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965",
+        "AGENTS.md": "5c8f31c2b81dc861264002af442b0da3c058b5520b02f512e5efefdc3e360fd2",
+        "references/operating-procedures.md": "4d25fc7bf57a1c046d2cc6cb937938de17f473453b4762759bf935f05dd08411",
         "scripts/wiki_bootstrap.py": "81e811ece62fffc2a7dd4d1164de8f23d54e423359b1f1d7475a991c7aa80d92"
       },
       "source_map": [
@@ -29,9 +29,9 @@
         "scripts/run_checks.py"
       ],
       "source_hashes": {
-        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965",
-        "scripts/run_checks.py": "088007751da635f6ab4dc64b367d0e1a93edf31460b54ecfe339cd964398518d",
-        "tests/test_run_checks.py": "fd4e2e62a77c6be52eee17127b26f168690c212f8c3d44269478ea08a0615315"
+        "references/operating-procedures.md": "4d25fc7bf57a1c046d2cc6cb937938de17f473453b4762759bf935f05dd08411",
+        "scripts/run_checks.py": "0e2e920998ba1435555c4c78cb4103e32eb1700a1687f353849ad643e953d455",
+        "tests/test_run_checks.py": "cb1c3c6e067d4e424fb3a009f530a8c4a0acde44dd12629efbf64f896ffadfab"
       },
       "source_map": [
         "references/operating-procedures.md",
@@ -48,7 +48,7 @@
       ],
       "source_hashes": {
         "references/concurrent-lane-control-plane.md": "e945fa039e0284276f2c1aa45042d575b0856ada033e9b9c0a5481daaaaa0fd0",
-        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965",
+        "references/operating-procedures.md": "4d25fc7bf57a1c046d2cc6cb937938de17f473453b4762759bf935f05dd08411",
         "scripts/concurrent_lane_manager.py": "91ffe5846e021a73927271a24e4dee06cb46366b3cb1723a18bebe8cc192598e"
       },
       "source_map": [
@@ -65,9 +65,9 @@
         "README.md"
       ],
       "source_hashes": {
-        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
-        "GOVERNANCE.md": "c0c2e346da57e75836ae067dd6d68a6e2284025d0d7434d909a340d0c7f221f8",
-        "README.md": "71f9a3234bc893572fc98da5cd932076df9b91a9b7110c5fcfdd85233e4cf4bd"
+        "AGENTS.md": "5c8f31c2b81dc861264002af442b0da3c058b5520b02f512e5efefdc3e360fd2",
+        "GOVERNANCE.md": "4f1491c04cfe02784f9349707341da62512bdd0e25f0df7be923cd42ec2ef7e6",
+        "README.md": "73ff65e82fb76a87785de53fbb52842290933bd1650c985a48572ed1f49f4029"
       },
       "source_map": [
         "AGENTS.md",
@@ -83,9 +83,9 @@
         "references/operating-procedures.md"
       ],
       "source_hashes": {
-        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
-        "GOVERNANCE.md": "c0c2e346da57e75836ae067dd6d68a6e2284025d0d7434d909a340d0c7f221f8",
-        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965"
+        "AGENTS.md": "5c8f31c2b81dc861264002af442b0da3c058b5520b02f512e5efefdc3e360fd2",
+        "GOVERNANCE.md": "4f1491c04cfe02784f9349707341da62512bdd0e25f0df7be923cd42ec2ef7e6",
+        "references/operating-procedures.md": "4d25fc7bf57a1c046d2cc6cb937938de17f473453b4762759bf935f05dd08411"
       },
       "source_map": [
         "AGENTS.md",
@@ -102,9 +102,9 @@
         "AGENTS.md"
       ],
       "source_hashes": {
-        "AGENTS.md": "099759c44197432b2a5885ef0d3e0c1357981be778057e6e2e8b377acd7afc22",
-        "references/memory-routing.md": "8ef9cd52b0dbd7983eee5b325142647f8aae6812d68e54e5557723513426b4b0",
-        "references/operating-procedures.md": "e945a95b481d505f91253c43ce0d8688b44dc80e0845861d3781d731fa5c4965"
+        "AGENTS.md": "5c8f31c2b81dc861264002af442b0da3c058b5520b02f512e5efefdc3e360fd2",
+        "references/memory-routing.md": "799df8e144f1413871d406d2ee8682cc9d66eaded4ae73476b232a7b06f66139",
+        "references/operating-procedures.md": "4d25fc7bf57a1c046d2cc6cb937938de17f473453b4762759bf935f05dd08411"
       },
       "source_map": [
         "references/operating-procedures.md",

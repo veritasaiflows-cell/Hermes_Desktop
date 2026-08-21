@@ -21,7 +21,7 @@ from typing import Iterable, Sequence
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INDEX_PATH = WORKSPACE_ROOT / "tmp" / "workspace-index.sqlite"
+DEFAULT_INDEX_PATH = WORKSPACE_ROOT / "vector" / "indexes" / "workspace-index.sqlite"
 DEFAULT_EXTENSIONS = frozenset({".csv", ".md", ".rst", ".sql", ".txt"})
 EXCLUDED_DIRECTORY_NAMES = frozenset(
     {
@@ -195,6 +195,53 @@ def search_index(
     return results
 
 
+def index_status(index_path: Path | str) -> dict[str, object]:
+    """Return availability, size, and source-hash freshness for the index."""
+    resolved = Path(index_path)
+    if not resolved.is_file():
+        return {
+            "index_path": str(resolved),
+            "available": False,
+            "document_count": 0,
+            "indexed_at": None,
+            "stale_source_count": 0,
+        }
+
+    connection = sqlite3.connect(
+        f"file:{resolved.resolve().as_posix()}?mode=ro",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        count_row = connection.execute(
+            "SELECT COUNT(*) AS document_count, MAX(indexed_at) AS indexed_at FROM documents"
+        ).fetchone()
+        rows = connection.execute(
+            "SELECT source_path, content_hash FROM documents"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    stale_count = 0
+    for row in rows:
+        path = Path(row["source_path"])
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            stale_count += 1
+            continue
+        if _content_hash(content) != row["content_hash"]:
+            stale_count += 1
+
+    return {
+        "index_path": str(resolved),
+        "available": True,
+        "document_count": count_row["document_count"] or 0,
+        "indexed_at": count_row["indexed_at"],
+        "stale_source_count": stale_count,
+    }
+
+
 def _initialize_database(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -363,6 +410,15 @@ def _command_query(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _command_status(arguments: argparse.Namespace) -> int:
+    summary = index_status(arguments.index)
+    healthy = bool(summary["available"]) and summary["stale_source_count"] == 0
+    status = "ok" if healthy else "degraded"
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(json.dumps({"status": status, "generated_at": generated_at, **summary}, sort_keys=True))
+    return 0 if healthy else 1
+
+
 def _parse_arguments() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -378,6 +434,10 @@ def _parse_arguments() -> argparse.ArgumentParser:
         help="Additional approved text extension, such as .py; defaults to safe document formats",
     )
     index.set_defaults(handler=_command_index)
+
+    status = subcommands.add_parser("status", help="Report index availability and source freshness")
+    status.add_argument("--index", type=Path, default=DEFAULT_INDEX_PATH)
+    status.set_defaults(handler=_command_status)
 
     query = subcommands.add_parser("query", help="Search a previously built index")
     query.add_argument("--index", type=Path, default=DEFAULT_INDEX_PATH)

@@ -33,6 +33,24 @@ durable graph: its edges are inferred (not asserted), carry no provenance, and
 are rebuilt from scratch. The durable graph stores edges the agent asserts with
 provenance and confidence.
 
+Graphify freshness is checked separately with
+`python scripts/graphify_freshness.py`. The gate compares the refreshed graph
+and manifest against a content-hash baseline, checks every current Python module
+under `canonical/`, `scripts/`, and `tests/` has graph source coverage, and
+honors Graphify's semantic `needs_update` marker. It requires all code roots,
+rejects linked/reparse-pointed artifact and source paths, refuses incomplete code
+coverage, and publishes the local baseline atomically. After a successful code refresh:
+
+```bash
+graphify update .
+graphify diagnose multigraph --graph graphify-out/graph.json --json
+python scripts/graphify_freshness.py --write-baseline
+python scripts/graphify_freshness.py
+```
+
+A stale Graphify artifact is a routing warning, not a failure of the durable
+asserted graph. Route to direct source inspection until the artifact is fresh.
+
 ## Data model
 
 The `relationships` table in `canonical/schema.sql` is the durable graph store.

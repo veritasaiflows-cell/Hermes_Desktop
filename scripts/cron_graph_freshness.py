@@ -224,7 +224,7 @@ def main(state_dir: Path | None = None) -> int:
         return 0
 
     try:
-        with CanonicalDB(database_path) as db:
+        with CanonicalDB(database_path, read_only=True) as db:
             integrity_issues = _check_graph_integrity(db)
             coverage_gaps = _check_graph_coverage(db, state_dir=state_dir)
     except sqlite3.Error as exc:

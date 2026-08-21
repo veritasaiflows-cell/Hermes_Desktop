@@ -2,7 +2,9 @@ from pathlib import Path
 import json
 import os
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from canonical.db import CanonicalDB
 from scripts import run_checks
@@ -10,6 +12,42 @@ from scripts.runtime_metadata import detect_active_model
 
 
 class RunChecksTests(unittest.TestCase):
+    def test_pytest_test_count_sums_executed_test_outcomes(self):
+        self.assertEqual(
+            run_checks._pytest_test_count("2 failed, 174 passed, 5 subtests passed in 17.9s"),
+            176,
+        )
+
+    def test_pytest_outcomes_ignore_captured_fake_counts(self):
+        outcomes = run_checks._pytest_outcome_counts(
+            "test output says 999 passed\n"
+            "================ 2 failed, 174 passed, 5 subtests passed in 17.9s ================\n"
+        )
+
+        self.assertEqual(outcomes["test_count"], 176)
+        self.assertEqual(outcomes["test_failure_count"], 2)
+
+    def test_pytest_failure_ids_only_use_short_summary(self):
+        failure_ids = run_checks._pytest_failure_ids(
+            "=========================== short test summary info ===========================\n"
+            "FAILED tests/fake.py::test_fake - captured spoof\n"
+            "=========================== short test summary info ===========================\n"
+            "FAILED tests/test_real.py::test_real - AssertionError\n"
+            "========================= 1 failed, 10 passed in 1.2s =========================\n"
+        )
+
+        self.assertEqual(failure_ids, ["tests/test_real.py::test_real"])
+
+    def test_failure_hash_covers_ids_beyond_persisted_sample(self):
+        shared = [f"tests/test_many.py::test_{index}" for index in range(100)]
+        first = [*shared, "tests/test_many.py::test_tail_a"]
+        second = [*shared, "tests/test_many.py::test_tail_b"]
+
+        self.assertNotEqual(
+            run_checks._failure_ids_sha256(first),
+            run_checks._failure_ids_sha256(second),
+        )
+
     def test_test_discovery_is_rooted_at_the_project_when_cwd_changes(self):
         original_cwd = Path.cwd()
         with TemporaryDirectory() as directory:
@@ -67,17 +105,25 @@ class RunChecksTests(unittest.TestCase):
 
     def test_record_run_check_writes_telemetry_row(self):
         with TemporaryDirectory() as directory:
-            db_path = Path(directory) / "efficiens.db"
+            project_root = Path(directory)
+            (project_root / "scripts").mkdir()
+            (project_root / "scripts" / "check.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            db_path = project_root / "efficiens.db"
             run_checks._record_run_check(
                 db_path,
                 tests_ok=True,
                 test_failures=[],
+                test_count=42,
                 test_duration_ms=1234,
                 smoke={"duration_ms": 100, "delta_entities": 1, "delta_metrics": 2},
                 routing={"duration_ms": 200},
                 wiki={"duration_ms": 50, "status": "fresh"},
                 model_or_agent="kimi-k2.7-code",
                 started_at="2026-08-19T00:00:00Z",
+                project_root=project_root,
             )
             with CanonicalDB(db_path) as db:
                 rows = db.get_run_metrics(request_type="run_checks", limit=1)
@@ -102,7 +148,9 @@ class RunChecksTests(unittest.TestCase):
                 )
                 self.assertEqual(row["verification_result"], "pass")
                 resource = json.loads(row["resource_usage_json"])
-                self.assertEqual(resource["test_count"], 1)
+                self.assertEqual(resource["test_count"], 42)
+                self.assertEqual(resource["source_file_count"], 1)
+                self.assertEqual(len(resource["source_fingerprint"]), 64)
                 self.assertEqual(resource["smoke_entities_delta"], 1)
                 self.assertEqual(resource["smoke_metrics_delta"], 2)
                 self.assertEqual(resource["unit_test_duration_ms"], 1234)
@@ -154,6 +202,121 @@ class RunChecksTests(unittest.TestCase):
                 rows = db.get_run_metrics(request_type="run_checks", limit=1)
                 self.assertEqual(rows[0]["verification_result"], "fail")
                 self.assertEqual(json.loads(rows[0]["errors_json"]), ["wiki_not_fresh"])
+
+    def test_record_run_check_rejects_source_drift(self):
+        with TemporaryDirectory() as directory:
+            project_root = Path(directory)
+            (project_root / "scripts").mkdir()
+            source = project_root / "scripts" / "check.py"
+            source.write_text("VALUE = 1\n", encoding="utf-8")
+            before = run_checks.correctness_snapshot(project_root)
+            source.write_text("VALUE = 2\n", encoding="utf-8")
+            db_path = project_root / "efficiens.db"
+
+            run_checks._record_run_check(
+                db_path,
+                tests_ok=True,
+                test_failures=[],
+                test_count=1,
+                test_failure_count=0,
+                test_duration_ms=10,
+                smoke={},
+                routing={},
+                wiki={},
+                project_root=project_root,
+                source_snapshot_before=before,
+            )
+
+            with CanonicalDB(db_path) as db:
+                row = db.get_run_metrics(request_type="run_checks", limit=1)[0]
+            resource = json.loads(row["resource_usage_json"])
+            self.assertEqual(row["verification_result"], "fail")
+            self.assertIn("source_changed_during_run", json.loads(row["errors_json"]))
+            self.assertTrue(resource["source_drift"])
+            self.assertIsNone(resource["source_fingerprint"])
+
+    def test_record_run_check_persists_failure_identities(self):
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "efficiens.db"
+            run_checks._record_run_check(
+                db_path,
+                tests_ok=False,
+                test_failures=["tests/test_real.py::test_real"],
+                test_count=11,
+                test_failure_count=1,
+                test_duration_ms=10,
+                smoke={},
+                routing={},
+                wiki={},
+                project_root=Path(directory),
+            )
+
+            with CanonicalDB(db_path) as db:
+                row = db.get_run_metrics(request_type="run_checks", limit=1)[0]
+            resource = json.loads(row["resource_usage_json"])
+            self.assertEqual(
+                resource["test_failure_ids"],
+                ["tests/test_real.py::test_real"],
+            )
+            self.assertEqual(len(resource["test_failure_ids_sha256"]), 64)
+
+    def test_fingerprint_failure_does_not_break_telemetry_recording(self):
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "efficiens.db"
+            with patch.object(
+                run_checks,
+                "correctness_snapshot",
+                side_effect=OSError("locked source"),
+            ):
+                run_checks._record_run_check(
+                    db_path,
+                    tests_ok=True,
+                    test_failures=[],
+                    test_count=1,
+                    test_failure_count=0,
+                    test_duration_ms=10,
+                    smoke={},
+                    routing={},
+                    wiki={},
+                    project_root=Path(directory),
+                )
+
+            with CanonicalDB(db_path) as db:
+                row = db.get_run_metrics(request_type="run_checks", limit=1)[0]
+            self.assertEqual(row["verification_result"], "fail")
+            self.assertIn("source_fingerprint_unavailable", json.loads(row["errors_json"]))
+
+    def test_main_returns_nonzero_on_source_drift_without_telemetry(self):
+        before = {
+            "source_fingerprint": "before",
+            "source_file_count": 1,
+            "tested_commit": "abc",
+            "fingerprint_error": None,
+        }
+        after = {**before, "source_fingerprint": "after"}
+        arguments = SimpleNamespace(
+            database=None,
+            persistent_smoke=False,
+            skip_smoke=True,
+            record_telemetry=False,
+        )
+        with (
+            patch.object(run_checks, "_parse_args", return_value=arguments),
+            patch.object(run_checks, "detect_active_model", return_value=None),
+            patch.object(
+                run_checks,
+                "run_tests",
+                return_value=(True, [], 10, 1, 0),
+            ),
+            patch.object(
+                run_checks,
+                "_safe_correctness_snapshot",
+                side_effect=[before, after],
+            ),
+        ):
+            code = run_checks.main()
+
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

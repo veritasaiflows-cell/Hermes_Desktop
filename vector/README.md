@@ -9,16 +9,21 @@ records or source material before relying on them.
 This workspace ships a concrete SQLite+FTS5 semantic-memory adapter in
 `scripts/vector_memory_index.py`.
 
-- Database: `tmp/vector-memory.sqlite`
+- Semantic index: `vector/indexes/vector-memory.sqlite`
+- Exact full-text index: `vector/indexes/workspace-index.sqlite`
+- Approved source manifest: `vector/retrieval-sources.json`
 - Query packet: `tmp/vector-memory-query.json`
 
 ## Canonical flow
 
-1. Index approved sources into the memory database (embeddings default to local Ollama):
+1. Refresh both indexes from the version-controlled approved source manifest:
 
 ```bash
-python scripts/vector_memory_index.py index --source C:/path/to/approved/root --source C:/path/to/notes.md
+python scripts/retrieval_refresh.py
 ```
+
+The A12 no-agent cron runs the same contract every six hours. Update the
+manifest—not the generated databases—when the approved retrieval scope changes.
 
 2. Query the memory layer (default hybrid retrieval via `memory_search`):
 

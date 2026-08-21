@@ -14,7 +14,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from scripts import cron_health_check, cron_wiki_regen
+from scripts import cron_health_check, cron_routing_refresh, cron_wiki_regen
 
 
 class HealthCheckLogicTests(unittest.TestCase):
@@ -297,6 +297,25 @@ class WikiRegenLogicTests(unittest.TestCase):
         with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
             rc = cron_wiki_regen.main()
         self.assertEqual(rc, 1)
+
+
+class RoutingRefreshLogicTests(unittest.TestCase):
+    def test_refresh_command_validates_before_writing(self):
+        fake_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"routing_index_stale": False}),
+        )
+        with patch.object(
+            cron_routing_refresh.subprocess,
+            "run",
+            return_value=fake_result,
+        ) as run_mock:
+            rc = cron_routing_refresh.main()
+
+        self.assertEqual(rc, 0)
+        command = run_mock.call_args.args[0]
+        self.assertIn("--validate", command)
+        self.assertIn("--write-index", command)
 
 
 def subprocess_result(*, returncode, stdout, stderr=""):

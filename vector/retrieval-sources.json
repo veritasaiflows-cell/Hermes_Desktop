@@ -1,0 +1,21 @@
+{
+  "schema": "retrieval-sources.v1",
+  "sources": [
+    "AGENTS.md",
+    "GOVERNANCE.md",
+    "README.md",
+    "canonical/README.md",
+    "references/README.md",
+    "references/automation-layer.md",
+    "references/commerce-data-model.md",
+    "references/concurrent-lane-control-plane.md",
+    "references/graph-memory.md",
+    "references/memory-routing.md",
+    "references/operating-procedures.md",
+    "references/vector-memory-scaling.md",
+    "references/workflow-product-research.md",
+    "references/workflow-routing-control-plane.md",
+    "references/workspace-status-maintenance.md",
+    "state/README.md"
+  ]
+}

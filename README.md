@@ -10,6 +10,8 @@ This workspace is organized around a layered evidence and memory architecture, w
 - `vector/` — semantic retrieval indexes and metadata
 - `derived/` — summaries and generated artifacts
 - `telemetry/` — run instrumentation and improvement signals
+- `state/` — authoritative workflow control-plane state and generated routing surfaces
+- `tmp/` — disposable scratch files and per-run packets; safe to clear when no process is using them
 - `references/` — authoritative detailed instructions the lean bootstrap points to
 
 ## Bootstrap and governance

@@ -37,6 +37,17 @@ with CanonicalDB() as db:
     )
 ```
 
+For observational gates and queries, use the enforced read-only mode:
+
+```python
+with CanonicalDB("canonical/efficiens.db", read_only=True) as db:
+    tables = db.tables()
+```
+
+`read_only=True` requires an existing database, opens SQLite with URI `mode=ro`
+and `PRAGMA query_only = ON`, and skips parent creation, WAL changes, schema
+application, and commits. SQLite rejects any attempted write through that connection.
+
 `insert()` enables foreign keys, uses WAL mode, inserts transactionally, records UTC timestamps and provenance, and raises `DuplicateRecordError` instead of overwriting. Use `with db.transaction():` for a multi-record all-or-nothing write set; individual inserts defer their commits until that outer transaction succeeds.
 
 `update()` runs as one `BEGIN IMMEDIATE` transaction: it snapshots the prior row into `version_history`, appends a `record.updated` event, then applies the mutation. A failed mutation rolls back the row change, audit records, and automatic provenance together. Repeated updates receive sequential per-record version numbers. Every update resolves one audit provenance ID, even when the target table has no `provenance_id` column; where that column exists, the target row, version record, and event share it. Primary keys and `created_at` are immutable; ambiguous or null provenance changes are rejected. `provenance`, `events`, and `version_history` are immutable evidence/audit tables and cannot be updated through this API; record a new provenance row instead.

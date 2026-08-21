@@ -23,7 +23,7 @@ This reference captures:
 | Overrides | Pause/halt/gate controls | `state/workflow-control-overrides.json` |
 | Continuity notes | Human-readable resume context per workflow | `continuity/` |
 | Dependency graph | Canonical `workflows -> depends_on -> workflows` edges | `canonical/efficiens.db` |
-| Vector memory | Optional cited context for a workflow and its graph dependencies | `tmp/vector-memory.sqlite` |
+| Vector memory | Optional cited context for a workflow and its graph dependencies | `vector/indexes/vector-memory.sqlite` |
 | Route index | Generated freshness artifact | `state/workflow-routing-index.json` |
 | Capsules | Generated per-workflow control summary | `state/workflows/WF-<ID>.json` |
 
@@ -32,6 +32,15 @@ as human-readable rendered views. The router prefers the JSON names but reads th
 legacy markdown files if needed.
 
 ## Command surface
+
+- Fast, read-only status for one workflow (authoritative queue/override state plus routing freshness):
+
+```bash
+python scripts/workflow_router.py workflow-a --status
+```
+
+`--status` implies `--validate --no-cache --skip-recall-context` and emits compact
+`workflow-status.v1` JSON. A stale route exits 3 while still returning authoritative state.
 
 - Build/refresh index and route one workflow:
 
@@ -42,7 +51,7 @@ python scripts/workflow_router.py WF-1000 --answer summary --validate --write-in
 - Build/refresh index and derived capsules:
 
 ```bash
-python scripts/workflow_router.py --all --answer all --write-index
+python scripts/workflow_router.py --all --answer all --validate --write-index
 ```
 
 - List available aliases:

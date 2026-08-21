@@ -118,7 +118,7 @@ def main() -> int:
         return 0
 
     try:
-        with CanonicalDB(database_path) as db:
+        with CanonicalDB(database_path, read_only=True) as db:
             expiring = _check_expiring_claims(db, now, CLAIM_WARNING_HOURS)
             tampered = _check_tampered_workflow_runs(db)
             stale = _check_stale_replays(db)

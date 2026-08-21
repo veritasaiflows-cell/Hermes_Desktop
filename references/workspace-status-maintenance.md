@@ -5,22 +5,49 @@ and how it fits into the cron schedule.
 
 ## Single-command aggregator
 
-`scripts/workspace_status.py` is the one-line status command. It runs these
-gates in parallel and returns a JSON brief:
+`scripts/workspace_status.py` is the one-line startup and closeout status command.
+It runs these gates serially in declared order to avoid shared SQLite and
+artifact races, and returns a JSON brief:
 
-- `routing` — `scripts/workflow_router.py --all --answer summary`
+- `organization` — `scripts/workspace_organization_validator.py`
+- `routing` — `scripts/workflow_router.py --all --answer summary --validate --no-cache --skip-recall-context`
 - `wiki` — `scripts/wiki_bootstrap.py validate`
 - `alias` — `scripts/cron_alias_sweep.py`
 - `cron_registration` — `scripts/cron_registration_validator.py`
 - `claim_drift` — `scripts/cron_claim_drift_check.py`
 - `graph_integrity` — `scripts/graph_memory.py validate`
 - `graph_freshness` — `scripts/cron_graph_freshness.py`
+- `graphify_freshness` — `scripts/graphify_freshness.py`
 - `vector_memory` — `scripts/vector_memory_index.py status`
-- `archive_stale` — `scripts/cron_archive_stale_workflows.py`
+- `workspace_index` — `scripts/workspace_index.py status`
+- `archive_stale` — `scripts/cron_archive_stale_workflows.py --check-only`
 
+Organization drift and missing or stale retrieval indexes are hard failures.
+Graphify drift is a warning because the derived code graph has a direct-source
+fallback. Refresh it with `graphify update .`, then record the verified artifact
+with `python scripts/graphify_freshness.py --write-baseline`.
 Exit code is 0 when healthy, 1 when degraded. The JSON body contains
 `health.status`, `health.hard_failures`, `health.warnings`, and a
 `recommended_next_action`.
+
+The brief also includes `correctness`, sourced from the latest `run_checks`
+telemetry row. It reports the test outcome, completion timestamp, duration,
+test count, tested commit, and whether the recorded source fingerprint still
+matches current code. `run_checks` fingerprints sources before and after the
+test/smoke run and returns nonzero if they differ or cannot be read, independently
+of telemetry recording. It parses numeric outcomes and exact failure node IDs only
+from pytest's final summary sections, persisting a bounded ID list plus its hash.
+The full failure set is hashed even when only the first 100 IDs are retained.
+Accepted evidence must report at least one executed test, zero failures, and the
+same source-file count as the current snapshot. Stale, failed, unavailable, or
+malformed correctness evidence produces a warning and the brief recommends
+`python scripts/cron_test_gate.py`; the fast operating-status command does not
+rerun the full suite itself.
+
+The A11 path is read-only: routing bypasses cache reads/writes and vector recall,
+all canonical graph/claim/freshness reads use `CanonicalDB(..., read_only=True)`
+or SQLite `mode=ro`, and stale-workflow archiving runs in check-only mode. Mutating
+archive and refresh operations remain separate explicit jobs.
 
 ## Cron schedule
 
@@ -38,10 +65,16 @@ Exit code is 0 when healthy, 1 when degraded. The JSON body contains
 | A9 | a9_claim_drift_check.py | hourly :45 | Claim/replay integrity monitor |
 | A10 | a10_graph_freshness.py | hourly :15 | Graph coverage + integrity monitor |
 | **A11** | **a11_workspace_status.py** | **every 4h :15** | **Single-command full operating brief** |
+| A12 | a12_retrieval_refresh.py | every 6h :30 | Refresh exact + semantic indexes from approved manifest |
+| A13 | a13_canonical_integrity.py | daily 07:00 | Verify canonical SQLite integrity |
 
 A11 is the new heartbeat for the status surface itself. It does not replace A2;
 A2 remains the fast watchdog, while A11 returns the richer JSON brief that an
 agent can parse in one call.
+
+A12 proactively repairs retrieval-source hash drift detected by A11. A13 gives
+canonical SQLite integrity an explicit deterministic schedule instead of relying
+on incidental database access by other gates.
 
 ## Keeping the status surface current
 
@@ -56,6 +89,9 @@ agent can parse in one call.
    if you need freshness immediately.
 4. **Skill updates**: When the status command or cron schedule changes, update
    `workflow-status-audit` skill.
+5. **Graphify refreshes**: Run `graphify update .` after code changes and write a
+   new baseline only after `graphify diagnose multigraph` and source-coverage
+   checks pass.
 
 ## What to do when A11 alerts
 
@@ -69,4 +105,5 @@ agent can parse in one call.
 ## Tests
 
 - `python -m unittest tests.test_workspace_status`
+- `python -m unittest tests.test_graphify_freshness`
 - `python -m unittest tests.test_cron_registration_validator`

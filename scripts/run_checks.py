@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
 import time
 import unittest
 import sys
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -25,6 +28,7 @@ from scripts import workflow_router
 from scripts import wiki_bootstrap
 from scripts.product_research_workflow import run_product_research
 from scripts.runtime_metadata import detect_active_model
+from scripts.workspace_fingerprint import correctness_snapshot
 
 
 def build_test_suite() -> unittest.TestSuite:
@@ -32,7 +36,62 @@ def build_test_suite() -> unittest.TestSuite:
     return unittest.defaultTestLoader.discover(str(PROJECT_ROOT / "tests"))
 
 
-def run_tests() -> tuple[bool, list[str], int]:
+def _pytest_outcome_counts(output: str) -> dict[str, int]:
+    """Parse executed outcomes from pytest's final timing summary only."""
+    summary_line = ""
+    for line in reversed(output.splitlines()):
+        if re.search(r"\bin\s+\d+(?:\.\d+)?s\b", line):
+            summary_line = line
+            break
+    outcomes = re.findall(
+        r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed)\b",
+        summary_line,
+    )
+    counts: dict[str, int] = {}
+    for count, label in outcomes:
+        normalized = "error" if label in {"error", "errors"} else label
+        counts[normalized] = counts.get(normalized, 0) + int(count)
+    return {
+        "test_count": sum(counts.values()),
+        "test_failure_count": counts.get("failed", 0) + counts.get("error", 0),
+    }
+
+
+def _pytest_test_count(output: str) -> int:
+    """Backward-compatible executed-test count helper."""
+    return _pytest_outcome_counts(output)["test_count"]
+
+
+def _pytest_failure_ids(output: str, *, limit: int | None = None) -> list[str]:
+    """Return exact pytest node IDs from the final short-summary section."""
+    lines = output.splitlines()
+    headers = [
+        index
+        for index, line in enumerate(lines)
+        if re.fullmatch(r"=+\s+short test summary info\s+=+", line.strip())
+    ]
+    if not headers:
+        return []
+    failure_ids: list[str] = []
+    for line in lines[headers[-1] + 1 :]:
+        if re.search(r"\bin\s+\d+(?:\.\d+)?s\b", line):
+            break
+        match = re.match(r"^(?:FAILED|ERROR)\s+(.+)$", line.strip())
+        if match:
+            failure_ids.append(match.group(1).split(" - ", 1)[0].strip())
+    return failure_ids if limit is None else failure_ids[: max(0, limit)]
+
+
+def _failure_ids_sha256(failure_ids: list[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            sorted(failure_ids),
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def run_tests() -> tuple[bool, list[str], int, int, int]:
     """Discover tests independently of the caller's current working directory.
 
     Prefers pytest when available for faster feedback and richer reporting.
@@ -58,8 +117,15 @@ def run_tests() -> tuple[bool, list[str], int]:
             output = completed.stdout + completed.stderr
             failures = []
             if completed.returncode != 0:
-                failures = [line for line in output.splitlines() if "FAILED" in line or "ERROR" in line][:10]
-            return completed.returncode == 0, failures, elapsed_ms
+                failures = _pytest_failure_ids(output)
+            outcomes = _pytest_outcome_counts(output)
+            return (
+                completed.returncode == 0,
+                failures,
+                elapsed_ms,
+                outcomes["test_count"],
+                outcomes["test_failure_count"],
+            )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
@@ -72,7 +138,38 @@ def run_tests() -> tuple[bool, list[str], int]:
         *(str(case) for case, _trace in result.failures),
         *(str(case) for case, _trace in result.errors),
     ]
-    return result.wasSuccessful(), failures, elapsed_ms
+    return (
+        result.wasSuccessful(),
+        failures,
+        elapsed_ms,
+        result.testsRun,
+        len(result.failures) + len(result.errors),
+    )
+
+
+def _safe_correctness_snapshot(project_root: Path) -> dict[str, Any]:
+    try:
+        return {**correctness_snapshot(project_root), "fingerprint_error": None}
+    except (OSError, ValueError) as exc:
+        return {
+            "source_fingerprint": None,
+            "source_file_count": 0,
+            "tested_commit": None,
+            "fingerprint_error": f"{type(exc).__name__}:{exc}",
+        }
+
+
+def _source_proof_errors(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> list[str]:
+    before_fingerprint = before.get("source_fingerprint")
+    after_fingerprint = after.get("source_fingerprint")
+    if not isinstance(before_fingerprint, str) or not isinstance(after_fingerprint, str):
+        return ["source_fingerprint_unavailable"]
+    if before_fingerprint != after_fingerprint:
+        return ["source_changed_during_run"]
+    return []
 
 
 def run_phase0_smoke(database_path: Path) -> dict:
@@ -222,12 +319,17 @@ def _record_run_check(
     *,
     tests_ok: bool,
     test_failures: list[str],
+    test_count: int | None = None,
+    test_failure_count: int | None = None,
     test_duration_ms: int,
     smoke: dict,
     routing: dict,
     wiki: dict,
     model_or_agent: str | None = None,
     started_at: str | None = None,
+    project_root: Path = PROJECT_ROOT,
+    source_snapshot_before: dict[str, Any] | None = None,
+    source_snapshot_after: dict[str, Any] | None = None,
 ) -> None:
     """Write a metadata-only telemetry row for the run_checks invocation."""
     target = Path(database_path) if database_path else DEFAULT_DATABASE_PATH
@@ -245,15 +347,45 @@ def _record_run_check(
     total_duration += routing.get("duration_ms", 0)
     total_duration += wiki.get("duration_ms", 0)
 
+    source_snapshot_after = source_snapshot_after or _safe_correctness_snapshot(project_root)
+    source_snapshot_before = source_snapshot_before or source_snapshot_after
+    before_fingerprint = source_snapshot_before.get("source_fingerprint")
+    after_fingerprint = source_snapshot_after.get("source_fingerprint")
+    proof_errors = _source_proof_errors(source_snapshot_before, source_snapshot_after)
+    errors.extend(proof_errors)
+    fingerprint_available = "source_fingerprint_unavailable" not in proof_errors
+    source_drift = "source_changed_during_run" in proof_errors
     resource_usage = {
-        "test_count": len(test_failures) + (1 if tests_ok else 0),
-        "test_failure_count": len(test_failures),
+        "test_count": (
+            test_count
+            if test_count is not None
+            else len(test_failures) + (1 if tests_ok else 0)
+        ),
+        "test_failure_count": (
+            test_failure_count
+            if test_failure_count is not None
+            else len(test_failures)
+        ),
         "smoke_duration_ms": smoke.get("duration_ms", 0),
         "routing_duration_ms": routing.get("duration_ms", 0),
         "wiki_duration_ms": wiki.get("duration_ms", 0),
         "unit_test_duration_ms": test_duration_ms,
         "smoke_entities_delta": smoke.get("delta_entities", 0),
         "smoke_metrics_delta": smoke.get("delta_metrics", 0),
+        "source_fingerprint": (
+            after_fingerprint if fingerprint_available and not source_drift else None
+        ),
+        "source_fingerprint_before": before_fingerprint,
+        "source_fingerprint_after": after_fingerprint,
+        "source_drift": source_drift,
+        "source_file_count": source_snapshot_after.get("source_file_count", 0),
+        "tested_commit": source_snapshot_after.get("tested_commit"),
+        "fingerprint_error": (
+            source_snapshot_before.get("fingerprint_error")
+            or source_snapshot_after.get("fingerprint_error")
+        ),
+        "test_failure_ids": [failure_id[:1024] for failure_id in test_failures[:100]],
+        "test_failure_ids_sha256": _failure_ids_sha256(test_failures),
     }
 
     # Sizes are byte counts of the metadata-only inputs and handoff payloads.
@@ -353,36 +485,57 @@ def main() -> int:
     arguments = _parse_args()
     started_at = _utc_now()
     active_model = detect_active_model()
-    tests_ok, test_failures, test_duration_ms = run_tests()
+    source_snapshot_before = _safe_correctness_snapshot(PROJECT_ROOT)
+    (
+        tests_ok,
+        test_failures,
+        test_duration_ms,
+        test_count,
+        test_failure_count,
+    ) = run_tests()
     if not tests_ok:
+        source_snapshot_after = _safe_correctness_snapshot(PROJECT_ROOT)
         if arguments.record_telemetry:
             _record_run_check(
                 Path(arguments.database) if arguments.database else None,
                 tests_ok=False,
                 test_failures=test_failures,
+                test_count=test_count,
+                test_failure_count=test_failure_count,
                 test_duration_ms=test_duration_ms,
                 smoke={},
                 routing={},
                 wiki={},
                 model_or_agent=active_model,
                 started_at=started_at,
+                source_snapshot_before=source_snapshot_before,
+                source_snapshot_after=source_snapshot_after,
             )
         return 1
 
     if arguments.skip_smoke:
+        source_snapshot_after = _safe_correctness_snapshot(PROJECT_ROOT)
+        source_proof_errors = _source_proof_errors(
+            source_snapshot_before,
+            source_snapshot_after,
+        )
         if arguments.record_telemetry:
             _record_run_check(
                 Path(arguments.database) if arguments.database else None,
                 tests_ok=True,
                 test_failures=[],
+                test_count=test_count,
+                test_failure_count=test_failure_count,
                 test_duration_ms=test_duration_ms,
                 smoke={},
                 routing={},
                 wiki={},
                 model_or_agent=active_model,
                 started_at=started_at,
+                source_snapshot_before=source_snapshot_before,
+                source_snapshot_after=source_snapshot_after,
             )
-        return 0
+        return 1 if source_proof_errors else 0
 
     if arguments.persistent_smoke:
         if not arguments.database:
@@ -401,18 +554,27 @@ def main() -> int:
     print("smoke-check:", smoke)
     print("routing-check:", routing_smoke)
     print("wiki-check:", wiki_smoke)
+    source_snapshot_after = _safe_correctness_snapshot(PROJECT_ROOT)
+    source_proof_errors = _source_proof_errors(
+        source_snapshot_before,
+        source_snapshot_after,
+    )
 
     if arguments.record_telemetry:
         _record_run_check(
             Path(arguments.database) if arguments.database else None,
             tests_ok=True,
             test_failures=[],
+            test_count=test_count,
+            test_failure_count=test_failure_count,
             test_duration_ms=test_duration_ms,
             smoke=smoke,
             routing=routing_smoke,
             wiki=wiki_smoke,
             model_or_agent=active_model,
             started_at=started_at,
+            source_snapshot_before=source_snapshot_before,
+            source_snapshot_after=source_snapshot_after,
         )
 
     return (
@@ -422,6 +584,7 @@ def main() -> int:
         and smoke["delta_events"] >= 1
         and not routing_smoke["routing"].get("routing_index_stale", True)
         and wiki_smoke["status"] == "fresh"
+        and not source_proof_errors
         else 1
     )
 

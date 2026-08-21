@@ -52,7 +52,7 @@ Execute via:
 
 ```bash
 python scripts/vector_memory_index.py memory_search \
-  --index tmp/vector-memory.sqlite \
+  --index vector/indexes/vector-memory.sqlite \
   --query "your natural-language question"
 ```
 
@@ -85,11 +85,11 @@ Execute both routes explicitly and then merge results:
 
 ```bash
 python scripts/workspace_index.py query \
-  --index tmp/workspace-index.sqlite \
+  --index vector/indexes/workspace-index.sqlite \
   --query "exact anchor"
 
 python scripts/vector_memory_index.py memory_search \
-  --index tmp/vector-memory.sqlite \
+  --index vector/indexes/vector-memory.sqlite \
   --query "same question"
 ```
 
@@ -106,7 +106,7 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
 1. Parse the request for exact identifiers, fields, dates, and structured filters.
 2. If strong structured anchors exist, run:
 
-   - `python scripts/workspace_index.py query --index tmp/workspace-index.sqlite --query "..."`
+   - `python scripts/workspace_index.py query --index vector/indexes/workspace-index.sqlite --query "..."`
 
 3. If the request is about relationships (dependencies, ownership, impact, supersession), run:
 
@@ -116,7 +116,7 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
 
 4. If no strong anchors exist, run:
 
-   - `python scripts/vector_memory_index.py memory_search --index tmp/vector-memory.sqlite --query "..."`
+   - `python scripts/vector_memory_index.py memory_search --index vector/indexes/vector-memory.sqlite --query "..."`
 
 5. If the first route returns no useful result, run the fallback route as bounded secondary pass.
 6. If multiple routes are used, deduplicate by source path and record ID.
@@ -125,7 +125,7 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
 
    ```bash
    python scripts/vector_memory_index.py memory_get \
-     --index tmp/vector-memory.sqlite \
+     --index vector/indexes/vector-memory.sqlite \
      --source-path "/absolute/path/to/source.md"
    ```
 
@@ -141,11 +141,11 @@ When available, use:
 - `scripts/workspace_index.py`
   - Exact workspace and full-text retrieval
   - Structured document, heading, alias, metadata, and freshness lookup
-  - Database: `tmp/workspace-index.sqlite`
+  - Database: `vector/indexes/workspace-index.sqlite`
 
 - `scripts/vector_memory_index.py`
   - Semantic/vector retrieval with source-grounded citations
-  - Database: `tmp/vector-memory.sqlite`
+  - Database: `vector/indexes/vector-memory.sqlite`
   - Query packet: `tmp/vector-memory-query.json`
 
 - `memory_search` (script command)

@@ -23,7 +23,15 @@ TIMEOUT_SECONDS = 120
 def main() -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     completed = subprocess.run(
-        [PYTHON, "scripts/workflow_router.py", "--all", "--write-index", "--answer", "summary"],
+        [
+            PYTHON,
+            "scripts/workflow_router.py",
+            "--all",
+            "--answer",
+            "summary",
+            "--validate",
+            "--write-index",
+        ],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,

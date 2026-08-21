@@ -98,6 +98,53 @@ Before answering from prior knowledge, use the route-selection and verification 
 
 ---
 
+## Workspace organization cadence
+
+The placement map is owned by `GOVERNANCE.md`. Follow this cadence so every
+session starts, writes, and closes against the same organization contract.
+
+### Session startup
+
+1. Run `python scripts/workspace_status.py`.
+2. Treat organization, routing, graph, vector, exact-index, and automation gate
+   failures as blockers to unrelated writes until their trust impact is known.
+3. Record `git status` and preserve all unrelated pre-existing changes.
+4. Resolve the active workflow, owner lane, blockers, and continuity pointer.
+
+### Before the first write
+
+1. Classify the artifact using the `GOVERNANCE.md` placement map.
+2. Read the target layer's README or authoritative contract.
+3. Distinguish authoritative input from generated or rebuildable output.
+4. Identify the owner command for generated files; do not hand-edit them.
+5. Confirm the write surface, rollback path, and any required lane lease.
+
+### During work
+
+- Preserve source evidence before deriving summaries or indexes.
+- Write exact current state to canonical or workflow-control surfaces only through
+  their governed adapters.
+- Keep scratch output in `tmp/`; promote useful results with provenance instead
+  of allowing scratch to become an unofficial durable store.
+- Keep unrelated working-tree changes isolated.
+
+### Session closeout
+
+1. Delete obsolete scratch or promote it to the correct governed layer.
+2. Refresh every derived surface affected by changed sources: wiki, workspace
+   index, vector index, routing index/capsules, and graph coverage as applicable.
+3. Run `python scripts/workspace_organization_validator.py`.
+4. Run focused tests, then `python scripts/run_checks.py` for shared surfaces.
+5. Re-run `python scripts/workspace_status.py` and require an honest healthy,
+   warned, or blocked result.
+6. Report changed paths, generated artifacts, verification evidence, remaining
+   debt, and uncommitted state. Do not commit unless requested.
+
+Scheduled maintenance supplements this session cadence; it does not replace
+startup and closeout verification.
+
+---
+
 ## Learning and improvement
 
 Instrument meaningful runs with request type, route, tools, model or agent,

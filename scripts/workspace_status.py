@@ -12,28 +12,51 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.workspace_fingerprint import correctness_snapshot
+from canonical.db import read_only_database_uri
+
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
 DEFAULT_DATABASE = PROJECT_ROOT / "canonical" / "efficiens.db"
 PYTHON = sys.executable
 
 DEFAULT_GATES: list[tuple[str, list[str], int]] = [
-    ("routing", ["scripts/workflow_router.py", "--all", "--answer", "summary"], 120),
+    ("organization", ["scripts/workspace_organization_validator.py"], 60),
+    (
+        "routing",
+        [
+            "scripts/workflow_router.py",
+            "--all",
+            "--answer",
+            "summary",
+            "--validate",
+            "--no-cache",
+            "--skip-recall-context",
+        ],
+        120,
+    ),
     ("wiki", ["scripts/wiki_bootstrap.py", "validate"], 120),
     ("alias", ["scripts/cron_alias_sweep.py"], 60),
     ("cron_registration", ["scripts/cron_registration_validator.py"], 60),
     ("claim_drift", ["scripts/cron_claim_drift_check.py"], 60),
     ("graph_integrity", ["scripts/graph_memory.py", "validate"], 120),
     ("graph_freshness", ["scripts/cron_graph_freshness.py"], 120),
+    ("graphify_freshness", ["scripts/graphify_freshness.py"], 120),
     ("vector_memory", ["scripts/vector_memory_index.py", "status"], 120),
-    ("archive_stale", ["scripts/cron_archive_stale_workflows.py"], 120),
+    ("workspace_index", ["scripts/workspace_index.py", "status"], 120),
+    ("archive_stale", ["scripts/cron_archive_stale_workflows.py", "--check-only"], 120),
 ]
 # Allow tests to inject a different gate list via the environment.
 _GATES_ENV = os.environ.get("WORKSPACE_STATUS_GATES")
@@ -83,6 +106,23 @@ def _run(label: str, args: list[str], timeout: int, project_root: Path = PROJECT
             "stdout": None,
             "stderr_tail": [str(exc)],
         }
+
+
+def _run_gates(
+    gates: list[tuple[str, list[str], int]],
+    *,
+    project_root: Path = PROJECT_ROOT,
+) -> dict[str, dict]:
+    """Run gates serially to avoid shared SQLite and artifact races."""
+    results: dict[str, dict] = {}
+    for label, args, timeout in gates:
+        results[label] = _run(
+            label,
+            args,
+            timeout,
+            project_root=project_root,
+        )
+    return results
 
 
 def _git_head() -> dict:
@@ -147,14 +187,133 @@ def _routing_brief(routing_gate: dict) -> dict:
     }
 
 
+def _correctness_status(project_root: Path) -> dict[str, Any]:
+    """Return the latest full-test outcome and whether it matches current sources."""
+    database_path = Path(project_root).resolve() / "canonical" / "efficiens.db"
+    if not database_path.is_file():
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": "canonical_database_missing",
+        }
+    try:
+        uri = read_only_database_uri(database_path)
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT started_at, completed_at, duration_ms, resource_usage_json, "
+                "verification_result, acceptance_status "
+                "FROM run_metrics WHERE request_type = 'run_checks' "
+                "ORDER BY started_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+    except (sqlite3.Error, OSError) as exc:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": f"telemetry_read_failed:{type(exc).__name__}",
+        }
+    if row is None:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": "no_run_checks_telemetry",
+        }
+    try:
+        resource = json.loads(row["resource_usage_json"] or "{}")
+    except json.JSONDecodeError:
+        resource = None
+    if not isinstance(resource, dict):
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": "correctness_telemetry_invalid",
+        }
+    recorded_fingerprint = resource.get("source_fingerprint")
+    test_count = resource.get("test_count")
+    test_failure_count = resource.get("test_failure_count")
+    source_file_count = resource.get("source_file_count")
+    tested_commit = resource.get("tested_commit")
+    telemetry_complete = (
+        isinstance(recorded_fingerprint, str)
+        and len(recorded_fingerprint) == 64
+        and all(character in "0123456789abcdef" for character in recorded_fingerprint)
+        and type(test_count) is int
+        and test_count >= 0
+        and type(test_failure_count) is int
+        and 0 <= test_failure_count <= test_count
+        and type(source_file_count) is int
+        and source_file_count >= 0
+        and "tested_commit" in resource
+        and (tested_commit is None or isinstance(tested_commit, str))
+        and isinstance(row["completed_at"], str)
+        and bool(row["completed_at"])
+    )
+    if not telemetry_complete:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": "correctness_telemetry_incomplete",
+        }
+    try:
+        current = correctness_snapshot(project_root)
+    except (OSError, ValueError) as exc:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": f"correctness_fingerprint_failed:{type(exc).__name__}",
+        }
+    stale = not recorded_fingerprint or recorded_fingerprint != current["source_fingerprint"]
+    accepted = (
+        row["verification_result"] == "pass"
+        and row["acceptance_status"] == "accepted"
+    )
+    if accepted and not (
+        test_count > 0
+        and test_failure_count == 0
+        and source_file_count == current["source_file_count"]
+    ):
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": True,
+            "reason": "correctness_telemetry_inconsistent",
+        }
+    status = "failed" if not accepted else "stale" if stale else "current"
+    return {
+        "available": True,
+        "status": status,
+        "stale": stale,
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "duration_ms": row["duration_ms"],
+        "verification_result": row["verification_result"],
+        "acceptance_status": row["acceptance_status"],
+        "test_count": resource.get("test_count"),
+        "test_failure_count": resource.get("test_failure_count"),
+        "tested_commit": resource.get("tested_commit"),
+        "tested_source_fingerprint": recorded_fingerprint,
+        "current_commit": current.get("tested_commit"),
+        "current_source_fingerprint": current["source_fingerprint"],
+        "source_file_count": current["source_file_count"],
+    }
+
+
 def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]:
     hard_labels = {
+        "organization",
         "routing",
         "alias",
         "cron_registration",
         "graph_integrity",
         "graph_freshness",
         "vector_memory",
+        "workspace_index",
         "archive_stale",
     }
     hard_failures: list[str] = []
@@ -180,6 +339,17 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
     if claim_gate.get("exit", 1) != 0:
         warnings.append("claim_drift")
 
+    if "graphify_freshness" in gates:
+        graphify_gate = gates["graphify_freshness"]
+        if graphify_gate.get("exit", 1) != 0:
+            stdout = graphify_gate.get("stdout")
+            graphify_status = stdout.get("status") if isinstance(stdout, dict) else None
+            warnings.append(
+                "graphify_stale"
+                if graphify_status == "stale"
+                else "graphify_unavailable"
+            )
+
     if hard_failures:
         return "degraded", hard_failures, warnings
     if warnings:
@@ -203,18 +373,46 @@ def _recent_commit(n: int = 3) -> list[str]:
 
 def main(project_root: Path = PROJECT_ROOT) -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    gates = {
-        label: _run(label, args, timeout, project_root=project_root)
-        for label, args, timeout in GATES
-    }
+    gates = _run_gates(GATES, project_root=project_root)
     decision, hard, warnings = _health_decision(gates)
     routing_brief = _routing_brief(gates.get("routing", {}))
+    correctness = _correctness_status(Path(project_root))
+    if correctness.get("status") != "current":
+        correctness_warning = (
+            "correctness_failed"
+            if correctness.get("status") == "failed"
+            else (
+                "correctness_stale"
+                if correctness.get("status") == "stale"
+                else "correctness_unavailable"
+            )
+        )
+        warnings.append(correctness_warning)
+        if not hard:
+            decision = "healthy_with_warnings"
 
     # Use the project_root for git and workflows in tests; production still
     # resolves through the default PROJECT_ROOT.
     git_head = _git_head() if project_root == PROJECT_ROOT else {"branch": "unknown", "commit_short": "unknown", "status_lines": []}
     workflows = _load_workflows() if project_root == PROJECT_ROOT else []
     recent = _recent_commit() if project_root == PROJECT_ROOT else []
+
+    if hard:
+        recommended_next_action = "Investigate hard failures before any workspace mutation."
+    elif correctness.get("status") in {"unavailable", "stale", "failed"}:
+        recommended_next_action = (
+            "Run python scripts/cron_test_gate.py to refresh the full correctness proof."
+        )
+    elif "graphify_stale" in warnings or "graphify_unavailable" in warnings:
+        recommended_next_action = (
+            "Refresh Graphify, then run python scripts/graphify_freshness.py --write-baseline."
+        )
+    elif warnings:
+        recommended_next_action = "Review workspace warnings before the next mutation."
+    else:
+        recommended_next_action = (
+            "Workspace is healthy; next action depends on the active workflow routing brief."
+        )
 
     brief = {
         "schema": "workspace-status.v1",
@@ -223,17 +421,14 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
         "recent_commits": recent,
         "active_workflows": workflows,
         "routing_brief": routing_brief,
+        "correctness": correctness,
         "gates": gates,
         "health": {
             "status": decision,
             "hard_failures": hard,
             "warnings": warnings,
         },
-        "recommended_next_action": (
-            "Investigate hard failures before any workspace mutation."
-            if hard
-            else "Workspace is healthy; next action depends on the active workflow routing brief."
-        ),
+        "recommended_next_action": recommended_next_action,
     }
 
     print(json.dumps(brief, indent=2, default=str))

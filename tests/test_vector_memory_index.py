@@ -12,6 +12,16 @@ from scripts.vector_memory_index import SourceSpec, build_index, get_index_entry
 
 
 class VectorMemoryIndexTests(unittest.TestCase):
+    def test_default_index_is_durable_and_query_packet_is_temporary(self):
+        self.assertEqual(
+            vector_memory_index.DEFAULT_INDEX_PATH,
+            vector_memory_index.WORKSPACE_ROOT / "vector" / "indexes" / "vector-memory.sqlite",
+        )
+        self.assertEqual(
+            vector_memory_index.DEFAULT_QUERY_PACKET_PATH,
+            vector_memory_index.WORKSPACE_ROOT / "tmp" / "vector-memory-query.json",
+        )
+
     def test_build_and_full_text_search_return_source_grounded_citation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "approved"
@@ -394,6 +404,31 @@ class VectorMemoryIndexTests(unittest.TestCase):
             summary = index_status(index_path)
 
             self.assertEqual(summary["stale_source_count"], 1)
+
+    def test_status_cli_exits_nonzero_for_stale_sources(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("fresh baseline fact", encoding="utf-8")
+            index_path = Path(directory) / "vector-memory.sqlite"
+            build_index(index_path, [SourceSpec(note)])
+            note.write_text("changed after indexing", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    "python",
+                    "scripts/vector_memory_index.py",
+                    "status",
+                    "--index",
+                    str(index_path),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertEqual(json.loads(completed.stdout)["status"], "degraded")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ from typing import Sequence
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INDEX_PATH = WORKSPACE_ROOT / "tmp" / "vector-memory.sqlite"
+DEFAULT_INDEX_PATH = WORKSPACE_ROOT / "vector" / "indexes" / "vector-memory.sqlite"
 DEFAULT_QUERY_PACKET_PATH = WORKSPACE_ROOT / "tmp" / "vector-memory-query.json"
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_EMBEDDING_MODEL = "nomic-embed-text:latest"
@@ -462,10 +462,12 @@ def index_status(index_path: Path | str) -> dict[str, object]:
             ).fetchall()
             for row in rows:
                 path = Path(row["source_path"])
-                if path.exists():
-                    current_hash = _content_hash(path.read_text(encoding="utf-8"))
-                    if current_hash != row["source_hash"]:
-                        stale_count += 1
+                if not path.exists():
+                    stale_count += 1
+                    continue
+                current_hash = _content_hash(path.read_text(encoding="utf-8"))
+                if current_hash != row["source_hash"]:
+                    stale_count += 1
         return {
             "index_path": str(resolved),
             "available": True,
@@ -1231,8 +1233,10 @@ def _command_get(arguments: argparse.Namespace) -> int:
 
 def _command_status(arguments: argparse.Namespace) -> int:
     summary = index_status(arguments.index)
-    print(json.dumps({"status": "ok", "generated_at": _utc_now(), **summary}, sort_keys=True))
-    return 0
+    healthy = bool(summary["available"]) and summary["stale_source_count"] == 0
+    status = "ok" if healthy else "degraded"
+    print(json.dumps({"status": status, "generated_at": _utc_now(), **summary}, sort_keys=True))
+    return 0 if healthy else 1
 
 
 def _parse_arguments() -> argparse.ArgumentParser:

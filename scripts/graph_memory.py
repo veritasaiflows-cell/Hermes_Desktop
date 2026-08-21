@@ -102,7 +102,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     Exit 0 when clean; exit 1 when issues are found (cron-friendly).
     """
-    with CanonicalDB(args.database) as db:
+    with CanonicalDB(args.database, read_only=True) as db:
         edges = db.list_relationships(status=None, include_expired=True)
         tables = db.tables()
         issues: list[dict] = []
