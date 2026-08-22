@@ -300,6 +300,17 @@ class WikiRegenLogicTests(unittest.TestCase):
 
 
 class RoutingRefreshLogicTests(unittest.TestCase):
+    def test_malformed_router_output_fails_closed(self):
+        fake_result = subprocess_result(returncode=0, stdout="not-json")
+        with patch.object(
+            cron_routing_refresh.subprocess,
+            "run",
+            return_value=fake_result,
+        ):
+            rc = cron_routing_refresh.main()
+
+        self.assertEqual(rc, 1)
+
     def test_refresh_command_validates_before_writing(self):
         fake_result = subprocess_result(
             returncode=0,

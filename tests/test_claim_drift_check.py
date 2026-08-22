@@ -18,7 +18,13 @@ class ClaimDriftCheckTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             db_path = Path(directory) / "efficiens.db"
             # No database yet; main should report OK.
-            result = claim_drift_main()
+            import scripts.cron_claim_drift_check as drift_module
+            original_database = drift_module.DEFAULT_DATABASE
+            drift_module.DEFAULT_DATABASE = db_path
+            try:
+                result = claim_drift_main()
+            finally:
+                drift_module.DEFAULT_DATABASE = original_database
             self.assertEqual(result, 0)
 
     def test_claim_drift_flags_expired_claim(self):

@@ -50,6 +50,7 @@ DEFAULT_GATES: list[tuple[str, list[str], int]] = [
     ("wiki", ["scripts/wiki_bootstrap.py", "validate"], 120),
     ("alias", ["scripts/cron_alias_sweep.py"], 60),
     ("cron_registration", ["scripts/cron_registration_validator.py"], 60),
+    ("feedback_evaluation", ["scripts/feedback_evaluation_loop.py", "status"], 60),
     ("claim_drift", ["scripts/cron_claim_drift_check.py"], 60),
     ("graph_integrity", ["scripts/graph_memory.py", "validate"], 120),
     ("graph_freshness", ["scripts/cron_graph_freshness.py"], 120),
@@ -339,6 +340,27 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
     if claim_gate.get("exit", 1) != 0:
         warnings.append("claim_drift")
 
+    feedback_gate = gates.get("feedback_evaluation", {})
+    if feedback_gate:
+        if feedback_gate.get("exit", 1) != 0:
+            warnings.append("feedback_evaluation_unavailable")
+        else:
+            feedback = feedback_gate.get("stdout")
+            feedback_status = feedback.get("status") if isinstance(feedback, dict) else None
+            report_status = feedback.get("report_status") if isinstance(feedback, dict) else None
+            if feedback_status == "review_required":
+                warnings.append("feedback_review_required")
+            elif feedback_status == "failed":
+                warnings.append("feedback_evaluation_failed")
+            if report_status == "stale" or (
+                report_status is None and feedback_status == "stale"
+            ):
+                warnings.append("feedback_evaluation_stale")
+            elif report_status == "unavailable" or (
+                report_status is None and feedback_status not in {"ready", "review_required"}
+            ):
+                warnings.append("feedback_evaluation_unavailable")
+
     if "graphify_freshness" in gates:
         graphify_gate = gates["graphify_freshness"]
         if graphify_gate.get("exit", 1) != 0:
@@ -377,6 +399,7 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
     decision, hard, warnings = _health_decision(gates)
     routing_brief = _routing_brief(gates.get("routing", {}))
     correctness = _correctness_status(Path(project_root))
+    feedback_evaluation = gates.get("feedback_evaluation", {}).get("stdout")
     if correctness.get("status") != "current":
         correctness_warning = (
             "correctness_failed"
@@ -407,6 +430,14 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
         recommended_next_action = (
             "Refresh Graphify, then run python scripts/graphify_freshness.py --write-baseline."
         )
+    elif "feedback_review_required" in warnings:
+        recommended_next_action = (
+            "Review the feedback-evaluation candidate before any promotion decision."
+        )
+    elif "feedback_evaluation_stale" in warnings or "feedback_evaluation_unavailable" in warnings:
+        recommended_next_action = (
+            "Run python scripts/cron_telemetry_harvest.py to refresh the feedback-evaluation report."
+        )
     elif warnings:
         recommended_next_action = "Review workspace warnings before the next mutation."
     else:
@@ -422,6 +453,7 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
         "active_workflows": workflows,
         "routing_brief": routing_brief,
         "correctness": correctness,
+        "feedback_evaluation": feedback_evaluation,
         "gates": gates,
         "health": {
             "status": decision,

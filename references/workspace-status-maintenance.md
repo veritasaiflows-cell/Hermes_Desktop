@@ -14,6 +14,7 @@ artifact races, and returns a JSON brief:
 - `wiki` — `scripts/wiki_bootstrap.py validate`
 - `alias` — `scripts/cron_alias_sweep.py`
 - `cron_registration` — `scripts/cron_registration_validator.py`
+- `feedback_evaluation` — `scripts/feedback_evaluation_loop.py status`
 - `claim_drift` — `scripts/cron_claim_drift_check.py`
 - `graph_integrity` — `scripts/graph_memory.py validate`
 - `graph_freshness` — `scripts/cron_graph_freshness.py`
@@ -44,6 +45,16 @@ malformed correctness evidence produces a warning and the brief recommends
 `python scripts/cron_test_gate.py`; the fast operating-status command does not
 rerun the full suite itself.
 
+The brief also includes the compact `feedback_evaluation` packet. A fresh
+`review_required` report is a warning, not a hard failure: it means repeated
+metadata has produced a baseline-backed candidate that needs explicit human
+review. Missing, malformed, or stale feedback reports are warnings and the
+brief recommends `python scripts/cron_telemetry_harvest.py`. Canonical pending
+candidate IDs remain visible even when the derived report is missing or stale;
+the packet's `report_status` independently reports `fresh`, `stale`, or
+`unavailable`. A failed baseline adds `feedback_evaluation_failed` while A8
+returns nonzero and retries the cohort on the next refresh.
+
 The A11 path is read-only: routing bypasses cache reads/writes and vector recall,
 all canonical graph/claim/freshness reads use `CanonicalDB(..., read_only=True)`
 or SQLite `mode=ro`, and stale-workflow archiving runs in check-only mode. Mutating
@@ -58,10 +69,10 @@ archive and refresh operations remain separate explicit jobs.
 | A2-full | a2_full_test_gate.py | daily 06:00 | Full unit/smoke correctness gate |
 | A3 | a3_routing_cache_sweep.py | daily 09:00 | Evict stale routing-cache rows |
 | A4 | a4_archive_stale_workflows.py | weekly Sun 10:00 | Archive terminal workflows |
-| A5 | a5_routing_refresh.py | hourly | Regenerate routing index + capsules |
+| A5 | a5_routing_refresh.py | hourly :35 | Regenerate routing index + capsules after the :30 retrieval refresh window |
 | A6 | a6_alias_sweep.py | daily 09:30 | Detect dead aliases |
 | A7 | a7_queue_hygiene.py | weekly Sun 11:00 | Active-workflows queue hygiene |
-| A8 | a8_telemetry_harvest.py | daily 06:30 | Collect run_metrics telemetry |
+| A8 | a8_telemetry_harvest.py | daily 06:30 | Aggregate canonical + turn telemetry; create baseline-only review candidates after A2-full |
 | A9 | a9_claim_drift_check.py | hourly :45 | Claim/replay integrity monitor |
 | A10 | a10_graph_freshness.py | hourly :15 | Graph coverage + integrity monitor |
 | **A11** | **a11_workspace_status.py** | **every 4h :15** | **Single-command full operating brief** |

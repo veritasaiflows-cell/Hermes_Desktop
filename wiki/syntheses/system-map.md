@@ -3,7 +3,7 @@
 - page_type: synthesis
 - owner: references/operating-procedures.md
 - status: current
-- generated_time: 2026-08-15T00:20:00Z
+- generated_time: 2026-08-22T15:55:01Z
 - source_artifacts:
   - references/operating-procedures.md
   - references/memory-routing.md

@@ -42,7 +42,7 @@
   "display_name": "Workflow D - Campaign Execution",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-21T00:00:29Z",
+  "generated_at": "2026-08-22T19:35:41Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -69,11 +69,11 @@
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L75-L75",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L107-L107",
         "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5472807001131496,
+        "score": 0.5609644289678999,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       },
       {

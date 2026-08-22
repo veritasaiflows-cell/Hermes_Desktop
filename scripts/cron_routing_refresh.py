@@ -49,8 +49,8 @@ def main() -> int:
         report = json.loads(completed.stdout)
         stale = report.get("routing_index_stale", True)
     except json.JSONDecodeError:
-        print(f"ROUTING REFRESH OK (unparsed) {now}")
-        return 0
+        print(f"ROUTING REFRESH FAIL {now} reason=invalid_report")
+        return 1
 
     if stale:
         print(f"ROUTING REFRESH DEGRADED {now}")

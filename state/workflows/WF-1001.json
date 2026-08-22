@@ -22,7 +22,7 @@
   "display_name": "Workflow B - Listing Drafts",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-21T00:00:29Z",
+  "generated_at": "2026-08-22T19:35:41Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -57,12 +57,12 @@
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md:L1-L1",
-        "excerpt": "# Workspace Status Maintenance\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L107-L107",
+        "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5547374873138248,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md"
+        "score": 0.5506150188419481,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       }
     ]
   },

@@ -33,6 +33,80 @@ def _gate_env(gate_scripts: dict[str, str]) -> str:
 
 
 class WorkspaceStatusTests(unittest.TestCase):
+    def test_pending_review_and_stale_report_are_both_warnings(self) -> None:
+        gates = {
+            label: {"exit": 0}
+            for label in (
+                "organization",
+                "routing",
+                "alias",
+                "cron_registration",
+                "graph_integrity",
+                "graph_freshness",
+                "vector_memory",
+                "workspace_index",
+                "archive_stale",
+            )
+        }
+        gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
+        gates["claim_drift"] = {"exit": 0}
+        gates["feedback_evaluation"] = {
+            "exit": 0,
+            "stdout": {
+                "status": "review_required",
+                "report_status": "stale",
+                "pending_review_count": 1,
+            },
+        }
+
+        status, hard, warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "healthy_with_warnings")
+        self.assertEqual(hard, [])
+        self.assertIn("feedback_review_required", warnings)
+        self.assertIn("feedback_evaluation_stale", warnings)
+
+    def test_failed_feedback_baseline_is_a_warning(self) -> None:
+        gates = {
+            label: {"exit": 0}
+            for label in (
+                "organization",
+                "routing",
+                "alias",
+                "cron_registration",
+                "graph_integrity",
+                "graph_freshness",
+                "vector_memory",
+                "workspace_index",
+                "archive_stale",
+            )
+        }
+        gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
+        gates["claim_drift"] = {"exit": 0}
+        gates["feedback_evaluation"] = {
+            "exit": 0,
+            "stdout": {
+                "status": "failed",
+                "report_status": "fresh",
+                "failed_candidate_count": 1,
+            },
+        }
+
+        status, hard, warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "healthy_with_warnings")
+        self.assertEqual(hard, [])
+        self.assertIn("feedback_evaluation_failed", warnings)
+
+    def test_default_feedback_evaluation_gate_is_read_only_status(self) -> None:
+        feedback = next(
+            gate for gate in workspace_status.DEFAULT_GATES if gate[0] == "feedback_evaluation"
+        )
+        self.assertEqual(
+            feedback[1],
+            ["scripts/feedback_evaluation_loop.py", "status"],
+        )
+
     def test_default_routing_gate_requires_freshness_validation(self) -> None:
         routing = next(gate for gate in workspace_status.DEFAULT_GATES if gate[0] == "routing")
         self.assertIn("--validate", routing[1])

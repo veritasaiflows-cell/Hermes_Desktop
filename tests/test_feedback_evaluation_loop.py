@@ -1,0 +1,1008 @@
+from __future__ import annotations
+
+import json
+import io
+import sqlite3
+import subprocess
+import sys
+import unittest
+from contextlib import redirect_stdout
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from canonical.db import CanonicalDB
+from scripts import cron_telemetry_harvest, feedback_evaluation_loop
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _seed_turn_metrics(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE turn_metrics (
+                turn_key TEXT PRIMARY KEY,
+                completed_at TEXT NOT NULL,
+                provider TEXT,
+                model TEXT,
+                outcome TEXT NOT NULL,
+                error_category TEXT,
+                api_error_count INTEGER NOT NULL,
+                retry_count INTEGER NOT NULL,
+                api_request_count INTEGER NOT NULL,
+                tool_call_count INTEGER NOT NULL,
+                tool_error_count INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                api_duration_ms INTEGER NOT NULL,
+                tool_duration_ms INTEGER NOT NULL,
+                approx_input_tokens INTEGER
+            );
+            """
+        )
+        for index in range(3):
+            connection.execute(
+                """
+                INSERT INTO turn_metrics (
+                    turn_key, completed_at, provider, model, outcome,
+                    error_category, api_error_count, retry_count,
+                    api_request_count, tool_call_count, tool_error_count,
+                    duration_ms, api_duration_ms, tool_duration_ms,
+                    approx_input_tokens
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"turn-{index}",
+                    f"2026-08-21T0{index}:00:00Z",
+                    "openai-codex",
+                    "gpt-5.6-terra",
+                    "complete",
+                    "APIConnectionError",
+                    1,
+                    0,
+                    2,
+                    1,
+                    0,
+                    1000,
+                    900,
+                    50,
+                    1000,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+class FeedbackEvaluationLoopTests(unittest.TestCase):
+    def test_turn_signal_requires_minimum_repeated_count(self):
+        with TemporaryDirectory() as directory:
+            turn_path = Path(directory) / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute("DELETE FROM turn_metrics WHERE turn_key = ?", ("turn-2",))
+                connection.commit()
+            finally:
+                connection.close()
+
+            signals = feedback_evaluation_loop._turn_error_signals(
+                turn_path,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(signals, [])
+
+    def test_a8_child_failure_returns_nonzero(self):
+        completed = SimpleNamespace(returncode=1, stdout='{"status":"error"}', stderr="boom")
+        stdout = io.StringIO()
+        with (
+            patch.object(cron_telemetry_harvest.subprocess, "run", return_value=completed),
+            redirect_stdout(stdout),
+        ):
+            exit_code = cron_telemetry_harvest.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("FEEDBACK EVALUATION FAIL", stdout.getvalue())
+
+    def test_a8_rejects_review_status_without_valid_candidate_payload(self):
+        for payload in (
+            {"status": "review_required", "candidates": []},
+            {
+                "schema": "feedback-evaluation-report.v1",
+                "status": "review_required",
+                "candidates": [],
+            },
+        ):
+            with self.subTest(payload=payload):
+                completed = SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(payload),
+                    stderr="",
+                )
+                with patch.object(
+                    cron_telemetry_harvest.subprocess,
+                    "run",
+                    return_value=completed,
+                ):
+                    self.assertEqual(cron_telemetry_harvest.main(), 1)
+
+    def test_acceptance_comparison_enforces_cohort_count_failures_and_duration(self):
+        baseline_evidence = {
+            "cohort_id": "feedback-harness-v1",
+            "test_count": 4,
+            "test_failure_count": 0,
+            "duration_ms": 100,
+        }
+        baseline = {"evidence_json": json.dumps(baseline_evidence)}
+        cases = {
+            "cohort_mismatch": {**baseline_evidence, "cohort_id": "other"},
+            "test_count_mismatch": {**baseline_evidence, "test_count": 5},
+            "additional_failure": {**baseline_evidence, "test_failure_count": 1},
+            "duration_over_20_percent": {**baseline_evidence, "duration_ms": 121},
+        }
+        for name, evidence in cases.items():
+            with self.subTest(name=name):
+                self.assertFalse(
+                    feedback_evaluation_loop._comparison_is_acceptable(
+                        baseline,
+                        {"evidence_json": json.dumps(evidence)},
+                    )
+                )
+        self.assertTrue(
+            feedback_evaluation_loop._comparison_is_acceptable(
+                baseline,
+                {"evidence_json": json.dumps({**baseline_evidence, "duration_ms": 120})},
+            )
+        )
+
+    def test_missing_or_stale_report_still_surfaces_canonical_pending_candidate(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = "feedback-candidate-pending"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Pending feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+
+            missing = feedback_evaluation_loop.feedback_status(
+                canonical_database=canonical_path,
+                report_path=root / "missing.json",
+                now="2026-08-21T05:00:00Z",
+            )
+            stale_path = root / "stale.json"
+            stale_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "feedback-evaluation-report.v1",
+                        "generated_at": "2026-08-19T00:00:00Z",
+                        "status": "review_required",
+                        "candidates": [{"candidate_id": candidate_id}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stale = feedback_evaluation_loop.feedback_status(
+                canonical_database=canonical_path,
+                report_path=stale_path,
+                now="2026-08-21T05:00:00Z",
+            )
+
+            for status, report_status in ((missing, "unavailable"), (stale, "stale")):
+                self.assertEqual(status["status"], "review_required")
+                self.assertEqual(status["report_status"], report_status)
+                self.assertEqual(status["pending_review_count"], 1)
+                self.assertEqual(status["candidate_ids"], [candidate_id])
+
+    def test_direct_script_entrypoint_resolves_workspace_imports(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "feedback_evaluation_loop.py"),
+                    "status",
+                    "--database",
+                    str(canonical_path),
+                    "--report",
+                    str(root / "missing.json"),
+                ],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+        self.assertNotIn("ModuleNotFoundError", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["status"], "unavailable")
+
+    def test_a8_runs_feedback_refresh_and_surfaces_review_candidate(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "schema": "feedback-evaluation-report.v1",
+                    "status": "review_required",
+                    "candidates": [{"candidate_id": "feedback-candidate-example"}],
+                }
+            ),
+            stderr="",
+        )
+        stdout = io.StringIO()
+        with (
+            patch.object(cron_telemetry_harvest.subprocess, "run", return_value=completed) as run_mock,
+            redirect_stdout(stdout),
+        ):
+            exit_code = cron_telemetry_harvest.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            run_mock.call_args.args[0][1:],
+            ["scripts/feedback_evaluation_loop.py", "refresh"],
+        )
+        self.assertIn("FEEDBACK REVIEW REQUIRED", stdout.getvalue())
+        self.assertIn("feedback-candidate-example", stdout.getvalue())
+
+    def test_status_cli_emits_compact_json(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            report_path = root / "report.json"
+            with CanonicalDB(canonical_path):
+                pass
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "feedback-evaluation-report.v1",
+                        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "status": "ready",
+                        "candidates": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = feedback_evaluation_loop.main(
+                    [
+                        "status",
+                        "--database",
+                        str(canonical_path),
+                        "--report",
+                        str(report_path),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "ready")
+            self.assertEqual(payload["pending_review_count"], 0)
+
+    def test_status_surfaces_fresh_human_review_candidate(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            report_path = root / "derived" / "feedback-evaluation" / "latest.json"
+            candidate_id = "feedback-candidate-example"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+            report_path.parent.mkdir(parents=True)
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "feedback-evaluation-report.v1",
+                        "generated_at": "2026-08-21T04:00:00Z",
+                        "status": "review_required",
+                        "candidates": [{"candidate_id": candidate_id}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            status = feedback_evaluation_loop.feedback_status(
+                canonical_database=canonical_path,
+                report_path=report_path,
+                now="2026-08-21T05:00:00Z",
+            )
+
+            self.assertEqual(status["status"], "review_required")
+            self.assertEqual(status["pending_review_count"], 1)
+            self.assertEqual(status["candidate_ids"], [candidate_id])
+
+    def test_fixed_cohort_uses_bounded_existing_control_plane_targets(self):
+        snapshot = {
+            "source_fingerprint": "c" * 64,
+            "source_file_count": 4,
+            "tested_commit": "cohort-commit",
+        }
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="====================== 12 passed in 1.0s ======================\n",
+            stderr="",
+        )
+        with (
+            patch.object(feedback_evaluation_loop.subprocess, "run", return_value=completed) as run_mock,
+            patch.object(feedback_evaluation_loop, "correctness_snapshot", return_value=snapshot),
+        ):
+            result = feedback_evaluation_loop.run_fixed_cohort()
+
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[:4], [sys.executable, "-m", "pytest", "-q"])
+        self.assertEqual(result["cohort_id"], feedback_evaluation_loop.COHORT_ID)
+        self.assertEqual(result["result"], "pass")
+        self.assertEqual(result["test_count"], 12)
+        self.assertEqual(result["test_failure_count"], 0)
+        self.assertEqual(result["source_fingerprint"], "c" * 64)
+
+    def test_fixed_cohort_cannot_pass_without_executed_tests(self):
+        snapshot = {
+            "source_fingerprint": "c" * 64,
+            "source_file_count": 4,
+            "tested_commit": "cohort-commit",
+        }
+        completed = SimpleNamespace(returncode=0, stdout="no pytest summary\n", stderr="")
+        with (
+            patch.object(feedback_evaluation_loop.subprocess, "run", return_value=completed),
+            patch.object(feedback_evaluation_loop, "correctness_snapshot", return_value=snapshot),
+        ):
+            result = feedback_evaluation_loop.run_fixed_cohort()
+
+        self.assertEqual(result["result"], "fail")
+        self.assertEqual(result["test_count"], 0)
+
+    def test_failed_baseline_fails_refresh_and_is_retried(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            base = {
+                "cohort_id": "feedback-harness-v1",
+                "test_count": 4,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "baseline",
+            }
+            failed = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: {
+                    **base,
+                    "result": "fail",
+                    "test_failure_count": 1,
+                },
+                now="2026-08-21T04:00:00Z",
+            )
+            recovered = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: {
+                    **base,
+                    "result": "pass",
+                    "test_failure_count": 0,
+                },
+                now="2026-08-21T04:01:00Z",
+            )
+
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(recovered["status"], "review_required")
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks"
+                ).fetchone()[0]
+                validations = db.connection.execute(
+                    "SELECT result FROM validation_results ORDER BY validated_at"
+                ).fetchall()
+            self.assertEqual(task_status, "baseline_recorded")
+            self.assertEqual([row[0] for row in validations], ["fail", "pass"])
+
+    def test_unevaluated_candidate_is_rebaselined_when_cohort_version_changes(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = feedback_evaluation_loop._candidate_id(
+                "turn_api_error:APIConnectionError"
+            )
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Versioned cohort candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps(
+                            {
+                                "cohort_id": "feedback-harness-obsolete",
+                                "result": "pass",
+                                "test_count": 4,
+                                "test_failure_count": 0,
+                                "duration_ms": 100,
+                                "source_fingerprint": "a" * 64,
+                                "tested_commit": "old-baseline",
+                            }
+                        ),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            cohort_calls: list[str] = []
+
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: cohort_calls.append("baseline")
+                or {
+                    "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                    "result": "pass",
+                    "test_count": 5,
+                    "test_failure_count": 0,
+                    "duration_ms": 110,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "new-baseline",
+                },
+                now="2026-08-21T04:01:00Z",
+            )
+
+            self.assertEqual(cohort_calls, ["baseline"])
+            self.assertEqual(report["status"], "review_required")
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                evidence = [
+                    json.loads(row[0])
+                    for row in db.connection.execute(
+                        "SELECT evidence_json FROM validation_results "
+                        "WHERE subject_id = ? ORDER BY validated_at",
+                        (candidate_id,),
+                    )
+                ]
+            self.assertEqual(
+                [item["cohort_id"] for item in evidence],
+                ["feedback-harness-obsolete", feedback_evaluation_loop.COHORT_ID],
+            )
+
+    def test_candidate_evaluation_refuses_failed_baseline(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-failed-baseline"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Failed baseline candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_failed",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "fail",
+                        "evidence_json": json.dumps(
+                            {
+                                "cohort_id": "feedback-harness-v1",
+                                "result": "fail",
+                                "test_count": 4,
+                                "test_failure_count": 1,
+                                "duration_ms": 100,
+                                "source_fingerprint": "a" * 64,
+                                "tested_commit": "baseline",
+                            }
+                        ),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+
+            with self.assertRaisesRegex(ValueError, "passing baseline"):
+                feedback_evaluation_loop.evaluate_candidate(
+                    canonical_database=canonical_path,
+                    candidate_id=candidate_id,
+                    cohort_runner=lambda: {
+                        "cohort_id": "feedback-harness-v1",
+                        "result": "pass",
+                        "test_count": 4,
+                        "test_failure_count": 0,
+                        "duration_ms": 100,
+                        "source_fingerprint": "b" * 64,
+                        "tested_commit": "candidate",
+                    },
+                    now="2026-08-21T04:01:00Z",
+                )
+
+    def test_repeated_turn_error_creates_human_review_candidate_with_baseline(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "canonical" / "efficiens.db"
+            canonical_path.parent.mkdir()
+            with CanonicalDB(canonical_path):
+                pass
+
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            report_path = root / "derived" / "feedback-evaluation" / "latest.json"
+            cohort_calls: list[str] = []
+
+            def cohort_runner() -> dict[str, object]:
+                cohort_calls.append("baseline")
+                return {
+                    "cohort_id": "feedback-harness-v1",
+                    "result": "pass",
+                    "test_count": 4,
+                    "test_failure_count": 0,
+                    "duration_ms": 120,
+                    "source_fingerprint": "a" * 64,
+                    "tested_commit": "abc123",
+                }
+
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=report_path,
+                cohort_runner=cohort_runner,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(report["status"], "review_required")
+            self.assertEqual(cohort_calls, ["baseline"])
+            self.assertEqual(report["created_candidate_count"], 1)
+            self.assertTrue(report_path.is_file())
+
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task = db.connection.execute(
+                    "SELECT task_id, status, scope FROM tasks"
+                ).fetchone()
+                validation = db.connection.execute(
+                    "SELECT subject_type, validator, result, evidence_json "
+                    "FROM validation_results"
+                ).fetchone()
+                decision_count = db.connection.execute(
+                    "SELECT COUNT(*) FROM decisions"
+                ).fetchone()[0]
+
+            self.assertIsNotNone(task)
+            self.assertEqual(task["status"], "baseline_recorded")
+            self.assertEqual(task["scope"], "feedback_evaluation")
+            self.assertEqual(validation["subject_type"], "improvement_candidate")
+            self.assertEqual(validation["validator"], "feedback_evaluation.baseline.v1")
+            self.assertEqual(validation["result"], "pass")
+            self.assertEqual(json.loads(validation["evidence_json"])["cohort_id"], "feedback-harness-v1")
+            self.assertEqual(decision_count, 0)
+
+    def test_repeated_canonical_error_creates_review_candidate(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path) as db:
+                for index in range(3):
+                    db.record_run(
+                        request_type="run_checks",
+                        errors_json=["unit_tests_failed"],
+                        verification_result="fail",
+                        acceptance_status="rejected",
+                        started_at=f"2026-08-21T0{index}:00:00Z",
+                    )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: {
+                    "cohort_id": "feedback-harness-v1",
+                    "result": "pass",
+                    "test_count": 4,
+                    "test_failure_count": 0,
+                    "duration_ms": 120,
+                    "source_fingerprint": "a" * 64,
+                    "tested_commit": "abc123",
+                },
+                now="2026-08-21T04:00:00Z",
+            )
+
+            canonical_signals = [
+                signal for signal in report["signals"] if signal["source"] == "run_metrics"
+            ]
+            self.assertEqual(len(canonical_signals), 1)
+            self.assertEqual(canonical_signals[0]["category"], "unit_tests_failed")
+
+    def test_one_refresh_shares_one_baseline_across_new_candidates(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path) as db:
+                for index in range(3):
+                    db.record_run(
+                        request_type="run_checks",
+                        errors_json=["unit_tests_failed"],
+                        verification_result="fail",
+                        acceptance_status="rejected",
+                        started_at=f"2026-08-21T0{index}:00:00Z",
+                    )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            cohort_calls: list[str] = []
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: cohort_calls.append("baseline")
+                or {
+                    "cohort_id": "feedback-harness-v1",
+                    "result": "pass",
+                    "test_count": 4,
+                    "test_failure_count": 0,
+                    "duration_ms": 120,
+                    "source_fingerprint": "a" * 64,
+                    "tested_commit": "abc123",
+                },
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(report["created_candidate_count"], 2)
+            self.assertEqual(cohort_calls, ["baseline"])
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                validation_count = db.connection.execute(
+                    "SELECT COUNT(*) FROM validation_results"
+                ).fetchone()[0]
+            self.assertEqual(validation_count, 2)
+
+    def test_rejected_candidate_remains_rejected_when_signal_repeats(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = feedback_evaluation_loop._candidate_id(
+                "turn_api_error:APIConnectionError"
+            )
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Rejected feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "rejected",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            cohort_calls: list[str] = []
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: cohort_calls.append("called") or {},
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(report["status"], "ready")
+            self.assertEqual(report["candidates"], [])
+            self.assertEqual(cohort_calls, [])
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+            self.assertEqual(status, "rejected")
+
+    def test_safe_end_to_end_cycle_records_evidence_and_human_decision(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            baseline = {
+                "cohort_id": "feedback-harness-v1",
+                "result": "pass",
+                "test_count": 4,
+                "test_failure_count": 0,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "baseline",
+            }
+
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "derived" / "feedback-evaluation" / "latest.json",
+                cohort_runner=lambda: baseline,
+                now="2026-08-21T04:00:00Z",
+            )
+            candidate_id = report["candidates"][0]["candidate_id"]
+            feedback_evaluation_loop.evaluate_candidate(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                cohort_runner=lambda: {
+                    **baseline,
+                    "duration_ms": 105,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "candidate",
+                },
+                now="2026-08-21T04:01:00Z",
+            )
+            decision_id = feedback_evaluation_loop.record_decision(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                decision="accepted",
+                reviewer="operator",
+                now="2026-08-21T04:02:00Z",
+            )
+
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                counts = {
+                    table: db.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("tasks", "validation_results", "decisions", "events")
+                }
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                decision = db.connection.execute(
+                    "SELECT decision FROM decisions WHERE decision_id = ?", (decision_id,)
+                ).fetchone()[0]
+
+            self.assertEqual(task_status, "accepted")
+            self.assertEqual(decision, "accepted")
+            self.assertEqual(counts["tasks"], 1)
+            self.assertEqual(counts["validation_results"], 2)
+            self.assertEqual(counts["decisions"], 1)
+            self.assertGreaterEqual(counts["events"], 3)
+
+    def test_acceptance_refuses_to_bypass_candidate_evaluation(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-example"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps({"duration_ms": 100, "test_count": 4}),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+
+            with self.assertRaisesRegex(ValueError, "candidate evaluation"):
+                feedback_evaluation_loop.record_decision(
+                    canonical_database=canonical_path,
+                    candidate_id=candidate_id,
+                    decision="accepted",
+                    reviewer="operator",
+                    now="2026-08-21T04:01:00Z",
+                )
+
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                decision_count = db.connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+
+            self.assertEqual(task_status, "baseline_recorded")
+            self.assertEqual(decision_count, 0)
+
+    def test_passing_candidate_cohort_can_be_human_accepted(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-example"
+            baseline = {
+                "cohort_id": "feedback-harness-v1",
+                "result": "pass",
+                "test_count": 4,
+                "test_failure_count": 0,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "baseline",
+            }
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps({**baseline, "phase": "baseline"}),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+
+            candidate_result = feedback_evaluation_loop.evaluate_candidate(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                cohort_runner=lambda: {
+                    **baseline,
+                    "duration_ms": 105,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "candidate",
+                },
+                now="2026-08-21T04:01:00Z",
+            )
+            decision_id = feedback_evaluation_loop.record_decision(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                decision="accepted",
+                reviewer="operator",
+                now="2026-08-21T04:02:00Z",
+            )
+
+            self.assertEqual(candidate_result["result"], "pass")
+            self.assertTrue(decision_id)
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                decision = db.connection.execute(
+                    "SELECT decision, status FROM decisions WHERE decision_id = ?", (decision_id,)
+                ).fetchone()
+                validator_count = db.connection.execute(
+                    "SELECT COUNT(*) FROM validation_results WHERE subject_id = ?", (candidate_id,)
+                ).fetchone()[0]
+
+            self.assertEqual(task_status, "accepted")
+            self.assertEqual(dict(decision), {"decision": "accepted", "status": "recorded"})
+            self.assertEqual(validator_count, 2)
+
+    def test_candidate_evaluation_pins_original_baseline_for_decision(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-baseline-pin"
+            baseline = {
+                "cohort_id": "feedback-harness-v1",
+                "result": "pass",
+                "test_count": 4,
+                "test_failure_count": 0,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "baseline-1",
+            }
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                original_baseline_id = db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps({**baseline, "phase": "baseline"}),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+
+            feedback_evaluation_loop.evaluate_candidate(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                cohort_runner=lambda: {
+                    **baseline,
+                    "duration_ms": 150,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "candidate",
+                },
+                now="2026-08-21T04:01:00Z",
+            )
+            with CanonicalDB(canonical_path) as db:
+                candidate_evidence = json.loads(
+                    db.connection.execute(
+                        "SELECT evidence_json FROM validation_results "
+                        "WHERE subject_id = ? AND validator = ?",
+                        (candidate_id, "feedback_evaluation.candidate.v1"),
+                    ).fetchone()[0]
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps(
+                            {**baseline, "duration_ms": 200, "tested_commit": "baseline-2"}
+                        ),
+                        "validated_at": "2026-08-21T04:02:00Z",
+                    },
+                )
+
+            self.assertEqual(
+                candidate_evidence["baseline_validation_id"], original_baseline_id
+            )
+            with self.assertRaisesRegex(ValueError, "acceptable cohort comparison"):
+                feedback_evaluation_loop.record_decision(
+                    canonical_database=canonical_path,
+                    candidate_id=candidate_id,
+                    decision="accepted",
+                    reviewer="operator",
+                    now="2026-08-21T04:03:00Z",
+                )
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                self.assertEqual(
+                    db.connection.execute(
+                        "SELECT COUNT(*) FROM decisions WHERE scope = 'feedback_evaluation'"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    db.connection.execute(
+                        "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                    ).fetchone()[0],
+                    "evaluated",
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

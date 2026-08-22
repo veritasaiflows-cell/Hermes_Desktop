@@ -1,7 +1,8 @@
 # Workspace automation layer
 
-Automation IDs A1-A11. A1, A2, A2-full, A3, A4, A5, A6, A7, A8, A9, A10, A11 are implemented
-as scheduled jobs; A12+ remain deferred until additional workspace maturity.
+Automation IDs A1-A13 are implemented as scheduled, deterministic jobs. A8 is
+the feedback/evaluation sweep; it creates review-only candidates from repeated
+metadata and never applies a production harness change.
 
 ## Authoritative code (version-controlled)
 
@@ -13,10 +14,13 @@ as scheduled jobs; A12+ remain deferred until additional workspace maturity.
 - `scripts/cron_routing_refresh.py` — A5 logic (regenerates routing index and capsules hourly)
 - `scripts/cron_alias_sweep.py` — A6 logic (reports aliases pointing to non-existent workflows)
 - `scripts/cron_queue_hygiene.py` — A7 logic (removes terminal-state workflows older than 30 days from the authoritative queue and archives them)
-- `scripts/cron_telemetry_harvest.py` — A8 logic (runs `run_checks.py --record-telemetry` daily to populate `run_metrics`)
+- `scripts/feedback_evaluation_loop.py` — reads canonical + turn telemetry, writes compact derived report, records review candidates/baselines, evaluates prepared candidates, and records explicit human decisions
+- `scripts/cron_telemetry_harvest.py` — A8 logic (consumes telemetry after A2-full, runs the feedback/evaluation refresh, and surfaces only pending-review candidate IDs)
 - `scripts/cron_claim_drift_check.py` — A9 logic (monitors expiring claims, tampered workflow runs, and stale replays)
 - `scripts/cron_graph_freshness.py` — A10 logic (graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges)
-- `scripts/workspace_status.py` — A11 logic (single-command JSON operating brief; runs all gates in parallel)
+- `scripts/workspace_status.py` — A11 logic (single-command JSON operating brief; runs gates serially to avoid shared-state races)
+- `scripts/cron_retrieval_refresh.py` — A12 logic (refreshes both retrieval indexes from the approved source manifest)
+- `scripts/cron_canonical_integrity.py` — A13 logic (checks canonical SQLite integrity)
 - `scripts/graph_backfill.py` — one-time idempotent backfill of durable graph edges from pre-graph canonical records
 - `scripts/cron_registration_validator.py` — verifies every cron wrapper resolves to an existing repo script (run by tests and A2)
 - `tests/test_cron_wrappers.py` — pins the exit-code + output contract for A1 and A2 wrappers
@@ -38,6 +42,8 @@ as scheduled jobs; A12+ remain deferred until additional workspace maturity.
 - `a9_claim_drift_check.py` -> execs `scripts/cron_claim_drift_check.py`
 - `a10_graph_freshness.py` -> execs `scripts/cron_graph_freshness.py`
 - `a11_workspace_status.py` -> execs `scripts/workspace_status.py`
+- `a12_retrieval_refresh.py` -> execs `scripts/cron_retrieval_refresh.py`
+- `a13_canonical_integrity.py` -> execs `scripts/cron_canonical_integrity.py`
 
 These are thin launchers so the real logic stays in the repo. Launchers fall
 back to a repo root discovered from the launcher path if the hardcoded `TARGET`
@@ -52,16 +58,42 @@ is missing.
 | A2-full | code-correctness gate | daily 06:00 | runs full test/smoke suite with telemetry recording; alerts on regression |
 | A3 | routing cache sweep | daily 09:00 | evicts expired and signature-mismatched `canonical/efficiens.db` routing_cache rows |
 | A4 | stale-workflow archive sweep | weekly Sunday 10:00 | flags terminal workflows older than 30 days; archives capsules |
-| A5 | routing index refresh | hourly | regenerates `state/workflow-routing-index.json` and capsules |
+| A5 | routing index refresh | hourly at :35 | regenerates `state/workflow-routing-index.json` and capsules after the :30 A12 index refresh window |
 | A6 | alias dead-target sweep | daily 09:30 | reports aliases that no longer point to active workflows |
 | A7 | authoritative queue hygiene | weekly Sunday 11:00 | removes terminal workflows older than 30 days from `active_workflows.json`; archives them |
-| A8 | telemetry harvest | daily 06:30 | runs `run_checks.py --record-telemetry` to populate `run_metrics` |
+| A8 | feedback/evaluation refresh | daily 06:30 | consumes canonical + turn telemetry after A2-full, emits review-only candidates and one shared baseline cohort when new candidates appear |
 | A9 | claim-drift check | hourly at :45 | monitors expiring claims, tampered workflow runs, and stale replays |
 | A10 | graph freshness | hourly at :15 | graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges |
 | A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
+| A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic retrieval indexes from the approved manifest |
+| A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
 
-All are `no_agent` (no LLM) and print to STDOUT only on failure/degraded, so a healthy
-run delivers nothing.
+All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
+except A8 intentionally emits a compact candidate ID when human review is
+required; a ready A8 run remains silent.
+
+## Feedback/evaluation loop (A8)
+
+```text
+A2-full correctness telemetry + profile-local turn telemetry
+  -> A8 `feedback_evaluation_loop.py refresh`
+  -> derived/feedback-evaluation/latest.json
+  -> canonical tasks + baseline validation_results + events
+  -> explicit `evaluate` against the fixed feedback-harness-v2 cohort
+  -> explicit human `decide`
+  -> canonical decisions/events history
+```
+
+Repeated category-only signals require at least three observations in seven
+days. A8 can create candidates and baselines, but cannot evaluate a prepared
+change, accept/reject it, alter source code, or change model/provider settings.
+Those actions require explicit CLI invocation and existing workspace approval
+rules. `accepted` requires passing baseline and candidate cohort evidence with
+no additional test failures, identical test count, and no more than 20% cohort
+duration regression. Candidate evaluation pins the exact baseline validation ID,
+so a later baseline row cannot silently change the decision comparison. A failed
+or zero-test baseline makes A8 exit nonzero, remains visible as `baseline_failed`,
+and is retried by the next refresh. A5 also fails closed on malformed router JSON.
 
 ## Delivery
 
@@ -75,9 +107,8 @@ or `deliver='all'`) once a channel is wired.
 - **WF-1000 scheduled resume.** Blocked: "No approved external connector
   configuration yet for phase 3." Wrap `default_resume_command` in a cron only
   after an approved source catalog + connector exists.
-- **A12 — Improvement signal sweep.** Needs a `follow_ups` table in
-  `canonical/schema.sql` and enough historical telemetry to detect recurring
-  patterns.
-- **A13 — Scorecard review / promotion gate.** Model-driven weekly synthesis of
-  the scorecard + open follow-ups into routed proposals. Defer until A12 is
-  producing real signals.
+- **Autonomous promotion or model-driven scorecard synthesis.** Candidates are
+  intentionally human-gated; no scheduled job may apply a harness change.
+- **Additional follow-up table or dashboard.** Reuse `tasks`,
+  `validation_results`, `decisions`, `events`, and the compact derived report
+  until evidence shows they are insufficient.
