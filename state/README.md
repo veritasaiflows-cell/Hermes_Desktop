@@ -10,6 +10,7 @@ operator overrides, lane coordination, and generated workflow summaries.
 - `workflow-control-overrides.json` — operator pause, halt, and gate controls.
 - `ACTIVE_WORKFLOWS.md` and `WORKFLOW_ALIAS_INDEX.md` — human-readable mirrors.
 - `concurrent-lane-register.sqlite` — durable lane coordination state.
+- `implementation-jobs/` — authoritative machine-readable long-work jobs and phase state.
 - `workflow-routing-index.json` and `workflows/` — generated routing surfaces.
 
 Do not store the canonical database, retrieval indexes, source evidence, or scratch
@@ -21,3 +22,7 @@ belong under `vector/indexes/`.
 Do not clear this directory as a unit. Preserve authoritative inputs and lane
 state. Generated routing artifacts may be refreshed through
 `scripts/workflow_router.py`, but should be changed only by their owning command.
+
+Long implementation jobs are governed by `references/implementation-contract.md`
+and mutated through `scripts/implementation_job.py`. Human plans live under
+`continuity/implementation-jobs/` and are pinned by hash in their job contract.

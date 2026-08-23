@@ -1,0 +1,265 @@
+{
+  "base_commit": "ef76729ce0614aefeccdeaea20908db83658edbc",
+  "created_at": "2026-08-23T04:31:49Z",
+  "current_phase": "P1",
+  "job_id": "semantic-memory-long-work-upgrade",
+  "objective": "Make long implementations efficiently resumable and improve semantic retrieval precision, freshness, and context cost.",
+  "owner": "agent-main",
+  "phases": [
+    {
+      "acceptance_commands": [
+        [
+          "uv",
+          "run",
+          "--with",
+          "pytest",
+          "python",
+          "-m",
+          "pytest",
+          "tests/test_implementation_job.py",
+          "-q"
+        ]
+      ],
+      "accepted_at": "2026-08-23T04:47:19.460599Z",
+      "allowed_writes": [
+        "scripts/implementation_job.py",
+        "tests/test_implementation_job.py",
+        "references/implementation-contract.md",
+        "references/script-index.md",
+        "state/README.md",
+        "state/implementation-jobs",
+        "continuity/implementation-jobs"
+      ],
+      "depends_on": [],
+      "goal": "Add validated phases, executed acceptance receipts, blocking, closeout, and bounded pickup packets.",
+      "next_action": "Complete documentation, run P0 acceptance, and inspect the generated pickup packet.",
+      "phase_id": "P0",
+      "proof_receipts": [
+        {
+          "commands": [
+            {
+              "argv": [
+                "python",
+                "-m",
+                "pytest",
+                "tests/test_implementation_job.py",
+                "-q"
+              ],
+              "duration_ms": 464,
+              "exit_code": 1,
+              "status": "failed",
+              "stderr_tail": "C:\\Users\\Veritas\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\python.exe: No module named pytest\n",
+              "stdout_tail": ""
+            }
+          ],
+          "completed_at": "2026-08-23T04:38:43.489314Z",
+          "phase_id": "P0",
+          "receipt_id": "a03ae9f2-88ba-4427-8c59-036c76641c0b",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 74,
+            "source_fingerprint": "6acd4774402e76b20230acf7f11e109ab41e6c7a99eee559d5b77a869f7e479e",
+            "tested_commit": "ef76729ce0614aefeccdeaea20908db83658edbc"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 74,
+            "source_fingerprint": "6acd4774402e76b20230acf7f11e109ab41e6c7a99eee559d5b77a869f7e479e",
+            "tested_commit": "ef76729ce0614aefeccdeaea20908db83658edbc"
+          },
+          "started_at": "2026-08-23T04:38:41.999177Z",
+          "status": "failed"
+        },
+        {
+          "commands": [
+            {
+              "argv": [
+                "uv",
+                "run",
+                "--with",
+                "pytest",
+                "python",
+                "-m",
+                "pytest",
+                "tests/test_implementation_job.py",
+                "-q"
+              ],
+              "duration_ms": 13862,
+              "exit_code": 0,
+              "status": "passed",
+              "stderr_tail": "",
+              "stdout_tail": ".............                                                            [100%]\n13 passed in 8.19s\n"
+            }
+          ],
+          "completed_at": "2026-08-23T04:47:19.460599Z",
+          "phase_id": "P0",
+          "receipt_id": "3e77d127-47b0-46b3-89a6-ace18d56457f",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 74,
+            "source_fingerprint": "6acd4774402e76b20230acf7f11e109ab41e6c7a99eee559d5b77a869f7e479e",
+            "tested_commit": "ef76729ce0614aefeccdeaea20908db83658edbc"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 74,
+            "source_fingerprint": "6acd4774402e76b20230acf7f11e109ab41e6c7a99eee559d5b77a869f7e479e",
+            "tested_commit": "ef76729ce0614aefeccdeaea20908db83658edbc"
+          },
+          "started_at": "2026-08-23T04:47:04.607706Z",
+          "status": "passed"
+        }
+      ],
+      "started_at": "2026-08-23T04:47:03.194479Z",
+      "status": "accepted",
+      "title": "Implementation contract control plane"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-m",
+          "pytest",
+          "tests/test_vector_memory_index.py",
+          "tests/test_workspace_index.py",
+          "tests/test_retrieval_refresh.py",
+          "-q"
+        ]
+      ],
+      "allowed_writes": [
+        "scripts/vector_memory_index.py",
+        "scripts/workspace_index.py",
+        "scripts/retrieval_refresh.py",
+        "vector/retrieval-sources.json",
+        "tests/test_vector_memory_index.py",
+        "tests/test_workspace_index.py",
+        "tests/test_retrieval_refresh.py"
+      ],
+      "depends_on": [
+        "P0"
+      ],
+      "goal": "Index Markdown sections with exact citations and metadata-rich source profiles while preserving v1 compatibility.",
+      "next_action": "Start P1 and implement one section-level tracer bullet before broadening the index schema.",
+      "phase_id": "P1",
+      "proof_receipts": [],
+      "status": "pending",
+      "title": "Section indexing and retrieval registry v2"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-m",
+          "pytest",
+          "tests/test_vector_memory_index.py",
+          "tests/test_workspace_index.py",
+          "tests/test_retrieval_refresh.py",
+          "-q"
+        ]
+      ],
+      "allowed_writes": [
+        "scripts/vector_memory_index.py",
+        "scripts/workspace_index.py",
+        "scripts/retrieval_refresh.py",
+        "vector/retrieval-sources.json",
+        "tests/test_vector_memory_index.py",
+        "tests/test_workspace_index.py",
+        "tests/test_retrieval_refresh.py",
+        "references/memory-routing.md",
+        "vector/README.md"
+      ],
+      "depends_on": [
+        "P1"
+      ],
+      "goal": "Index approved Wiki, continuity, and plan sections with review-only authority, freshness gating, dedupe, and abstention.",
+      "next_action": "Start P2 only after section-level records are accepted.",
+      "phase_id": "P2",
+      "proof_receipts": [],
+      "status": "pending",
+      "title": "Selective governed synthesis retrieval"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-m",
+          "pytest",
+          "tests/test_vector_memory_index.py",
+          "tests/test_workspace_index.py",
+          "tests/test_retrieval_refresh.py",
+          "tests/test_vector_memory_benchmark.py",
+          "-q"
+        ]
+      ],
+      "allowed_writes": [
+        "scripts/vector_memory_index.py",
+        "scripts/workspace_index.py",
+        "scripts/retrieval_refresh.py",
+        "scripts/vector_memory_benchmark.py",
+        "tests/test_vector_memory_index.py",
+        "tests/test_workspace_index.py",
+        "tests/test_retrieval_refresh.py",
+        "tests/test_vector_memory_benchmark.py"
+      ],
+      "depends_on": [
+        "P2"
+      ],
+      "goal": "Reuse unchanged embeddings and answer multiple queries in one process without weakening freshness validation.",
+      "next_action": "Start P3 after governed synthesis retrieval passes.",
+      "phase_id": "P3",
+      "proof_receipts": [],
+      "status": "pending",
+      "title": "Incremental refresh and batched semantic queries"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-m",
+          "pytest",
+          "tests",
+          "-q"
+        ],
+        [
+          "python",
+          "scripts/run_checks.py",
+          "--skip-smoke"
+        ],
+        [
+          "python",
+          "scripts/concurrent_lane_manager.py",
+          "validate"
+        ]
+      ],
+      "allowed_writes": [
+        "scripts/workspace_status.py",
+        "tests/test_workspace_status.py",
+        "references/workspace-status-maintenance.md",
+        "references/implementation-contract.md",
+        "references/script-index.md",
+        "state/README.md",
+        "state/implementation-jobs",
+        "continuity/implementation-jobs"
+      ],
+      "depends_on": [
+        "P3"
+      ],
+      "goal": "Surface active jobs in workspace status, refresh derived surfaces, run full verification, and close the contract.",
+      "next_action": "Run full closeout only after P3 is accepted and the workspace is quiescent.",
+      "phase_id": "P4",
+      "proof_receipts": [],
+      "status": "pending",
+      "title": "Startup integration and closeout"
+    }
+  ],
+  "plan_hash": "ae1a898d60d0aa2dc87b02ee6261055812c63661e2847260d0df4148e825ee40",
+  "plan_path": "continuity/implementation-jobs/semantic-memory-long-work-upgrade.md",
+  "schema": "implementation-job.v1",
+  "status": "active",
+  "stop_lines": [
+    "No phase may be accepted without executed commands and stable source fingerprints.",
+    "No semantic result may be treated as authoritative current state.",
+    "No stale Wiki page may be indexed as fresh.",
+    "No commit may include work outside the registered implementation scope."
+  ],
+  "updated_at": "2026-08-23T04:47:19.460599Z",
+  "workflow_id": "WF-1000"
+}

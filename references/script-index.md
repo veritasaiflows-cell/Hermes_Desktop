@@ -39,6 +39,7 @@ Owned by `references/automation-layer.md`.
 | `workflow_router.py` | Workflow ownership routing + control-plane validator | `selector` + `--all --answer --validate --write-index --write-capsules --index-path --no-cache --aliases --status` | `test_workflow_router.py` | `references/workflow-routing-control-plane.md` |
 | `workflow_runner.py` | Mandatory read-only control-plane preflight for workflow entrypoints | (library; imported by workflow CLIs) | — | `references/workflow-routing-control-plane.md` |
 | `concurrent_lane_manager.py` | Concurrent lane + write-lease manager | `plan/lease/start/complete/status` subcommands | `test_concurrent_lane_manager.py` | `references/concurrent-lane-control-plane.md` |
+| `implementation_job.py` | Long-work job/phase contract, executed acceptance receipts, and bounded pickup packets | `validate/status/pickup/phase-start/phase-accept/phase-block/close` | `test_implementation_job.py` | `references/implementation-contract.md` |
 
 ## Memory layers
 
@@ -73,5 +74,6 @@ Owned by `references/automation-layer.md`.
 
 ## Change history
 
-- v1 — initial script index covering all 34 `scripts/*.py` entries, mapped to
+- v1 — initial script index covering the workspace `scripts/*.py` entries, mapped to
   owning references and test anchors.
+- v1.1 — added the disciplined implementation-job control plane.
