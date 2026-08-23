@@ -22,7 +22,7 @@
   "display_name": "Workflow C - Creative Generation",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-23T03:35:05Z",
+  "generated_at": "2026-08-23T20:35:17Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -41,28 +41,28 @@
     "result_count": 3,
     "results": [
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L110-L110",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L108-L117",
         "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5672962489367103,
+        "score": 0.6311833167955273,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L1-L1",
-        "excerpt": "# Workflow A \u2014 Product Research (phase-2 scaffold)\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md:L112-L129",
+        "excerpt": "## Mandatory write preflight\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5557419675192186,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
+        "score": 0.5922300422052554,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md:L1-L1",
-        "excerpt": "# Workspace Status Maintenance\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L82-L90",
+        "excerpt": "## 6. Reporting surface\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5464172103973446,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md"
+        "score": 0.5843137766722512,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       }
     ]
   },

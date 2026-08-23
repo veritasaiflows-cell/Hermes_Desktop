@@ -36,6 +36,7 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
     }
 )
 EXCLUDED_SUFFIXES = frozenset({".db", ".key", ".log", ".pem", ".pyc", ".tmp"})
+VALID_CHUNKING = frozenset({"document", "markdown_heading"})
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class SourceSpec:
     path: Path | str
     profile: str = "explicit-local-source"
     authority_class: str = "source"
+    chunking: str = "markdown_heading"
     extensions: frozenset[str] = DEFAULT_EXTENSIONS
 
     def __post_init__(self) -> None:
@@ -52,6 +54,8 @@ class SourceSpec:
             raise ValueError("Source profile must not be empty")
         if not self.authority_class.strip():
             raise ValueError("Authority class must not be empty")
+        if self.chunking not in VALID_CHUNKING:
+            raise ValueError(f"Unsupported chunking policy: {self.chunking}")
         normalized = frozenset(_normalize_extension(value) for value in self.extensions)
         if not normalized:
             raise ValueError("At least one text extension must be approved")
@@ -87,6 +91,22 @@ class SearchResult:
     freshness_state: str
     warnings: tuple[str, ...]
     excerpt: str
+    section_id: str = "document"
+    heading: str | None = None
+    line_start: int = 1
+    line_end: int = 1
+
+
+@dataclass(frozen=True)
+class SourceSection:
+    """One independently retrievable source section with absolute line bounds."""
+
+    section_id: str
+    heading: str | None
+    line_start: int
+    line_end: int
+    content: str
+    section_hash: str
 
 
 def build_index(index_path: Path | str, sources: Sequence[SourceSpec]) -> BuildSummary:
@@ -101,7 +121,7 @@ def build_index(index_path: Path | str, sources: Sequence[SourceSpec]) -> BuildS
         raise ValueError("At least one explicitly approved source is required")
 
     destination = Path(index_path).resolve()
-    documents: list[tuple[Path, SourceSpec, str, str]] = []
+    documents: list[tuple[Path, SourceSpec, str, SourceSection]] = []
     approved_roots: list[Path] = []
     skipped_files = 0
     for source in sources:
@@ -113,7 +133,9 @@ def build_index(index_path: Path | str, sources: Sequence[SourceSpec]) -> BuildS
             except (OSError, UnicodeDecodeError):
                 skipped_files += 1
                 continue
-            documents.append((path, source, content, _content_hash(content)))
+            source_hash = _content_hash(content)
+            for section in split_source_sections(path, content, chunking=source.chunking):
+                documents.append((path, source, source_hash, section))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(destination)
@@ -122,8 +144,8 @@ def build_index(index_path: Path | str, sources: Sequence[SourceSpec]) -> BuildS
         with connection:
             for root in approved_roots:
                 _delete_documents_beneath(connection, root)
-            for path, source, content, content_hash in documents:
-                _upsert_document(connection, path, source, content, content_hash)
+            for path, source, source_hash, section in documents:
+                _upsert_document(connection, path, source, source_hash, section)
     finally:
         connection.close()
 
@@ -158,7 +180,8 @@ def search_index(
     try:
         rows = connection.execute(
             "SELECT d.source_path, d.source_family, d.authority_class, "
-            "d.content_hash, d.content, bm25(documents_fts) AS score "
+            "d.content_hash, d.section_id, d.heading, d.line_start, d.line_end, "
+            "d.content, bm25(documents_fts) AS score "
             "FROM documents_fts "
             "JOIN documents d ON d.document_id = documents_fts.rowid "
             "WHERE documents_fts MATCH ? "
@@ -177,11 +200,13 @@ def search_index(
         freshness_state, warnings = _freshness(Path(row["source_path"]), row["content_hash"])
         if freshness_state != "fresh" and not allow_stale:
             continue
-        line_start, line_end, excerpt = _excerpt_for_query(row["content"], query)
+        relative_start, relative_end, excerpt = _excerpt_for_query(row["content"], query)
+        citation_start = int(row["line_start"]) + relative_start - 1
+        citation_end = int(row["line_start"]) + relative_end - 1
         results.append(
             SearchResult(
                 source_path=row["source_path"],
-                citation=f"{row['source_path']}:L{line_start}-L{line_end}",
+                citation=f"{row['source_path']}:L{citation_start}-L{citation_end}",
                 source_hash=row["content_hash"],
                 source_family=row["source_family"],
                 authority_class=row["authority_class"],
@@ -190,6 +215,10 @@ def search_index(
                 freshness_state=freshness_state,
                 warnings=tuple(warnings),
                 excerpt=excerpt,
+                section_id=row["section_id"],
+                heading=row["heading"],
+                line_start=int(row["line_start"]),
+                line_end=int(row["line_end"]),
             )
         )
     return results
@@ -217,7 +246,7 @@ def index_status(index_path: Path | str) -> dict[str, object]:
             "SELECT COUNT(*) AS document_count, MAX(indexed_at) AS indexed_at FROM documents"
         ).fetchone()
         rows = connection.execute(
-            "SELECT source_path, content_hash FROM documents"
+            "SELECT source_path, content_hash FROM documents GROUP BY source_path, content_hash"
         ).fetchall()
     finally:
         connection.close()
@@ -243,17 +272,30 @@ def index_status(index_path: Path | str) -> dict[str, object]:
 
 
 def _initialize_database(connection: sqlite3.Connection) -> None:
+    existing_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+    }
+    if existing_columns and "section_id" not in existing_columns:
+        connection.executescript(
+            "DROP TABLE IF EXISTS documents_fts; DROP TABLE IF EXISTS documents;"
+        )
     connection.executescript(
         """
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS documents (
             document_id INTEGER PRIMARY KEY,
-            source_path TEXT NOT NULL UNIQUE,
+            source_path TEXT NOT NULL,
+            section_id TEXT NOT NULL,
+            heading TEXT,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
             source_family TEXT NOT NULL,
             authority_class TEXT NOT NULL,
             content_hash TEXT NOT NULL,
+            section_hash TEXT NOT NULL,
             indexed_at TEXT NOT NULL,
-            content TEXT NOT NULL
+            content TEXT NOT NULL,
+            UNIQUE(source_path, section_id)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(content);
         """
@@ -282,18 +324,119 @@ def _upsert_document(
     connection: sqlite3.Connection,
     path: Path,
     source: SourceSpec,
-    content: str,
-    content_hash: str,
+    source_hash: str,
+    section: SourceSection,
 ) -> None:
     indexed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     cursor = connection.execute(
-        "INSERT INTO documents (source_path, source_family, authority_class, content_hash, indexed_at, content) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (str(path), source.profile, source.authority_class, content_hash, indexed_at, content),
+        "INSERT INTO documents (source_path, section_id, heading, line_start, line_end, "
+        "source_family, authority_class, content_hash, section_hash, indexed_at, content) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            str(path),
+            section.section_id,
+            section.heading,
+            section.line_start,
+            section.line_end,
+            source.profile,
+            source.authority_class,
+            source_hash,
+            section.section_hash,
+            indexed_at,
+            section.content,
+        ),
     )
     connection.execute(
         "INSERT INTO documents_fts(rowid, content) VALUES (?, ?)",
-        (cursor.lastrowid, content),
+        (cursor.lastrowid, section.content),
+    )
+
+
+def split_source_sections(
+    path: Path,
+    content: str,
+    *,
+    chunking: str = "markdown_heading",
+) -> list[SourceSection]:
+    """Split Markdown into non-overlapping heading sections with absolute lines."""
+    if chunking not in VALID_CHUNKING:
+        raise ValueError(f"Unsupported chunking policy: {chunking}")
+    lines = content.splitlines()
+    if chunking == "document" or path.suffix.lower() not in {".md", ".mdx"}:
+        return [_document_section(content)]
+
+    heading_rows: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            heading_rows.append((index, len(match.group(1)), match.group(2).strip()))
+    if not heading_rows:
+        return [_document_section(content)]
+
+    sections: list[SourceSection] = []
+    if heading_rows[0][0] > 0:
+        preamble = "\n".join(lines[: heading_rows[0][0]])
+        if preamble.strip():
+            sections.append(
+                _make_section(
+                    heading="(preamble)",
+                    line_start=1,
+                    line_end=heading_rows[0][0],
+                    content=preamble,
+                    occurrence=1,
+                )
+            )
+
+    stack: list[str] = []
+    occurrences: dict[str, int] = {}
+    for position, (start, level, title) in enumerate(heading_rows):
+        stack = stack[: level - 1]
+        while len(stack) < level - 1:
+            stack.append("(untitled)")
+        stack.append(title)
+        heading = " > ".join(stack)
+        occurrences[heading] = occurrences.get(heading, 0) + 1
+        end = heading_rows[position + 1][0] if position + 1 < len(heading_rows) else len(lines)
+        section_content = "\n".join(lines[start:end])
+        sections.append(
+            _make_section(
+                heading=heading,
+                line_start=start + 1,
+                line_end=max(start + 1, end),
+                content=section_content,
+                occurrence=occurrences[heading],
+            )
+        )
+    return sections
+
+
+def _document_section(content: str) -> SourceSection:
+    line_count = max(1, len(content.splitlines()))
+    return _make_section(
+        heading=None,
+        line_start=1,
+        line_end=line_count,
+        content=content,
+        occurrence=1,
+    )
+
+
+def _make_section(
+    *,
+    heading: str | None,
+    line_start: int,
+    line_end: int,
+    content: str,
+    occurrence: int,
+) -> SourceSection:
+    identity = f"{heading or '(document)'}\0{occurrence}".encode("utf-8")
+    return SourceSection(
+        section_id=hashlib.sha256(identity).hexdigest()[:16],
+        heading=heading,
+        line_start=line_start,
+        line_end=line_end,
+        content=content,
+        section_hash=_content_hash(content),
     )
 
 

@@ -22,7 +22,7 @@
   "display_name": "Workflow B - Listing Drafts",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-23T03:35:05Z",
+  "generated_at": "2026-08-23T20:35:17Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -41,28 +41,28 @@
     "result_count": 3,
     "results": [
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L1-L1",
-        "excerpt": "# Commerce data model (Phase 1)\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L7-L27",
+        "excerpt": "## 1. Canonical entities currently in use\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.6283137913628297,
+        "score": 0.639927294092463,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L1-L1",
-        "excerpt": "# Workflow A \u2014 Product Research (phase-2 scaffold)\n",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.5859943982296276,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L110-L110",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L108-L117",
         "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5627123530071555,
+        "score": 0.632330282278735,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L74-L81",
+        "excerpt": "## 5. Phase 1 milestone outcomes\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6193568138062124,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       }
     ]
   },

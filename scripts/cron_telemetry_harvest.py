@@ -13,6 +13,7 @@ required; alerts on a failed or malformed refresh.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,51 @@ TIMEOUT_SECONDS = 360
 def main() -> int:
     """Run the feedback/evaluation refresh; exit 1 on failure, 0 on ready or review-required."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    retention_command = [PYTHON, "scripts/telemetry_retention.py", "maintain"]
+    if os.environ.get("HERMES_TELEMETRY_MONTHLY_ARCHIVES") == "1":
+        retention_command.append("--archive-months")
+    try:
+        retention_completed = subprocess.run(
+            retention_command,
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"TELEMETRY RETENTION FAIL {now} reason=timeout_after_{TIMEOUT_SECONDS}s")
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive subprocess boundary
+        print(f"TELEMETRY RETENTION FAIL {now} reason=spawn_error")
+        print(type(exc).__name__)
+        return 1
+
+    if retention_completed.returncode != 0:
+        print(f"TELEMETRY RETENTION FAIL {now} exit={retention_completed.returncode}")
+        if retention_completed.stdout:
+            print(retention_completed.stdout[-2000:])
+        if retention_completed.stderr:
+            print(retention_completed.stderr[-1000:])
+        return 1
+    try:
+        retention_report = json.loads(retention_completed.stdout)
+    except json.JSONDecodeError:
+        print(f"TELEMETRY RETENTION FAIL {now} reason=invalid_report")
+        return 1
+    if (
+        retention_report.get("schema") != "telemetry-retention-report.v1"
+        or retention_report.get("status") != "ok"
+    ):
+        print(f"TELEMETRY RETENTION FAIL {now} reason=invalid_status")
+        return 1
+    print(
+        f"TELEMETRY RETENTION OK {now} "
+        f"rollups={retention_report.get('rollups_created', 0)} "
+        f"deleted={retention_report.get('raw_rows_deleted', 0)} "
+        f"size_deleted={retention_report.get('size_rows_deleted', 0)}",
+        file=sys.stderr,
+    )
+
     try:
         completed = subprocess.run(
             [PYTHON, "scripts/feedback_evaluation_loop.py", "refresh"],

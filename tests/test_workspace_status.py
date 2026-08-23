@@ -100,6 +100,73 @@ class WorkspaceStatusTests(unittest.TestCase):
         self.assertEqual(hard, [])
         self.assertIn("feedback_evaluation_failed", warnings)
 
+    def test_lane_gate_does_not_erase_earlier_hard_failures(self) -> None:
+        """A healthy lane gate must not mask index/graph hard failures.
+
+        Regression: the lane branch rebound the accumulated ``hard_failures``
+        list to the lane payload's own (usually empty) list, so any hard
+        failure detected before it was silently discarded and a degraded
+        workspace reported as healthy.
+        """
+        gates = {
+            label: {"exit": 0}
+            for label in (
+                "organization",
+                "routing",
+                "alias",
+                "cron_registration",
+                "graph_integrity",
+                "graph_freshness",
+                "archive_stale",
+            )
+        }
+        gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
+        gates["claim_drift"] = {"exit": 0}
+        gates["vector_memory"] = {"exit": 1, "stdout": {"status": "degraded"}}
+        gates["workspace_index"] = {"exit": 1, "stdout": {"status": "degraded"}}
+        gates["lane_register"] = {
+            "exit": 0,
+            "stdout": {"expired_leases": [], "collisions": [], "hard_failures": []},
+        }
+
+        status, hard, _warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "degraded")
+        self.assertIn("vector_memory", hard)
+        self.assertIn("workspace_index", hard)
+
+    def test_lane_register_hard_failures_surface_as_a_warning(self) -> None:
+        gates = {
+            label: {"exit": 0}
+            for label in (
+                "organization",
+                "routing",
+                "alias",
+                "cron_registration",
+                "graph_integrity",
+                "graph_freshness",
+                "vector_memory",
+                "workspace_index",
+                "archive_stale",
+            )
+        }
+        gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
+        gates["claim_drift"] = {"exit": 0}
+        gates["lane_register"] = {
+            "exit": 0,
+            "stdout": {
+                "expired_leases": [],
+                "collisions": [],
+                "hard_failures": ["lane_scope_violation"],
+            },
+        }
+
+        status, hard, warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "healthy_with_warnings")
+        self.assertEqual(hard, [])
+        self.assertIn("lane_register_hard_failures", warnings)
+
     def test_default_feedback_evaluation_gate_is_read_only_status(self) -> None:
         feedback = next(
             gate for gate in workspace_status.DEFAULT_GATES if gate[0] == "feedback_evaluation"

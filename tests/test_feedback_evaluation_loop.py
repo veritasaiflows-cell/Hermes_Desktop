@@ -77,6 +77,21 @@ def _seed_turn_metrics(path: Path) -> None:
         connection.close()
 
 
+def _retention_completed(*, returncode: int = 0, status: str = "ok") -> SimpleNamespace:
+    return SimpleNamespace(
+        returncode=returncode,
+        stdout=json.dumps(
+            {
+                "schema": "telemetry-retention-report.v1",
+                "status": status,
+                "raw_rows_deleted": 0,
+                "rollups_created": 0,
+            }
+        ),
+        stderr="",
+    )
+
+
 class FeedbackEvaluationLoopTests(unittest.TestCase):
     def test_turn_signal_requires_minimum_repeated_count(self):
         with TemporaryDirectory() as directory:
@@ -100,13 +115,64 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
         completed = SimpleNamespace(returncode=1, stdout='{"status":"error"}', stderr="boom")
         stdout = io.StringIO()
         with (
-            patch.object(cron_telemetry_harvest.subprocess, "run", return_value=completed),
+            patch.object(
+                cron_telemetry_harvest.subprocess,
+                "run",
+                side_effect=[_retention_completed(), completed],
+            ),
             redirect_stdout(stdout),
         ):
             exit_code = cron_telemetry_harvest.main()
 
         self.assertEqual(exit_code, 1)
         self.assertIn("FEEDBACK EVALUATION FAIL", stdout.getvalue())
+
+    def test_a8_retention_failure_stops_before_feedback_refresh(self):
+        stdout = io.StringIO()
+        with (
+            patch.object(
+                cron_telemetry_harvest.subprocess,
+                "run",
+                return_value=_retention_completed(returncode=2, status="degraded"),
+            ) as run_mock,
+            redirect_stdout(stdout),
+        ):
+            exit_code = cron_telemetry_harvest.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertIn("TELEMETRY RETENTION FAIL", stdout.getvalue())
+
+    def test_a8_monthly_archives_require_explicit_environment_opt_in(self):
+        feedback = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "schema": "feedback-evaluation-report.v1",
+                    "status": "ready",
+                    "candidates": [],
+                }
+            ),
+            stderr="",
+        )
+        with (
+            patch.dict(
+                cron_telemetry_harvest.os.environ,
+                {"HERMES_TELEMETRY_MONTHLY_ARCHIVES": "1"},
+            ),
+            patch.object(
+                cron_telemetry_harvest.subprocess,
+                "run",
+                side_effect=[_retention_completed(), feedback],
+            ) as run_mock,
+        ):
+            exit_code = cron_telemetry_harvest.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            run_mock.call_args_list[0].args[0][1:],
+            ["scripts/telemetry_retention.py", "maintain", "--archive-months"],
+        )
 
     def test_a8_rejects_review_status_without_valid_candidate_payload(self):
         for payload in (
@@ -126,7 +192,7 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                 with patch.object(
                     cron_telemetry_harvest.subprocess,
                     "run",
-                    return_value=completed,
+                    side_effect=[_retention_completed(), completed],
                 ):
                     self.assertEqual(cron_telemetry_harvest.main(), 1)
 
@@ -245,18 +311,35 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
         )
         stdout = io.StringIO()
         with (
-            patch.object(cron_telemetry_harvest.subprocess, "run", return_value=completed) as run_mock,
+            patch.object(
+                cron_telemetry_harvest.subprocess,
+                "run",
+                side_effect=[_retention_completed(), completed],
+            ) as run_mock,
             redirect_stdout(stdout),
         ):
             exit_code = cron_telemetry_harvest.main()
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
-            run_mock.call_args.args[0][1:],
+            run_mock.call_args_list[0].args[0][1:],
+            ["scripts/telemetry_retention.py", "maintain"],
+        )
+        self.assertEqual(
+            run_mock.call_args_list[1].args[0][1:],
             ["scripts/feedback_evaluation_loop.py", "refresh"],
         )
         self.assertIn("FEEDBACK REVIEW REQUIRED", stdout.getvalue())
         self.assertIn("feedback-candidate-example", stdout.getvalue())
+
+    def test_latest_report_is_replaced_without_accumulating_files(self):
+        with TemporaryDirectory() as directory:
+            report = Path(directory) / "derived" / "feedback-evaluation" / "latest.json"
+            feedback_evaluation_loop._atomic_write_json(report, {"revision": 1})
+            feedback_evaluation_loop._atomic_write_json(report, {"revision": 2})
+
+            self.assertEqual(json.loads(report.read_text(encoding="utf-8")), {"revision": 2})
+            self.assertEqual([path.name for path in report.parent.iterdir()], ["latest.json"])
 
     def test_status_cli_emits_compact_json(self):
         with TemporaryDirectory() as directory:

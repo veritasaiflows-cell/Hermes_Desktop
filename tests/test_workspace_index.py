@@ -42,6 +42,32 @@ class WorkspaceIndexTests(unittest.TestCase):
             self.assertEqual(results[0].freshness_state, "fresh")
             self.assertIn("exact full-text search", results[0].excerpt)
 
+    def test_markdown_headings_are_distinct_records_with_absolute_citations(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = root / "plan.md"
+            document.write_text(
+                "# Upgrade plan\n\n"
+                "Use exact state for current phase.\n\n"
+                "## Acceptance\n\n"
+                "Run deterministic tests before advancing.\n\n"
+                "## Rationale\n\n"
+                "Semantic explanations preserve model-independent context.\n",
+                encoding="utf-8",
+            )
+            index_path = root / "workspace-index.sqlite"
+
+            summary = build_index(index_path, [SourceSpec(document)])
+            results = search_index(index_path, "model-independent context")
+
+            self.assertEqual(summary.indexed_documents, 3)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].heading, "Upgrade plan > Rationale")
+            self.assertTrue(results[0].section_id)
+            self.assertEqual(results[0].line_start, 9)
+            self.assertEqual(results[0].line_end, 11)
+            self.assertEqual(results[0].citation, f"{document.resolve()}:L11-L11")
+
     def test_indexing_only_uses_explicitly_approved_sources(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

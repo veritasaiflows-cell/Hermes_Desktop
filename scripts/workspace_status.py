@@ -357,12 +357,12 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
             if isinstance(lane_stdout, dict):
                 expired = lane_stdout.get("expired_leases") or []
                 collisions = lane_stdout.get("collisions") or []
-                hard_failures = lane_stdout.get("hard_failures") or []
+                lane_hard_failures = lane_stdout.get("hard_failures") or []
                 if expired:
                     warnings.append("lane_lease_expired")
                 if collisions:
                     warnings.append("lane_collision")
-                if hard_failures:
+                if lane_hard_failures:
                     warnings.append("lane_register_hard_failures")
 
     feedback_gate = gates.get("feedback_evaluation", {})

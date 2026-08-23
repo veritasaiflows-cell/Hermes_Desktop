@@ -1,21 +1,71 @@
 {
-  "schema": "retrieval-sources.v1",
+  "schema": "retrieval-sources.v2",
   "sources": [
-    "AGENTS.md",
-    "GOVERNANCE.md",
-    "README.md",
-    "canonical/README.md",
-    "references/README.md",
-    "references/automation-layer.md",
-    "references/commerce-data-model.md",
-    "references/concurrent-lane-control-plane.md",
-    "references/graph-memory.md",
-    "references/memory-routing.md",
-    "references/operating-procedures.md",
-    "references/vector-memory-scaling.md",
-    "references/workflow-product-research.md",
-    "references/workflow-routing-control-plane.md",
-    "references/workspace-status-maintenance.md",
-    "state/README.md"
+    {
+      "path": "AGENTS.md",
+      "chunking": "markdown_heading",
+      "authority_class": "bootstrap"
+    },
+    {
+      "path": "GOVERNANCE.md",
+      "chunking": "markdown_heading",
+      "authority_class": "governance"
+    },
+    {
+      "path": "README.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "canonical/README.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/README.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/automation-layer.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/commerce-data-model.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/concurrent-lane-control-plane.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/graph-memory.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/memory-routing.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/operating-procedures.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/vector-memory-scaling.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/workflow-product-research.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/workflow-routing-control-plane.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "references/workspace-status-maintenance.md",
+      "chunking": "markdown_heading"
+    },
+    {
+      "path": "state/README.md",
+      "chunking": "markdown_heading"
+    }
   ]
 }

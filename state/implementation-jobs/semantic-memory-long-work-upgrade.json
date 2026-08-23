@@ -1,7 +1,7 @@
 {
   "base_commit": "ef76729ce0614aefeccdeaea20908db83658edbc",
   "created_at": "2026-08-23T04:31:49Z",
-  "current_phase": "P1",
+  "current_phase": "P2",
   "job_id": "semantic-memory-long-work-upgrade",
   "objective": "Make long implementations efficiently resumable and improve semantic retrieval precision, freshness, and context cost.",
   "owner": "agent-main",
@@ -115,6 +115,10 @@
     {
       "acceptance_commands": [
         [
+          "uv",
+          "run",
+          "--with",
+          "pytest",
           "python",
           "-m",
           "pytest",
@@ -124,6 +128,7 @@
           "-q"
         ]
       ],
+      "accepted_at": "2026-08-23T06:09:22.088903Z",
       "allowed_writes": [
         "scripts/vector_memory_index.py",
         "scripts/workspace_index.py",
@@ -139,13 +144,95 @@
       "goal": "Index Markdown sections with exact citations and metadata-rich source profiles while preserving v1 compatibility.",
       "next_action": "Start P1 and implement one section-level tracer bullet before broadening the index schema.",
       "phase_id": "P1",
-      "proof_receipts": [],
-      "status": "pending",
+      "proof_receipts": [
+        {
+          "commands": [
+            {
+              "argv": [
+                "python",
+                "-m",
+                "pytest",
+                "tests/test_vector_memory_index.py",
+                "tests/test_workspace_index.py",
+                "tests/test_retrieval_refresh.py",
+                "-q"
+              ],
+              "duration_ms": 42,
+              "exit_code": 1,
+              "status": "failed",
+              "stderr_tail": "C:\\Users\\Veritas\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\python.exe: No module named pytest\n",
+              "stdout_tail": ""
+            }
+          ],
+          "completed_at": "2026-08-23T06:08:23.840897Z",
+          "phase_id": "P1",
+          "receipt_id": "2af5529c-90fa-41ab-8283-6cf53bf01ba1",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 75,
+            "source_fingerprint": "8ee9d7b736677dfbecce0c12cc1879e0cd364936fbc2a256e9b021a60864ba30",
+            "tested_commit": "5cc35bef3d0b827b552ff964e8b9d36c4c44094e"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 75,
+            "source_fingerprint": "8ee9d7b736677dfbecce0c12cc1879e0cd364936fbc2a256e9b021a60864ba30",
+            "tested_commit": "5cc35bef3d0b827b552ff964e8b9d36c4c44094e"
+          },
+          "started_at": "2026-08-23T06:08:23.635285Z",
+          "status": "failed"
+        },
+        {
+          "commands": [
+            {
+              "argv": [
+                "uv",
+                "run",
+                "--with",
+                "pytest",
+                "python",
+                "-m",
+                "pytest",
+                "tests/test_vector_memory_index.py",
+                "tests/test_workspace_index.py",
+                "tests/test_retrieval_refresh.py",
+                "-q"
+              ],
+              "duration_ms": 3094,
+              "exit_code": 0,
+              "status": "passed",
+              "stderr_tail": "",
+              "stdout_tail": ".................................................                        [100%]\n49 passed in 2.20s\n"
+            }
+          ],
+          "completed_at": "2026-08-23T06:09:22.088903Z",
+          "phase_id": "P1",
+          "receipt_id": "9684cd7d-9eb4-4ccd-9616-dbc712f8251c",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 75,
+            "source_fingerprint": "8ee9d7b736677dfbecce0c12cc1879e0cd364936fbc2a256e9b021a60864ba30",
+            "tested_commit": "5cc35bef3d0b827b552ff964e8b9d36c4c44094e"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 75,
+            "source_fingerprint": "8ee9d7b736677dfbecce0c12cc1879e0cd364936fbc2a256e9b021a60864ba30",
+            "tested_commit": "5cc35bef3d0b827b552ff964e8b9d36c4c44094e"
+          },
+          "started_at": "2026-08-23T06:09:18.833847Z",
+          "status": "passed"
+        }
+      ],
+      "started_at": "2026-08-23T06:09:18.655595Z",
+      "status": "accepted",
       "title": "Section indexing and retrieval registry v2"
     },
     {
       "acceptance_commands": [
         [
+          "uv",
+          "run",
+          "--with",
+          "pytest",
           "python",
           "-m",
           "pytest",
@@ -179,6 +266,10 @@
     {
       "acceptance_commands": [
         [
+          "uv",
+          "run",
+          "--with",
+          "pytest",
           "python",
           "-m",
           "pytest",
@@ -212,6 +303,10 @@
     {
       "acceptance_commands": [
         [
+          "uv",
+          "run",
+          "--with",
+          "pytest",
           "python",
           "-m",
           "pytest",
@@ -260,6 +355,6 @@
     "No stale Wiki page may be indexed as fresh.",
     "No commit may include work outside the registered implementation scope."
   ],
-  "updated_at": "2026-08-23T04:47:19.460599Z",
+  "updated_at": "2026-08-23T06:09:22.088903Z",
   "workflow_id": "WF-1000"
 }

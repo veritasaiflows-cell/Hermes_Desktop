@@ -162,6 +162,43 @@ class VectorMemoryIndexTests(unittest.TestCase):
                 self.assertTrue(results[0].source_path.endswith("long.md"))
                 self.assertGreater(results[0].score, 0.0)
 
+    def test_semantic_search_ranks_heading_section_and_preserves_bounds(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            note = root / "plan.md"
+            note.write_text(
+                "# Upgrade\n\n"
+                "Use deterministic state.\n\n"
+                "## Acceptance\n\n"
+                "Run focused tests.\n\n"
+                "## Rationale\n\n"
+                "Portable handoffs let a different model resume efficiently.\n",
+                encoding="utf-8",
+            )
+            index_path = root / "vector-memory.sqlite"
+
+            def fake_embedding(text: str, **_: object) -> list[float]:
+                lower = text.lower()
+                if "rationale" in lower or "explain long work" in lower:
+                    return [0.0, 1.0]
+                return [1.0, 0.0]
+
+            with patch.object(vector_memory_index, "_safe_embedding_for_text", side_effect=fake_embedding):
+                summary = build_index(index_path, [SourceSpec(note)])
+                results = search_index(
+                    index_path,
+                    "explain long work",
+                    limit=1,
+                    retrieval_mode="semantic",
+                )
+
+            self.assertEqual(summary.indexed_documents, 3)
+            self.assertEqual(summary.embedded_documents, 3)
+            self.assertEqual(results[0].heading, "Upgrade > Rationale")
+            self.assertEqual(results[0].line_start, 9)
+            self.assertEqual(results[0].line_end, 11)
+            self.assertEqual(results[0].citation, f"{note.resolve()}:L9-L11")
+
     def test_indexing_excludes_sensitive_and_configuration_directories(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

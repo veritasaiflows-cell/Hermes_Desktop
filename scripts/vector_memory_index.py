@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import urllib.error
 import urllib.request
 from collections import OrderedDict
@@ -32,6 +33,11 @@ from typing import Sequence
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+
+from scripts.workspace_index import VALID_CHUNKING, SourceSection, split_source_sections
+
 DEFAULT_INDEX_PATH = WORKSPACE_ROOT / "vector" / "indexes" / "vector-memory.sqlite"
 DEFAULT_QUERY_PACKET_PATH = WORKSPACE_ROOT / "tmp" / "vector-memory-query.json"
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
@@ -88,6 +94,7 @@ class SourceSpec:
     profile: str = "explicit-local-memory"
     authority_class: str = "semantic_memory"
     source_type: str = "file"
+    chunking: str = "markdown_heading"
     extensions: frozenset[str] = DEFAULT_EXTENSIONS
 
     def __post_init__(self) -> None:
@@ -97,6 +104,8 @@ class SourceSpec:
             raise ValueError("Authority class must not be empty")
         if not self.source_type.strip():
             raise ValueError("Source type must not be empty")
+        if self.chunking not in VALID_CHUNKING:
+            raise ValueError(f"Unsupported chunking policy: {self.chunking}")
         normalized = frozenset(_normalize_extension(value) for value in self.extensions)
         if not normalized:
             raise ValueError("At least one text extension must be approved")
@@ -134,6 +143,10 @@ class SearchResult:
     freshness_state: str
     warnings: tuple[str, ...]
     excerpt: str
+    section_id: str = "document"
+    heading: str | None = None
+    line_start: int = 1
+    line_end: int = 1
 
 
 def build_index(
@@ -160,7 +173,7 @@ def build_index(
     clear_query_embedding_cache()
 
     destination = Path(index_path).resolve()
-    documents: list[tuple[Path, SourceSpec, str, str, list[float] | None]] = []
+    documents: list[tuple[Path, SourceSpec, str, SourceSection, list[float] | None]] = []
     skipped_files = 0
     embedded_documents = 0
     embedding_errors = 0
@@ -179,25 +192,25 @@ def build_index(
             if str(path) in seen_paths:
                 continue
             seen_paths.add(str(path))
-            content_hash = _content_hash(content)
-
-            if disable_embedding:
-                embedding = None
-            else:
-                embedding = _embed_text_with_chunking(
-                    content,
-                    chunk_char_limit=DEFAULT_EMBED_CHUNK_CHAR_LIMIT,
-                    provider=embedding_provider,
-                    model=embedding_model,
-                    ollama_base_url=ollama_base_url,
-                    timeout=embedding_timeout,
-                )
-                if embedding is None:
-                    embedding_errors += 1
+            source_hash = _content_hash(content)
+            for section in split_source_sections(path, content, chunking=source.chunking):
+                if disable_embedding:
+                    embedding = None
                 else:
-                    embedded_documents += 1
+                    embedding = _embed_text_with_chunking(
+                        section.content,
+                        chunk_char_limit=DEFAULT_EMBED_CHUNK_CHAR_LIMIT,
+                        provider=embedding_provider,
+                        model=embedding_model,
+                        ollama_base_url=ollama_base_url,
+                        timeout=embedding_timeout,
+                    )
+                    if embedding is None:
+                        embedding_errors += 1
+                    else:
+                        embedded_documents += 1
 
-            documents.append((path, source, content, content_hash, embedding))
+                documents.append((path, source, source_hash, section, embedding))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(destination)
@@ -206,13 +219,13 @@ def build_index(
         with connection:
             for root in approved_roots:
                 _delete_documents_beneath(connection, root)
-            for path, source, content, content_hash, embedding in documents:
+            for path, source, source_hash, section, embedding in documents:
                 _upsert_document(
                     connection,
                     path,
                     source,
-                    content,
-                    content_hash,
+                    source_hash,
+                    section,
                     embedding,
                     embedding_provider if not disable_embedding and embedding is not None else "",
                     embedding_model if not disable_embedding and embedding is not None else "",
@@ -480,21 +493,32 @@ def index_status(index_path: Path | str) -> dict[str, object]:
 
 
 def _initialize_database(connection: sqlite3.Connection) -> None:
+    existing_columns = _table_columns(connection, "memory_memories")
+    if existing_columns and "section_id" not in existing_columns:
+        connection.executescript(
+            "DROP TABLE IF EXISTS memory_memories_fts; DROP TABLE IF EXISTS memory_memories;"
+        )
     connection.executescript(
         """
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS memory_memories (
             memory_id INTEGER PRIMARY KEY,
-            source_path TEXT NOT NULL UNIQUE,
+            source_path TEXT NOT NULL,
+            section_id TEXT NOT NULL,
+            heading TEXT,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
             source_type TEXT NOT NULL,
             source_family TEXT NOT NULL,
             authority_class TEXT NOT NULL,
             source_hash TEXT NOT NULL,
+            section_hash TEXT NOT NULL,
             indexed_at TEXT NOT NULL,
             content TEXT NOT NULL,
             embedding_model TEXT,
             embedding_provider TEXT,
-            embedding_vector_json TEXT
+            embedding_vector_json TEXT,
+            UNIQUE(source_path, section_id)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS memory_memories_fts USING fts5(content);
         """
@@ -547,26 +571,31 @@ def _upsert_document(
     connection: sqlite3.Connection,
     path: Path,
     source: SourceSpec,
-    content: str,
-    content_hash: str,
+    source_hash: str,
+    section: SourceSection,
     embedding: list[float] | None,
     embedding_provider: str,
     embedding_model: str,
 ) -> None:
     indexed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     cursor = connection.execute(
-        "INSERT INTO memory_memories (source_path, source_type, source_family, "
-        "authority_class, source_hash, indexed_at, content, embedding_model, "
-        "embedding_provider, embedding_vector_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memory_memories (source_path, section_id, heading, line_start, "
+        "line_end, source_type, source_family, authority_class, source_hash, "
+        "section_hash, indexed_at, content, embedding_model, embedding_provider, "
+        "embedding_vector_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             str(path),
+            section.section_id,
+            section.heading,
+            section.line_start,
+            section.line_end,
             source.source_type,
             source.profile,
             source.authority_class,
-            content_hash,
+            source_hash,
+            section.section_hash,
             indexed_at,
-            content,
+            section.content,
             embedding_model or None,
             embedding_provider or None,
             json.dumps(embedding) if embedding is not None else None,
@@ -574,7 +603,7 @@ def _upsert_document(
     )
     connection.execute(
         "INSERT INTO memory_memories_fts(rowid, content) VALUES (?, ?)",
-        (cursor.lastrowid, content),
+        (cursor.lastrowid, section.content),
     )
 
 
@@ -587,12 +616,13 @@ def _query_full_text_rows(
     fts_query = _to_fts_query(query, exact=exact)
     try:
         return connection.execute(
-            "SELECT m.source_path, m.source_family, m.authority_class, "
-            "m.source_hash, m.content, bm25(memory_memories_fts) AS score "
+            "SELECT m.source_path, m.section_id, m.heading, m.line_start, m.line_end, "
+            "m.source_family, m.authority_class, m.source_hash, m.content, "
+            "bm25(memory_memories_fts) AS score "
             "FROM memory_memories_fts "
             "JOIN memory_memories m ON m.memory_id = memory_memories_fts.rowid "
             "WHERE memory_memories_fts MATCH ? "
-            "ORDER BY score, m.source_path",
+            "ORDER BY score, m.source_path, m.line_start",
             (fts_query,),
         ).fetchall()
     except sqlite3.OperationalError as exc:
@@ -626,11 +656,13 @@ def _search_fulltext(
         freshness_state, warnings = _freshness(Path(row["source_path"]), row["source_hash"])
         if freshness_state != "fresh" and not allow_stale:
             continue
-        line_start, line_end, excerpt = _excerpt_for_query(row["content"], query)
+        relative_start, relative_end, excerpt = _excerpt_for_query(row["content"], query)
+        citation_start = int(row["line_start"]) + relative_start - 1
+        citation_end = int(row["line_start"]) + relative_end - 1
         results.append(
             SearchResult(
                 source_path=row["source_path"],
-                citation=f"{row['source_path']}:L{line_start}-L{line_end}",
+                citation=f"{row['source_path']}:L{citation_start}-L{citation_end}",
                 source_hash=row["source_hash"],
                 source_family=row["source_family"],
                 authority_class=row["authority_class"],
@@ -639,6 +671,10 @@ def _search_fulltext(
                 freshness_state=freshness_state,
                 warnings=tuple(warnings),
                 excerpt=excerpt,
+                section_id=row["section_id"],
+                heading=row["heading"],
+                line_start=int(row["line_start"]),
+                line_end=int(row["line_end"]),
             )
         )
     return results
@@ -666,7 +702,8 @@ def _search_semantic(
         raise ValueError("Embedding backend unavailable for semantic retrieval")
 
     rows = connection.execute(
-        "SELECT source_path, source_family, authority_class, source_hash, content, embedding_vector_json "
+        "SELECT source_path, section_id, heading, line_start, line_end, source_family, "
+        "authority_class, source_hash, content, embedding_vector_json "
         "FROM memory_memories WHERE embedding_vector_json IS NOT NULL"
     ).fetchall()
 
@@ -685,11 +722,11 @@ def _search_semantic(
         freshness_state, warnings = _freshness(Path(row["source_path"]), row["source_hash"])
         if freshness_state != "fresh" and not allow_stale:
             continue
-        line_start, line_end, excerpt = _excerpt_for_query(row["content"], query)
+        _relative_start, _relative_end, excerpt = _excerpt_for_query(row["content"], query)
         results.append(
             SearchResult(
                 source_path=row["source_path"],
-                citation=f"{row['source_path']}:L{line_start}-L{line_end}",
+                citation=f"{row['source_path']}:L{row['line_start']}-L{row['line_end']}",
                 source_hash=row["source_hash"],
                 source_family=row["source_family"],
                 authority_class=row["authority_class"],
@@ -698,6 +735,10 @@ def _search_semantic(
                 freshness_state=freshness_state,
                 warnings=tuple(warnings),
                 excerpt=excerpt,
+                section_id=row["section_id"],
+                heading=row["heading"],
+                line_start=int(row["line_start"]),
+                line_end=int(row["line_end"]),
             )
         )
 
@@ -725,8 +766,9 @@ def _query_semantic_rows(
         return []
 
     rows = connection.execute(
-        "SELECT source_path, source_family, authority_class, source_hash, content, "
-        "embedding_vector_json FROM memory_memories WHERE embedding_vector_json IS NOT NULL"
+        "SELECT source_path, section_id, heading, line_start, line_end, source_family, "
+        "authority_class, source_hash, content, embedding_vector_json FROM memory_memories "
+        "WHERE embedding_vector_json IS NOT NULL"
     ).fetchall()
 
     scored: list[tuple[sqlite3.Row, float]] = []
@@ -754,15 +796,18 @@ def _merge_fulltext_semantic(
         state, warnings = _freshness(Path(path), source_hash)
         return state, tuple(warnings)
 
+    def row_key(row: sqlite3.Row) -> str:
+        return f"{row['source_path']}\0{row['section_id']}"
+
     full_map: dict[str, dict[str, object]] = {}
     for row in full_text_rows:
         score = _normalize_fts_score(float(row["score"]))
-        line_start, line_end, excerpt = _excerpt_for_query(row["content"], query)
+        relative_start, relative_end, excerpt = _excerpt_for_query(row["content"], query)
         freshness_state, warnings = row_freshness(row["source_path"], row["source_hash"])
-        full_map[row["source_path"]] = {
+        full_map[row_key(row)] = {
             "row": row,
-            "line_start": line_start,
-            "line_end": line_end,
+            "citation_start": int(row["line_start"]) + relative_start - 1,
+            "citation_end": int(row["line_start"]) + relative_end - 1,
             "excerpt": excerpt,
             "score": score,
             "freshness_state": freshness_state,
@@ -771,72 +816,60 @@ def _merge_fulltext_semantic(
 
     semantic_map: dict[str, dict[str, object]] = {}
     for row, score in semantic_rows:
-        line_start, line_end, excerpt = _excerpt_for_query(row["content"], query)
+        _relative_start, _relative_end, excerpt = _excerpt_for_query(row["content"], query)
         freshness_state, warnings = row_freshness(row["source_path"], row["source_hash"])
-        semantic_map[row["source_path"]] = {
+        semantic_map[row_key(row)] = {
             "row": row,
-            "line_start": line_start,
-            "line_end": line_end,
+            "citation_start": int(row["line_start"]),
+            "citation_end": int(row["line_end"]),
             "excerpt": excerpt,
             "score": max(0.0, score),
             "freshness_state": freshness_state,
             "warnings": warnings,
         }
 
-    paths = set(full_map) | set(semantic_map)
+    keys = set(full_map) | set(semantic_map)
     combined: list[SearchResult] = []
-    for path in paths:
-        full = full_map.get(path)
-        semantic = semantic_map.get(path)
+    for key in keys:
+        full = full_map.get(key)
+        semantic = semantic_map.get(key)
         if full is None and semantic is None:
             continue
 
         row = (full or semantic)["row"]
         if full and semantic:
-            full_score = full["score"]
-            semantic_score = semantic["score"]
-            score = (0.7 * semantic_score) + (0.3 * full_score)
-            if semantic_score >= full_score:
-                line_start = semantic["line_start"]
-                line_end = semantic["line_end"]
-                excerpt = semantic["excerpt"]
-                freshness_state = semantic["freshness_state"]
-                warnings = tuple(sorted(set(semantic["warnings"])))
-            else:
-                line_start = full["line_start"]
-                line_end = full["line_end"]
-                excerpt = full["excerpt"]
-                freshness_state = full["freshness_state"]
-                warnings = tuple(sorted(set(full["warnings"])) )
+            score = (0.7 * semantic["score"]) + (0.3 * full["score"])
+            selected = semantic if semantic["score"] >= full["score"] else full
         elif semantic:
             score = semantic["score"]
-            line_start = semantic["line_start"]
-            line_end = semantic["line_end"]
-            excerpt = semantic["excerpt"]
-            freshness_state = semantic["freshness_state"]
-            warnings = semantic["warnings"]
+            selected = semantic
         else:
             score = full["score"]
-            line_start = full["line_start"]
-            line_end = full["line_end"]
-            excerpt = full["excerpt"]
-            freshness_state = full["freshness_state"]
-            warnings = full["warnings"]
+            selected = full
 
+        freshness_state = selected["freshness_state"]
         if not allow_stale and freshness_state != "fresh":
             continue
+        warnings = tuple(sorted(set(selected["warnings"])))
         combined.append(
             SearchResult(
                 source_path=row["source_path"],
-                citation=f"{row['source_path']}:L{line_start}-L{line_end}",
+                citation=(
+                    f"{row['source_path']}:L{selected['citation_start']}-"
+                    f"L{selected['citation_end']}"
+                ),
                 source_hash=row["source_hash"],
                 source_family=row["source_family"],
                 authority_class=row["authority_class"],
                 retrieval_mode="hybrid",
                 score=float(score),
                 freshness_state=freshness_state,
-                warnings=tuple(sorted(set(warnings))),
-                excerpt=excerpt,
+                warnings=warnings,
+                excerpt=selected["excerpt"],
+                section_id=row["section_id"],
+                heading=row["heading"],
+                line_start=int(row["line_start"]),
+                line_end=int(row["line_end"]),
             )
         )
 
