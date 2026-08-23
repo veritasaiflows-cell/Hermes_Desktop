@@ -29,22 +29,26 @@ CLAIM_WARNING_HOURS = 24
 
 
 def _utc_now() -> datetime:
+    """Return the current UTC time."""
     return datetime.now(timezone.utc)
 
 
 def _parse_utc(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp (with optional ``Z``) into a UTC datetime."""
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _bundle_result_hash(result: dict) -> str:
+    """Hash a workflow result bundle excluding its own ``bundle_sha256`` field."""
     payload = dict(result)
     payload.pop("bundle_sha256", None)
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _check_expiring_claims(db: CanonicalDB, now: datetime, warning_hours: int) -> list[dict]:
+    """Return active claims expiring within ``warning_hours`` of ``now``."""
     warning_until = now + timedelta(hours=warning_hours)
     rows = db.connection.execute(
         "SELECT claim_id, title, subject_type, subject_id, valid_until "
@@ -66,6 +70,7 @@ def _check_expiring_claims(db: CanonicalDB, now: datetime, warning_hours: int) -
 
 
 def _check_tampered_workflow_runs(db: CanonicalDB) -> list[dict]:
+    """Return workflow runs whose stored bundle hash no longer matches their result."""
     rows = db.connection.execute(
         "SELECT run_id, workflow_id, run_key, result_json FROM workflow_runs"
     ).fetchall()
@@ -88,6 +93,7 @@ def _check_tampered_workflow_runs(db: CanonicalDB) -> list[dict]:
 
 
 def _check_stale_replays(db: CanonicalDB) -> list[dict]:
+    """Return workflow runs recorded as ``replayed_stale`` due to missing active claims."""
     rows = db.connection.execute(
         "SELECT run_id, workflow_id, run_key, result_json FROM workflow_runs"
     ).fetchall()
@@ -109,6 +115,7 @@ def _check_stale_replays(db: CanonicalDB) -> list[dict]:
 
 
 def main() -> int:
+    """Scan for expiring claims, tampered runs, and stale replays; exit 1 on drift."""
     now = _utc_now()
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     database_path = DEFAULT_DATABASE

@@ -12,9 +12,19 @@ standard test runner output and a final summary line.
 This script exists so that cron_health_check.py can remain a fast,
 operational gate (routing + wiki + alias) while the correctness gate
 keeps its own schedule.
+
+Preflight: before spending ~90s on the full suite, check the lane register
+for active write lanes whose allowed_writes touch the correctness surface
+(scripts/, tests/, canonical/). A2-full fingerprints the source tree — any
+concurrent write guarantees a drift rejection after the run, wasting the
+test effort. When active lanes block, print a deferral marker and exit 2
+(signal for the scheduler to retry on the next tick rather than treating it
+as a correctness failure).
 """
 from __future__ import annotations
 
+import json
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -23,10 +33,60 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 TIMEOUT_SECONDS = 300
+LANE_REGISTER = PROJECT_ROOT / "state" / "concurrent-lane-register.sqlite"
+# Write-scope prefixes whose edits invalidate the A2-full source fingerprint.
+CORRECTNESS_SURFACE = ("scripts/", "tests/", "canonical/")
+
+
+def _active_write_lanes_blocking(register: Path = LANE_REGISTER) -> list[dict]:
+    """Return active write lanes whose scope overlaps the correctness surface."""
+    if not register.is_file():
+        return []
+    try:
+        connection = sqlite3.connect(f"file:{register}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                "SELECT lane_id, owner, status, allowed_writes_json FROM lanes "
+                "WHERE status IN ('planned', 'leased', 'running')"
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        # Register unreadable — don't block the correctness gate on an
+        # observability failure; run the suite and let telemetry judge.
+        return []
+
+    blocking = []
+    for row in rows:
+        try:
+            writes = json.loads(row["allowed_writes_json"] or "[]")
+        except json.JSONDecodeError:
+            continue
+        for path in writes:
+            normalized = str(path).replace("\\", "/").lower()
+            if any(f"/{prefix}" in normalized for prefix in CORRECTNESS_SURFACE):
+                blocking.append(
+                    {
+                        "lane_id": row["lane_id"],
+                        "owner": row["owner"],
+                        "status": row["status"],
+                    }
+                )
+                break
+    return blocking
 
 
 def main() -> int:
+    """Run the full correctness suite; exit 0 on pass, non-zero on any failure."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    blocking = _active_write_lanes_blocking()
+    if blocking:
+        print(f"TEST GATE DEFERRED {now} reason=active_write_lanes")
+        print(json.dumps({"blocking_lanes": blocking}, indent=2))
+        return 2
+
     try:
         completed = subprocess.run(
             [PYTHON, "scripts/run_checks.py", "--skip-smoke", "--record-telemetry"],

@@ -6,12 +6,14 @@ operates on mocked gate commands rather than the real repository state.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -152,32 +154,57 @@ class WorkspaceStatusTests(unittest.TestCase):
         self.assertTrue(completed.stdout.strip(), completed.stderr)
         self.assertEqual(json.loads(completed.stdout)["schema"], "workspace-status.v1")
 
-    def _run_workspace_status(self, project_root: Path, gate_scripts: dict[str, str]) -> tuple[int, dict]:
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(PROJECT_ROOT)
-        env["WORKSPACE_STATUS_GATES"] = _gate_env(gate_scripts)
-
-        # Run via Python import so we can pass project_root to main().
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                f"import sys; sys.path.insert(0, {str(PROJECT_ROOT)!r}); "
-                f"from scripts.workspace_status import main; "
-                f"raise SystemExit(main({str(project_root)!r}))",
-            ],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=60,
-        )
-        if not completed.stdout.strip():
-            return completed.returncode, {"parse_error": True, "stderr": completed.stderr}
+    @staticmethod
+    def _execute_mock_gate(label: str, body: str) -> dict:
+        """Execute a tiny gate fixture in-process with the real gate-result shape."""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        returncode = 0
         try:
-            return completed.returncode, json.loads(completed.stdout)
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exec(compile(body, f"<mock-gate:{label}>", "exec"), {"__name__": "__main__"})
+        except SystemExit as exc:
+            returncode = exc.code if isinstance(exc.code, int) else 1
+
+        raw_stdout = stdout.getvalue().strip()
+        parsed = None
+        if raw_stdout:
+            try:
+                parsed = json.loads(raw_stdout)
+            except json.JSONDecodeError:
+                parsed = raw_stdout
+        return {
+            "label": label,
+            "exit": returncode,
+            "elapsed_ms": 0,
+            "stdout": parsed,
+            "stderr_tail": stderr.getvalue().strip().splitlines()[-3:],
+        }
+
+    def _run_workspace_status(self, project_root: Path, gate_scripts: dict[str, str]) -> tuple[int, dict]:
+        gates = [
+            (label, [f"scripts/{label}.py"], 30)
+            for label in gate_scripts
+        ]
+
+        def fake_run(label, _args, _timeout, project_root):
+            return self._execute_mock_gate(label, gate_scripts[label])
+
+        stdout = io.StringIO()
+        with (
+            patch.object(workspace_status, "GATES", gates),
+            patch.object(workspace_status, "_run", side_effect=fake_run),
+            redirect_stdout(stdout),
+        ):
+            returncode = workspace_status.main(project_root)
+
+        raw_stdout = stdout.getvalue().strip()
+        if not raw_stdout:
+            return returncode, {"parse_error": True, "stderr": ""}
+        try:
+            return returncode, json.loads(raw_stdout)
         except json.JSONDecodeError:
-            return completed.returncode, {"parse_error": True, "stdout": completed.stdout, "stderr": completed.stderr}
+            return returncode, {"parse_error": True, "stdout": raw_stdout, "stderr": ""}
 
     def _make_minimal_project(self, gate_scripts: dict[str, str]) -> Path:
         directory = tempfile.TemporaryDirectory()

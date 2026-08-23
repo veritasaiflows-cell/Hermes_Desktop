@@ -39,6 +39,7 @@ from scripts.vector_memory_index import (  # noqa: E402
 
 
 def _percentile(values: list[float], p: int) -> float:
+    """Return the ``p``-th percentile of ``values`` (linear interpolation)."""
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -52,6 +53,7 @@ def _percentile(values: list[float], p: int) -> float:
 
 
 def _mock_embedding(text: str, **_: object) -> list[float]:
+    """Return a deterministic 3-dim embedding derived from character sums."""
     total = sum(ord(ch) for ch in text)
     return [
         float((total % 997) / 997.0),
@@ -61,6 +63,7 @@ def _mock_embedding(text: str, **_: object) -> list[float]:
 
 
 def _build_dataset(root: Path, size: int) -> None:
+    """Write ``size`` synthetic markdown documents into ``root``."""
     root.mkdir(parents=True, exist_ok=True)
     for i in range(size):
         text = (
@@ -72,6 +75,7 @@ def _build_dataset(root: Path, size: int) -> None:
 
 
 def _run_queries(index_path: Path, queries: list[str], retrieval_mode: str, *, limit: int = 5) -> list[float]:
+    """Time each query against the index and return per-query latencies."""
     timings = []
     for query in queries:
         start = time.perf_counter()
@@ -89,6 +93,7 @@ def _run_queries(index_path: Path, queries: list[str], retrieval_mode: str, *, l
 
 
 def run_benchmark(dataset_size: int, query_count: int, include_real_ollama: bool) -> dict[str, object]:
+    """Build a synthetic corpus and measure full-text and hybrid query latency."""
     with TemporaryDirectory() as directory:
         workspace = Path(directory)
         approved = workspace / "approved"
@@ -164,6 +169,7 @@ def run_benchmark(dataset_size: int, query_count: int, include_real_ollama: bool
 
 
 def main() -> None:
+    """Parse arguments, run the benchmark, and print (and optionally write) the report."""
     parser = argparse.ArgumentParser(description="Benchmark vector/semantic memory search adapters.")
     parser.add_argument("--dataset-size", type=int, default=500)
     parser.add_argument("--queries", type=int, default=250)

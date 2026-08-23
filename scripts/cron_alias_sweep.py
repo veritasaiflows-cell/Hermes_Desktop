@@ -17,6 +17,7 @@ DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
 
 
 def main() -> int:
+    """Sweep aliases for dead workflow targets; exit 1 if any are found."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     alias_path = DEFAULT_STATE_DIR / "workflow_alias_index.json"

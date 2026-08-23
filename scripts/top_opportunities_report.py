@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Generate a ranked, deduplicated opportunity shortlist from canonical data."""
+"""Generate a ranked, deduplicated opportunity shortlist from canonical data.
+
+Reads ``product_candidate`` entities and their ``commerce.*`` metrics from the
+canonical SQLite database, deduplicates on ``(name, supplier)``, filters by a
+minimum viability score, and prints a ranked shortlist.
+
+Usage:
+    python scripts/top_opportunities_report.py canonical/efficiens.db --top-n 5
+    python scripts/top_opportunities_report.py canonical/efficiens.db --as-json
+
+Side effects: read-only. Opens the database with foreign keys enabled and never
+writes canonical records.
+"""
 
 from __future__ import annotations
 
@@ -57,6 +69,11 @@ LIMIT :top_n;
 
 
 def generate(db_path: Path, top_n: int, min_viability: float) -> list[dict[str, object]]:
+    """Return the top ``top_n`` deduplicated candidates at or above ``min_viability``.
+
+    Prefers a single SQL query with JSON extraction; falls back to explicit
+    Python-side JSON parsing when the SQLite build lacks JSON1 support.
+    """
     with sqlite3.connect(db_path) as con:
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON;")
@@ -130,11 +147,15 @@ def generate(db_path: Path, top_n: int, min_viability: float) -> list[dict[str, 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    """Parse arguments, generate the shortlist, and print it (text or JSON)."""
+    parser = argparse.ArgumentParser(
+        description="Ranked, deduplicated opportunity shortlist from canonical data.",
+        epilog="Read-only: never writes canonical records.",
+    )
     parser.add_argument("database", help="Path to canonical SQLite database")
-    parser.add_argument("--top-n", type=int, default=5)
-    parser.add_argument("--min-viability", type=float, default=0.0)
-    parser.add_argument("--as-json", action="store_true")
+    parser.add_argument("--top-n", type=int, default=5, help="Number of candidates to return (default 5)")
+    parser.add_argument("--min-viability", type=float, default=0.0, help="Minimum viability score filter (default 0.0)")
+    parser.add_argument("--as-json", action="store_true", help="Emit JSON instead of a text table")
     arguments = parser.parse_args()
 
     rows = generate(Path(arguments.database), arguments.top_n, arguments.min_viability)

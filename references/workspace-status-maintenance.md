@@ -69,23 +69,25 @@ archive and refresh operations remain separate explicit jobs.
 | A2-full | a2_full_test_gate.py | daily 06:00 | Full unit/smoke correctness gate |
 | A3 | a3_routing_cache_sweep.py | daily 09:00 | Evict stale routing-cache rows |
 | A4 | a4_archive_stale_workflows.py | weekly Sun 10:00 | Archive terminal workflows |
-| A5 | a5_routing_refresh.py | hourly :35 | Regenerate routing index + capsules after the :30 retrieval refresh window |
+| A5 | a5_routing_refresh.py | hourly :35 | Regenerate routing index + capsules with bounded fail-closed reporting |
 | A6 | a6_alias_sweep.py | daily 09:30 | Detect dead aliases |
 | A7 | a7_queue_hygiene.py | weekly Sun 11:00 | Active-workflows queue hygiene |
 | A8 | a8_telemetry_harvest.py | daily 06:30 | Aggregate canonical + turn telemetry; create baseline-only review candidates after A2-full |
 | A9 | a9_claim_drift_check.py | hourly :45 | Claim/replay integrity monitor |
 | A10 | a10_graph_freshness.py | hourly :15 | Graph coverage + integrity monitor |
 | **A11** | **a11_workspace_status.py** | **every 4h :15** | **Single-command full operating brief** |
-| A12 | a12_retrieval_refresh.py | every 6h :30 | Refresh exact + semantic indexes from approved manifest |
+| A12 | a12_retrieval_refresh.py | every 6h :30 | Refresh indexes, then invoke A5 even after degraded/failed refresh attempts |
 | A13 | a13_canonical_integrity.py | daily 07:00 | Verify canonical SQLite integrity |
 
 A11 is the new heartbeat for the status surface itself. It does not replace A2;
 A2 remains the fast watchdog, while A11 returns the richer JSON brief that an
 agent can parse in one call.
 
-A12 proactively repairs retrieval-source hash drift detected by A11. A13 gives
-canonical SQLite integrity an explicit deterministic schedule instead of relying
-on incidental database access by other gates.
+A12 proactively repairs retrieval-source hash drift detected by A11 and treats
+successful A5 routing synchronization as a required postcondition. It invokes A5
+after successful or degraded refreshes and best-effort after exceptions, covering
+partial index writes. A13 gives canonical SQLite integrity an explicit deterministic
+schedule instead of relying on incidental database access by other gates.
 
 ## Keeping the status surface current
 

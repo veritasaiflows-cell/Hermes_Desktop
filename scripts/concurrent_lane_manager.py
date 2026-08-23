@@ -69,10 +69,12 @@ class LaneManagerError(ValueError):
 
 
 def _utc_now() -> str:
+    """Return the current UTC time as a compact ISO-8601 string."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_utc(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp (with optional ``Z``) into a UTC datetime."""
     if not value:
         return None
     if value.endswith("Z"):
@@ -81,15 +83,18 @@ def _parse_utc(value: str | None) -> datetime | None:
 
 
 def _as_bool_json(value: Any) -> str:
+    """Serialize ``value`` to compact canonical JSON for deterministic diffs."""
     # Compact canonical JSON for deterministic diffs and equality checks.
     return json.dumps(value, sort_keys=True)
 
 
 def _normalize_json_list(values: list[str]) -> list[str]:
+    """Return a deduplicated, sorted list of non-empty strings."""
     return sorted({value for value in values if value})
 
 
 def _normalize_path(raw: str, project_root: Path) -> str:
+    """Validate and normalize a workspace-relative lease surface path."""
     if not raw:
         raise LaneManagerError("Path cannot be empty")
     value = raw.strip()
@@ -125,6 +130,7 @@ def _normalize_path(raw: str, project_root: Path) -> str:
 
 
 def _path_overlaps(lhs: str, rhs: str) -> bool:
+    """Return True if two normalized paths are equal or one is a parent of the other."""
     lhs_norm = os.path.normcase(lhs)
     rhs_norm = os.path.normcase(rhs)
     if lhs_norm == rhs_norm:
@@ -136,6 +142,7 @@ def _path_overlaps(lhs: str, rhs: str) -> bool:
 
 
 def _load_json_list(blob: str | None, *, field_name: str) -> list[str]:
+    """Parse a stored JSON list field, raising ``LaneManagerError`` on malformed data."""
     if not blob:
         return []
     try:
@@ -149,6 +156,7 @@ def _load_json_list(blob: str | None, *, field_name: str) -> list[str]:
 
 
 def _resolve_workflow_ids(project_root: Path) -> set[str]:
+    """Return the set of known workflow IDs from the live workflow queue."""
     # Validate against the live workflow queue when available.
     state_file = project_root / "state" / "ACTIVE_WORKFLOWS.md"
     legacy_state_file = project_root / "state" / "active_workflows.json"
@@ -487,6 +495,7 @@ class ConcurrentLaneManager:
         job_retry: int = 0,
         run_target: str | None = None,
     ) -> dict[str, Any]:
+        """Register a planned lane (and its parent job) in the durable register."""
         if lane_mode not in WRITE_MODES:
             raise LaneManagerError(f"Invalid lane mode: {lane_mode!r}")
         if not owner.strip():
@@ -625,6 +634,7 @@ class ConcurrentLaneManager:
         refresh: bool = False,
         run_target: str | None = None,
     ) -> dict[str, Any]:
+        """Grant or refresh a finite lease on a planned lane."""
         if not math.isfinite(duration_minutes) or duration_minutes <= 0:
             raise LaneManagerError("Lease duration_minutes must be a positive finite number")
         now = _utc_now()
@@ -705,6 +715,7 @@ class ConcurrentLaneManager:
             return self._decode_fields(updated)
 
     def start_lane(self, lane_id: str, *, actor: str = "main-session") -> dict[str, Any]:
+        """Transition a leased lane to running, rejecting expired leases."""
         now = _utc_now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -753,6 +764,7 @@ class ConcurrentLaneManager:
         acceptance_command: str | None = None,
         force_proof: bool = False,
     ) -> dict[str, Any]:
+        """Transition a lane to a new status, enforcing the transition table."""
         if status_value not in VALID_STATUSES:
             raise LaneManagerError(f"Invalid status value: {status_value!r}")
 
@@ -831,6 +843,7 @@ class ConcurrentLaneManager:
         acceptance_command: str | None = None,
         force_proof: bool = False,
     ) -> dict[str, Any]:
+        """Complete a lane, requiring proof artifacts unless force_proof is set."""
         return self.set_status(
             lane_id,
             "complete",
@@ -847,6 +860,7 @@ class ConcurrentLaneManager:
         include_terminal: bool = True,
         status_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """List lanes, optionally filtered by ID, status, or terminal state."""
         with self._connect() as connection:
             rows = self._iter_lane_rows(connection, lane_id=lane_id)
             payload: list[dict[str, Any]] = []
@@ -860,6 +874,7 @@ class ConcurrentLaneManager:
             return payload
 
     def validate(self) -> dict[str, Any]:
+        """Sweep the register for collisions, expired leases, and integrity issues."""
         now = datetime.now(timezone.utc)
         hard_failures: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -1039,6 +1054,7 @@ class ConcurrentLaneManager:
             }
 
     def status_packet(self, *, include_terminal: bool = False) -> dict[str, Any]:
+        """Return a compact status packet for the register and its lanes."""
         with self._connect() as connection:
             register_revision = self._get_revision(connection)
 
@@ -1052,6 +1068,7 @@ class ConcurrentLaneManager:
 
 
 def _parse_args() -> argparse.Namespace:
+    """Parse the lane-manager CLI (plan/lease/start/complete/status subcommands)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--project-root",
@@ -1132,12 +1149,14 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _normalize_output(value: Any) -> dict[str, Any]:
+    """Wrap a non-dict result in a ``{"result": ...}`` envelope."""
     if isinstance(value, dict):
         return value
     return {"result": value}
 
 
 def main() -> int:
+    """Dispatch the lane-manager CLI command and print the JSON result."""
     arguments = _parse_args()
     try:
         project_root = Path(arguments.project_root)

@@ -22,7 +22,7 @@
   "display_name": "Workflow C - Creative Generation",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-22T19:35:41Z",
+  "generated_at": "2026-08-23T03:35:05Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -41,11 +41,11 @@
     "result_count": 3,
     "results": [
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L107-L107",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L110-L110",
         "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5613239888571491,
+        "score": 0.5672962489367103,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       },
       {
@@ -61,7 +61,7 @@
         "excerpt": "# Workspace Status Maintenance\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.5428065581635937,
+        "score": 0.5464172103973446,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workspace-status-maintenance.md"
       }
     ]

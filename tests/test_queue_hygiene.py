@@ -87,17 +87,19 @@ class QueueHygieneTests(unittest.TestCase):
 class TestGateWrapperTests(unittest.TestCase):
     def test_green_when_run_checks_exits_zero(self):
         fake = subprocess_result(returncode=0, stdout="Ran 87 tests\nOK", stderr="")
-        with patch.object(cron_test_gate.subprocess, "run", return_value=fake):
-            with patch.object(cron_test_gate.sys, "stderr"):
-                rc = cron_test_gate.main()
+        with patch.object(cron_test_gate, "_active_write_lanes_blocking", return_value=[]):
+            with patch.object(cron_test_gate.subprocess, "run", return_value=fake):
+                with patch.object(cron_test_gate.sys, "stderr"):
+                    rc = cron_test_gate.main()
         self.assertEqual(rc, 0)
 
     def test_fail_when_run_checks_exits_nonzero(self):
         fake = subprocess_result(returncode=1, stdout="", stderr="Traceback...")
-        with patch.object(cron_test_gate.subprocess, "run", return_value=fake):
-            with patch.object(cron_test_gate.sys, "stdout"):
-                with patch.object(cron_test_gate.sys, "stderr"):
-                    rc = cron_test_gate.main()
+        with patch.object(cron_test_gate, "_active_write_lanes_blocking", return_value=[]):
+            with patch.object(cron_test_gate.subprocess, "run", return_value=fake):
+                with patch.object(cron_test_gate.sys, "stdout"):
+                    with patch.object(cron_test_gate.sys, "stderr"):
+                        rc = cron_test_gate.main()
         self.assertEqual(rc, 1)
 
 

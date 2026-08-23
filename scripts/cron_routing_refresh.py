@@ -20,9 +20,28 @@ PYTHON = sys.executable
 TIMEOUT_SECONDS = 120
 
 
+def _run_router(command: list[str], now: str):
+    """Run one bounded router command and return ``None`` after a timeout."""
+    try:
+        return subprocess.run(
+            command,
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"ROUTING REFRESH FAIL {now} "
+            f"reason=timeout_after_{TIMEOUT_SECONDS}s"
+        )
+        return None
+
+
 def main() -> int:
+    """Regenerate the routing index via the router; exit 1 on failure or stale output."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    completed = subprocess.run(
+    completed = _run_router(
         [
             PYTHON,
             "scripts/workflow_router.py",
@@ -32,11 +51,10 @@ def main() -> int:
             "--validate",
             "--write-index",
         ],
-        cwd=str(PROJECT_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT_SECONDS,
+        now,
     )
+    if completed is None:
+        return 1
     if completed.returncode != 0:
         print(f"ROUTING REFRESH FAIL {now}")
         print("--- stdout ---")
@@ -47,17 +65,20 @@ def main() -> int:
 
     try:
         report = json.loads(completed.stdout)
-        stale = report.get("routing_index_stale", True)
     except json.JSONDecodeError:
         print(f"ROUTING REFRESH FAIL {now} reason=invalid_report")
         return 1
+    if not isinstance(report, dict):
+        print(f"ROUTING REFRESH FAIL {now} reason=invalid_report")
+        return 1
+    stale = report.get("routing_index_stale", True)
 
     if stale:
         print(f"ROUTING REFRESH DEGRADED {now}")
         print(json.dumps({"routing_index_stale": True}, indent=2))
         return 1
 
-    print(f"ROUTING REFRESH OK {now}", file=sys.stderr)
+    print(f"ROUTING REFRESH OK {now} action=regenerated", file=sys.stderr)
     return 0
 
 

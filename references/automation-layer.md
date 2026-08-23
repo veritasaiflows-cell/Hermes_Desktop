@@ -11,15 +11,16 @@ metadata and never applies a production harness change.
 - `scripts/cron_test_gate.py` — A2-full logic (full `run_checks.py --skip-smoke --record-telemetry` correctness gate)
 - `scripts/cron_routing_cache_sweep.py` — A3 logic (evicts expired routing cache rows and rows with mismatched source signatures)
 - `scripts/cron_archive_stale_workflows.py` — A4 logic (flags terminal-state workflows older than 30 days and archives derived capsules)
-- `scripts/cron_routing_refresh.py` — A5 logic (regenerates routing index and capsules hourly)
+- `scripts/cron_routing_refresh.py` — A5 logic (regenerates routing index/capsules and fails closed on timeout or malformed output)
 - `scripts/cron_alias_sweep.py` — A6 logic (reports aliases pointing to non-existent workflows)
 - `scripts/cron_queue_hygiene.py` — A7 logic (removes terminal-state workflows older than 30 days from the authoritative queue and archives them)
 - `scripts/feedback_evaluation_loop.py` — reads canonical + turn telemetry, writes compact derived report, records review candidates/baselines, evaluates prepared candidates, and records explicit human decisions
 - `scripts/cron_telemetry_harvest.py` — A8 logic (consumes telemetry after A2-full, runs the feedback/evaluation refresh, and surfaces only pending-review candidate IDs)
 - `scripts/cron_claim_drift_check.py` — A9 logic (monitors expiring claims, tampered workflow runs, and stale replays)
 - `scripts/cron_graph_freshness.py` — A10 logic (graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges)
+- `scripts/cron_lane_lease_check.py` — coordination watchdog (alerts on expiring, expired, or missing active-lane leases)
 - `scripts/workspace_status.py` — A11 logic (single-command JSON operating brief; runs gates serially to avoid shared-state races)
-- `scripts/cron_retrieval_refresh.py` — A12 logic (refreshes both retrieval indexes from the approved source manifest)
+- `scripts/cron_retrieval_refresh.py` — A12 logic (refreshes both retrieval indexes, then synchronizes routing through A5 even after degraded/failed refresh attempts)
 - `scripts/cron_canonical_integrity.py` — A13 logic (checks canonical SQLite integrity)
 - `scripts/graph_backfill.py` — one-time idempotent backfill of durable graph edges from pre-graph canonical records
 - `scripts/cron_registration_validator.py` — verifies every cron wrapper resolves to an existing repo script (run by tests and A2)
@@ -58,14 +59,14 @@ is missing.
 | A2-full | code-correctness gate | daily 06:00 | runs full test/smoke suite with telemetry recording; alerts on regression |
 | A3 | routing cache sweep | daily 09:00 | evicts expired and signature-mismatched `canonical/efficiens.db` routing_cache rows |
 | A4 | stale-workflow archive sweep | weekly Sunday 10:00 | flags terminal workflows older than 30 days; archives capsules |
-| A5 | routing index refresh | hourly at :35 | regenerates `state/workflow-routing-index.json` and capsules after the :30 A12 index refresh window |
+| A5 | routing index refresh | hourly at :35 | regenerates `state/workflow-routing-index.json` and capsules with bounded fail-closed reporting |
 | A6 | alias dead-target sweep | daily 09:30 | reports aliases that no longer point to active workflows |
 | A7 | authoritative queue hygiene | weekly Sunday 11:00 | removes terminal workflows older than 30 days from `active_workflows.json`; archives them |
 | A8 | feedback/evaluation refresh | daily 06:30 | consumes canonical + turn telemetry after A2-full, emits review-only candidates and one shared baseline cohort when new candidates appear |
 | A9 | claim-drift check | hourly at :45 | monitors expiring claims, tampered workflow runs, and stale replays |
 | A10 | graph freshness | hourly at :15 | graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges |
 | A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
-| A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic retrieval indexes from the approved manifest |
+| A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic indexes and invokes A5 after successful, degraded, or exceptional refresh attempts |
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
@@ -93,7 +94,9 @@ no additional test failures, identical test count, and no more than 20% cohort
 duration regression. Candidate evaluation pins the exact baseline validation ID,
 so a later baseline row cannot silently change the decision comparison. A failed
 or zero-test baseline makes A8 exit nonzero, remains visible as `baseline_failed`,
-and is retried by the next refresh. A5 also fails closed on malformed router JSON.
+and is retried by the next refresh. A5 fails closed on timeout or malformed router
+JSON. A12 invokes it after every completed refresh and best-effort after exceptions,
+so partial or degraded retrieval changes cannot silently leave routing stale.
 
 ## Delivery
 

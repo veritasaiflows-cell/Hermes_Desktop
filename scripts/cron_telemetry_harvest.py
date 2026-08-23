@@ -24,6 +24,7 @@ TIMEOUT_SECONDS = 360
 
 
 def main() -> int:
+    """Run the feedback/evaluation refresh; exit 1 on failure, 0 on ready or review-required."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         completed = subprocess.run(

@@ -23,6 +23,7 @@ TIMEOUT_SECONDS = 120
 
 
 def main() -> int:
+    """Publish and validate the wiki; exit 0 on fresh, non-zero on failure."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     completed = subprocess.run(
         [PYTHON, "scripts/wiki_bootstrap.py", "publish"],

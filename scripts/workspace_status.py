@@ -51,6 +51,14 @@ DEFAULT_GATES: list[tuple[str, list[str], int]] = [
     ("alias", ["scripts/cron_alias_sweep.py"], 60),
     ("cron_registration", ["scripts/cron_registration_validator.py"], 60),
     ("feedback_evaluation", ["scripts/feedback_evaluation_loop.py", "status"], 60),
+    (
+        "lane_register",
+        [
+            "scripts/concurrent_lane_manager.py",
+            "validate",
+        ],
+        60,
+    ),
     ("claim_drift", ["scripts/cron_claim_drift_check.py"], 60),
     ("graph_integrity", ["scripts/graph_memory.py", "validate"], 120),
     ("graph_freshness", ["scripts/cron_graph_freshness.py"], 120),
@@ -339,6 +347,23 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
     claim_gate = gates.get("claim_drift", {})
     if claim_gate.get("exit", 1) != 0:
         warnings.append("claim_drift")
+
+    lane_gate = gates.get("lane_register", {})
+    if lane_gate:
+        if lane_gate.get("exit", 1) != 0:
+            warnings.append("lane_register_degraded")
+        else:
+            lane_stdout = lane_gate.get("stdout")
+            if isinstance(lane_stdout, dict):
+                expired = lane_stdout.get("expired_leases") or []
+                collisions = lane_stdout.get("collisions") or []
+                hard_failures = lane_stdout.get("hard_failures") or []
+                if expired:
+                    warnings.append("lane_lease_expired")
+                if collisions:
+                    warnings.append("lane_collision")
+                if hard_failures:
+                    warnings.append("lane_register_hard_failures")
 
     feedback_gate = gates.get("feedback_evaluation", {})
     if feedback_gate:

@@ -29,6 +29,7 @@ from scripts import wiki_bootstrap
 from scripts.product_research_workflow import run_product_research
 from scripts.runtime_metadata import detect_active_model
 from scripts.workspace_fingerprint import correctness_snapshot
+from scripts.script_doc_validator import validate_script_docs
 
 
 def build_test_suite() -> unittest.TestSuite:
@@ -290,6 +291,23 @@ def run_wiki_smoke(*, project_root: Path = PROJECT_ROOT) -> dict:
         }
 
 
+def run_script_doc_check(*, project_root: Path = PROJECT_ROOT) -> dict:
+    """Run the script-documentation coverage gate."""
+    start = time.perf_counter_ns()
+    try:
+        report = validate_script_docs(project_root)
+        elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
+        report["duration_ms"] = elapsed_ms
+        return report
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
+        return {
+            "ok": False,
+            "issues": [{"code": "script_doc_check_error", "message": f"{type(exc).__name__}: {exc}"}],
+            "duration_ms": elapsed_ms,
+        }
+
+
 
 def run_isolated_smoke() -> dict:
     """Run all mutating smoke checks against disposable copies of control state."""
@@ -311,6 +329,7 @@ def run_isolated_smoke() -> dict:
             "smoke": smoke,
             "routing": routing,
             "wiki": run_wiki_smoke(project_root=PROJECT_ROOT),
+            "script_doc": run_script_doc_check(project_root=PROJECT_ROOT),
         }
 
 
@@ -543,6 +562,7 @@ def main() -> int:
         smoke = run_phase0_smoke(Path(arguments.database))
         routing_smoke = run_routing_smoke(database_path=Path(arguments.database))
         wiki_smoke = run_wiki_smoke()
+        script_doc = run_script_doc_check()
     else:
         if arguments.database:
             raise ValueError("--database requires --persistent-smoke")
@@ -550,10 +570,12 @@ def main() -> int:
         smoke = isolated["smoke"]
         routing_smoke = isolated["routing"]
         wiki_smoke = isolated["wiki"]
+        script_doc = isolated["script_doc"]
 
     print("smoke-check:", smoke)
     print("routing-check:", routing_smoke)
     print("wiki-check:", wiki_smoke)
+    print("script-doc-check:", script_doc)
     source_snapshot_after = _safe_correctness_snapshot(PROJECT_ROOT)
     source_proof_errors = _source_proof_errors(
         source_snapshot_before,
@@ -584,6 +606,7 @@ def main() -> int:
         and smoke["delta_events"] >= 1
         and not routing_smoke["routing"].get("routing_index_stale", True)
         and wiki_smoke["status"] == "fresh"
+        and script_doc.get("ok", False)
         and not source_proof_errors
         else 1
     )

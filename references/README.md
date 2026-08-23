@@ -11,6 +11,7 @@ Authoritative detailed instructions that the lean bootstrap (`AGENTS.md`) points
 - `workflow-product-research.md` — phase-2 workflow scaffold: product research ingestion and candidate scoring.
 - `workflow-routing-control-plane.md` — routing and ownership control-plane implementation for workflow capsules and stale checks.
 - `concurrent-lane-control-plane.md` — collision-safe lane leasing and completion proof protocol.
+- `script-index.md` — authoritative routing surface for the `scripts/` layer (purpose, entrypoints, test anchors, owning references).
 - `wiki/` (new): authoritative bootstrap evidence for startup and operational evidence routing.
 
 ## Rules

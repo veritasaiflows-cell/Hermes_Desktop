@@ -79,7 +79,16 @@ and `metrics.dimensions_json` until a stable relation model is introduced.
    `entities` where `entity_type = 'product_candidate'` and `status='candidate'`.
 3. Candidate ranking is explainable from associated `commerce.viability_score`.
 
-## 6. Future migration targets (optional)
+## 6. Reporting surface
+
+`scripts/top_opportunities_report.py` is the read-only reporting entrypoint for
+the ranked opportunity shortlist. It reads `product_candidate` entities and
+their `commerce.*` metrics, deduplicates on `(name, supplier)`, filters by a
+minimum viability score, and prints a ranked shortlist (text or `--as-json`).
+It never writes canonical records; see `references/script-index.md` for the
+full script inventory.
+
+## 7. Future migration targets (optional)
 
 When needed for scale, add dedicated tables:
 
@@ -92,3 +101,5 @@ This keeps the existing foundation intact while unblocking first revenue workflo
 ## Change history
 
 - v1: initial phase-1 commerce model for Workflow A and canonical score telemetry.
+- v1.1: documented the `top_opportunities_report.py` reporting surface and linked
+  the script index.

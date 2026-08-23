@@ -30,6 +30,7 @@ TERMINAL_STATES = {"closed", "closed_with_follow_up", "blocked", "gated", "on_ho
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp (with optional ``Z``) into a UTC datetime."""
     if not value:
         return None
     try:
@@ -39,6 +40,7 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 
 
 def _archive_removed(archive_dir: Path, removed: list[dict], now: datetime) -> Path:
+    """Write (and rotate) the daily archive of removed workflow entries."""
     archive_dir.mkdir(parents=True, exist_ok=True)
     day_label = now.strftime("%Y-%m-%d")
     archive_path = archive_dir / f"{day_label}.json"
@@ -60,6 +62,7 @@ def _archive_removed(archive_dir: Path, removed: list[dict], now: datetime) -> P
 
 
 def main() -> int:
+    """Remove terminal workflows older than the threshold and archive them."""
     now = datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 

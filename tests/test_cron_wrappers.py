@@ -300,8 +300,32 @@ class WikiRegenLogicTests(unittest.TestCase):
 
 
 class RoutingRefreshLogicTests(unittest.TestCase):
+    def test_timeout_fails_closed(self):
+        with patch.object(
+            cron_routing_refresh.subprocess,
+            "run",
+            side_effect=cron_routing_refresh.subprocess.TimeoutExpired(
+                cmd=["workflow_router.py"],
+                timeout=cron_routing_refresh.TIMEOUT_SECONDS,
+            ),
+        ):
+            rc = cron_routing_refresh.main()
+
+        self.assertEqual(rc, 1)
+
     def test_malformed_router_output_fails_closed(self):
         fake_result = subprocess_result(returncode=0, stdout="not-json")
+        with patch.object(
+            cron_routing_refresh.subprocess,
+            "run",
+            return_value=fake_result,
+        ):
+            rc = cron_routing_refresh.main()
+
+        self.assertEqual(rc, 1)
+
+    def test_non_object_router_output_fails_closed(self):
+        fake_result = subprocess_result(returncode=0, stdout="[]")
         with patch.object(
             cron_routing_refresh.subprocess,
             "run",
@@ -324,6 +348,7 @@ class RoutingRefreshLogicTests(unittest.TestCase):
             rc = cron_routing_refresh.main()
 
         self.assertEqual(rc, 0)
+        self.assertEqual(run_mock.call_count, 1)
         command = run_mock.call_args.args[0]
         self.assertIn("--validate", command)
         self.assertIn("--write-index", command)

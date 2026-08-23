@@ -24,6 +24,7 @@ TERMINAL_STATES = {"closed", "closed_with_follow_up", "blocked", "gated", "on_ho
 
 
 def main(*, check_only: bool = False) -> int:
+    """Flag terminal workflows older than the threshold; archive capsules unless check_only."""
     now = datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -88,6 +89,7 @@ def main(*, check_only: bool = False) -> int:
 
 
 def _parse_args() -> argparse.Namespace:
+    """Parse the archive-sweep CLI (only ``--check-only``)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check-only",

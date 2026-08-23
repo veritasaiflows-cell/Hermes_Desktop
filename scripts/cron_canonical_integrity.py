@@ -14,6 +14,7 @@ from canonical.db import CanonicalDB, DEFAULT_DATABASE_PATH
 
 
 def main() -> int:
+    """Run a read-only integrity check; exit 1 on any failure."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         with CanonicalDB(DEFAULT_DATABASE_PATH, read_only=True) as db:
