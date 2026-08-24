@@ -7,10 +7,17 @@ import hashlib
 import json
 import os
 import stat
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.graphify_gate_edges import gate_edge_issues
 
 SCHEMA = "graphify-freshness.v1"
 BASELINE_SCHEMA = "graphify-freshness-baseline.v1"
@@ -209,6 +216,12 @@ def write_baseline(project_root: Path) -> dict[str, Any]:
             "Graphify graph is missing code source coverage: "
             + ", ".join(missing_code_sources)
         )
+    gate_issues = gate_edge_issues(project_root)
+    if gate_issues:
+        raise ValueError(
+            "Graphify graph is missing declared workspace gate edges: "
+            + ", ".join(issue["label"] for issue in gate_issues)
+        )
     source_paths = sorted(set(manifest) | set(code_sources))
     source_hashes = {
         relative: _sha256(_source_path(project_root, relative))
@@ -276,6 +289,15 @@ def check_freshness(project_root: Path) -> dict[str, Any]:
     for relative in _code_sources(project_root):
         if relative not in represented_sources:
             issues.append({"code": "source_missing_from_graph", "path": relative})
+    try:
+        issues.extend(gate_edge_issues(project_root))
+    except (OSError, SyntaxError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        issues.append(
+            {
+                "code": "declared_gate_edges_unverifiable",
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
+        )
     needs_update = project_root / GRAPH_DIR_NAME / "needs_update"
     if needs_update.exists():
         issues.append(

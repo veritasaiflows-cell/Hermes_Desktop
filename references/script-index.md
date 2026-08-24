@@ -60,6 +60,7 @@ Owned by `references/automation-layer.md`.
 | `workspace_organization_validator.py` | Validate governed directory + retention contract | `--project-root` | `test_workspace_organization_validator.py` | `references/operating-procedures.md` |
 | `script_doc_validator.py` | Validate script documentation coverage (module/function docs, test anchor, reference mention) | `--project-root` | `test_script_doc_validator.py` | `references/script-index.md` |
 | `graphify_freshness.py` | Deterministic freshness gate for the disposable Graphify artifact | `--project-root --write-baseline` | `test_graphify_freshness.py` | `references/graph-memory.md` |
+| `graphify_gate_edges.py` | Reconcile static workspace-status gates into cited derived Graphify edges | `--project-root` | `test_graphify_gate_edges.py` | `references/graph-memory.md` |
 | `top_opportunities_report.py` | Ranked, deduplicated opportunity shortlist (read-only) | `database` + `--top-n --min-viability --as-json` | `test_top_opportunities_report.py` | `references/commerce-data-model.md` |
 | `feedback_evaluation_loop.py` | Metadata-only feedback→evaluation loop (A8 core) | `refresh/evaluate/decide/status` + `--database --report --decision --reviewer` | `test_feedback_evaluation_loop.py` | `references/automation-layer.md` |
 | `wiki_bootstrap.py` | Wiki bootstrap validation + atomic publish | `validate/publish` + `--project-root --manifest-path` | `test_wiki_bootstrap.py` | `references/operating-procedures.md` |

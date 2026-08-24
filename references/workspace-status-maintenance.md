@@ -25,8 +25,9 @@ artifact races, and returns a JSON brief:
 
 Organization drift and missing or stale retrieval indexes are hard failures.
 Graphify drift is a warning because the derived code graph has a direct-source
-fallback. Refresh it with `graphify update .`, then record the verified artifact
-with `python scripts/graphify_freshness.py --write-baseline`.
+fallback. Refresh it with `graphify update .`, then reconcile static gate edges
+with `python scripts/graphify_gate_edges.py` before recording the verified
+artifact with `python scripts/graphify_freshness.py --write-baseline`.
 Exit code is 0 when healthy, 1 when degraded. The JSON body contains
 `health.status`, `health.hard_failures`, `health.warnings`, and a
 `recommended_next_action`.
@@ -102,9 +103,10 @@ schedule instead of relying on incidental database access by other gates.
    if you need freshness immediately.
 4. **Skill updates**: When the status command or cron schedule changes, update
    `workflow-status-audit` skill.
-5. **Graphify refreshes**: Run `graphify update .` after code changes and write a
-   new baseline only after `graphify diagnose multigraph` and source-coverage
-   checks pass.
+5. **Graphify refreshes**: Run `graphify update .`, then
+   `python scripts/graphify_gate_edges.py`, after code changes. Write a new
+   baseline only after `graphify diagnose multigraph` and source-coverage checks
+   pass.
 
 ## What to do when A11 alerts
 

@@ -275,6 +275,42 @@ class GraphifyFreshnessTests(unittest.TestCase):
 
         self.assertEqual(baseline_path.read_bytes(), before)
 
+    def test_baseline_rejects_missing_declared_workspace_gate_edge(self) -> None:
+        directory, root = self._project()
+        self.addCleanup(directory.cleanup)
+        (root / "scripts" / "workspace_status.py").write_text(
+            "DEFAULT_GATES: list[tuple[str, list[str], int]] = [\n"
+            "    (\"graphify_freshness\", [\"scripts/graphify_freshness.py\"], 120),\n"
+            "]\n",
+            encoding="utf-8",
+        )
+        (root / "scripts" / "graphify_freshness.py").write_text(
+            "print('fresh')\n",
+            encoding="utf-8",
+        )
+        graph_path = root / "graphify-out" / "graph.json"
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        graph["nodes"].extend(
+            [
+                {
+                    "id": "scripts_workspace_status",
+                    "source_file": "scripts/workspace_status.py",
+                    "source_location": "L1",
+                    "file_type": "code",
+                },
+                {
+                    "id": "scripts_graphify_freshness",
+                    "source_file": "scripts/graphify_freshness.py",
+                    "source_location": "L1",
+                    "file_type": "code",
+                },
+            ]
+        )
+        graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "missing declared workspace gate edges"):
+            graphify_freshness.write_baseline(root)
+
     def test_baseline_rejects_missing_required_code_root(self) -> None:
         directory, root = self._project()
         self.addCleanup(directory.cleanup)

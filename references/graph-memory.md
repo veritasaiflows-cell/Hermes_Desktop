@@ -29,9 +29,10 @@ provenance, not proof.
 | `graphify-out/` (derived) | "What code relates to what?" | LLM-inferred, disposable, gitignored |
 
 Graphify is a **derived routing layer** for codebase questions. It is not the
-durable graph: its edges are inferred (not asserted), carry no provenance, and
-are rebuilt from scratch. The durable graph stores edges the agent asserts with
-provenance and confidence.
+durable graph: most edges are AST- or LLM-extracted, and the workspace adds only
+deterministic static gate-dispatch edges with exact source paths and lines. None
+are canonical assertions. The durable graph stores the relationships the agent
+asserts with provenance and confidence.
 
 Graphify freshness is checked separately with
 `python scripts/graphify_freshness.py`. The gate compares the refreshed graph
@@ -43,10 +44,17 @@ coverage, and publishes the local baseline atomically. After a successful code r
 
 ```bash
 graphify update .
+python scripts/graphify_gate_edges.py
 graphify diagnose multigraph --graph graphify-out/graph.json --json
 python scripts/graphify_freshness.py --write-baseline
 python scripts/graphify_freshness.py
 ```
+
+`graphify_gate_edges.py` derives `runs_gate` edges from the literal
+`DEFAULT_GATES` contract in `scripts/workspace_status.py`. The freshness gate
+refuses a new baseline when that evidence is missing or stale, so a Graphify
+shortest path can expose a cited dispatch edge without turning Graphify into an
+authority.
 
 A stale Graphify artifact is a routing warning, not a failure of the durable
 asserted graph. Route to direct source inspection until the artifact is fresh.
