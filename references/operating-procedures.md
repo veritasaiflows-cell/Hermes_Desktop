@@ -137,8 +137,33 @@ session starts, writes, and closes against the same organization contract.
 4. Run focused tests, then `python scripts/run_checks.py` for shared surfaces.
 5. Re-run `python scripts/workspace_status.py` and require an honest healthy,
    warned, or blocked result.
-6. Report changed paths, generated artifacts, verification evidence, remaining
-   debt, and uncommitted state. Do not commit unless requested.
+6. Classify each durable write as tracked workspace source, profile-local state,
+   Git-ignored derived output, or external system state.
+7. Apply the standing local checkpoint authority below to significant verified
+   tracked workspace source. Report changed paths, generated artifacts,
+   verification evidence, remaining debt, and the final checkpoint disposition.
+
+### Standing local checkpoint authority
+
+The operator has granted standing approval for scope-limited **local** checkpoint
+commits after coherent, significant workspace updates pass their focused checks
+and repository gate. A significant update changes behavior, governance, schema,
+workflow state, or a workspace-owned skill contract; trivial edits and
+regenerable derived output do not require one commit per file or command.
+
+- Inspect the live branch, status, diff, recent history, and active write lanes
+  before staging.
+- Stage only reviewed in-scope paths. Never absorb unrelated pre-existing or
+  concurrently written changes merely to make the tree clean.
+- Use the repository's commit-subject convention and verify the resulting commit
+  plus remaining status. Never push under this standing authority.
+- If a gate, active lane, missing scope evidence, or unresolved mixed ownership
+  prevents a safe commit, return `checkpoint_pending` with exact paths, proof,
+  proposed subject, and blocker instead of leaving the durability state implicit.
+- Profile-local skill changes are not covered by workspace Git: use Curator
+  backup and mutation-ledger evidence. Workspace-specific skills that require Git
+  history belong under trusted `.hermes/skills/` as the single authoritative
+  editable source; do not keep a competing profile-local copy.
 
 Scheduled maintenance supplements this session cadence; it does not replace
 startup and closeout verification.
