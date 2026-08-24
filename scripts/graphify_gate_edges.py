@@ -136,11 +136,16 @@ def _edge_identity(edge: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def gate_edge_issues(project_root: Path) -> list[dict[str, Any]]:
-    """Return missing static gate-edge evidence without changing graph.json."""
+def gate_edge_issues(
+    project_root: Path,
+    *,
+    graph_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return missing static gate-edge evidence without changing the selected graph."""
     if not (project_root / OWNER_PATH).is_file():
         return []
-    graph = _load_graph(project_root / GRAPH_DIR_NAME / GRAPH_NAME)
+    selected_graph = graph_path or project_root / GRAPH_DIR_NAME / GRAPH_NAME
+    graph = _load_graph(selected_graph)
     expected = _expected_edges(project_root, graph)
     actual = {
         _edge_identity(edge)
@@ -189,10 +194,10 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
             temporary_path.unlink()
 
 
-def reconcile(project_root: Path) -> dict[str, Any]:
-    """Replace generated gate edges with the static contract currently in source."""
-    graph_path = project_root / GRAPH_DIR_NAME / GRAPH_NAME
-    graph = _load_graph(graph_path)
+def reconcile(project_root: Path, *, graph_path: Path | None = None) -> dict[str, Any]:
+    """Replace generated gate edges in an explicit candidate or legacy graph artifact."""
+    selected_graph = graph_path or project_root / GRAPH_DIR_NAME / GRAPH_NAME
+    graph = _load_graph(selected_graph)
 
     generated_edges = _expected_edges(project_root, graph)
     preserved_edges = [
@@ -201,11 +206,11 @@ def reconcile(project_root: Path) -> dict[str, Any]:
         if not isinstance(edge, dict) or edge.get("_origin") != EDGE_ORIGIN
     ]
     graph["links"] = preserved_edges + generated_edges
-    _write_json(graph_path, graph)
+    _write_json(selected_graph, graph)
     return {
         "schema": "graphify-gate-edges.v1",
         "status": "updated",
-        "graph_path": str(graph_path),
+        "graph_path": str(selected_graph),
         "edge_count": len(generated_edges),
     }
 
@@ -218,13 +223,17 @@ def _parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parents[1],
         help="workspace root (default: repository containing this script)",
     )
+    parser.add_argument("--graph-path", type=Path, help="explicit isolated candidate graph path")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
     try:
-        report = reconcile(args.project_root.resolve())
+        report = reconcile(
+            args.project_root.resolve(),
+            graph_path=args.graph_path.resolve() if args.graph_path else None,
+        )
     except (OSError, SyntaxError, TypeError, ValueError, json.JSONDecodeError) as exc:
         report = {
             "schema": "graphify-gate-edges.v1",

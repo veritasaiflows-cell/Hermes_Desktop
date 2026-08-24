@@ -94,6 +94,20 @@ class GraphifyGateEdgesTests(unittest.TestCase):
             ],
         )
 
+    def test_reconcile_can_target_an_isolated_candidate_graph(self) -> None:
+        directory, root = self._project()
+        self.addCleanup(directory.cleanup)
+        legacy_graph = root / "graphify-out" / "graph.json"
+        candidate_graph = root / "candidate" / "graph.json"
+        candidate_graph.parent.mkdir()
+        candidate_graph.write_bytes(legacy_graph.read_bytes())
+
+        report = graphify_gate_edges.reconcile(root, graph_path=candidate_graph)
+
+        self.assertEqual(Path(report["graph_path"]), candidate_graph)
+        self.assertEqual(json.loads(legacy_graph.read_text(encoding="utf-8"))["links"], [])
+        self.assertEqual(len(json.loads(candidate_graph.read_text(encoding="utf-8"))["links"]), 1)
+
     def test_check_reports_a_declared_gate_missing_from_the_graph(self) -> None:
         directory, root = self._project()
         self.addCleanup(directory.cleanup)

@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.graphify_gate_edges import gate_edge_issues
+from scripts.graphify_generation import resolve_current_generation
 
 SCHEMA = "graphify-freshness.v1"
 BASELINE_SCHEMA = "graphify-freshness-baseline.v1"
@@ -175,13 +176,40 @@ def _graph_sources(graph: dict[str, Any]) -> set[str]:
     return sources
 
 
-def _artifact_paths(project_root: Path) -> tuple[Path, Path, Path]:
+def _artifact_paths(
+    project_root: Path,
+    *,
+    for_write: bool = False,
+    lock_held: bool = False,
+) -> tuple[Path, Path, Path]:
+    """Resolve legacy artifacts or the immutable generation selected by the atomic pointer."""
     root = project_root.resolve()
     graph_dir = _validate_artifact_path(
         root,
         root / GRAPH_DIR_NAME,
         label="Graphify artifact directory",
     )
+    pointer_path = graph_dir / "current-generation.json"
+    if pointer_path.exists():
+        if for_write:
+            raise ValueError("A selected immutable generation must not receive a new freshness baseline")
+        selection = resolve_current_generation(root, lock_held=lock_held)
+        graph_path = _validate_artifact_path(
+            root,
+            selection.graph_path,
+            label="Selected immutable Graphify graph",
+        )
+        manifest_path = _validate_artifact_path(
+            root,
+            selection.generation_dir / "manifest.json",
+            label="Selected immutable Graphify manifest",
+        )
+        baseline_path = _validate_artifact_path(
+            root,
+            selection.generation_dir / BASELINE_NAME,
+            label="Selected immutable Graphify freshness baseline",
+        )
+        return graph_path, manifest_path, baseline_path
     graph_path = _validate_artifact_path(
         root,
         graph_dir / "graph.json",
@@ -204,7 +232,7 @@ def _artifact_paths(project_root: Path) -> tuple[Path, Path, Path]:
 def write_baseline(project_root: Path) -> dict[str, Any]:
     """Record content hashes for the sources represented by the current graph."""
     project_root = Path(project_root).resolve()
-    graph_path, manifest_path, baseline_path = _artifact_paths(project_root)
+    graph_path, manifest_path, baseline_path = _artifact_paths(project_root, for_write=True)
     graph = _load_json_object(graph_path, "graph")
     manifest = _load_json_object(manifest_path, "manifest")
     _validate_graph(graph)
@@ -216,7 +244,7 @@ def write_baseline(project_root: Path) -> dict[str, Any]:
             "Graphify graph is missing code source coverage: "
             + ", ".join(missing_code_sources)
         )
-    gate_issues = gate_edge_issues(project_root)
+    gate_issues = gate_edge_issues(project_root, graph_path=graph_path)
     if gate_issues:
         raise ValueError(
             "Graphify graph is missing declared workspace gate edges: "
@@ -264,10 +292,14 @@ def write_baseline(project_root: Path) -> dict[str, Any]:
     }
 
 
-def check_freshness(project_root: Path) -> dict[str, Any]:
+def check_freshness(
+    project_root: Path,
+    *,
+    lock_held: bool = False,
+) -> dict[str, Any]:
     """Return the current Graphify freshness state without mutating the workspace."""
     project_root = Path(project_root).resolve()
-    graph_path, manifest_path, baseline_path = _artifact_paths(project_root)
+    graph_path, manifest_path, baseline_path = _artifact_paths(project_root, lock_held=lock_held)
     graph = _load_json_object(graph_path, "graph")
     manifest = _load_json_object(manifest_path, "manifest")
     baseline = _load_json_object(baseline_path, "baseline")
@@ -290,7 +322,7 @@ def check_freshness(project_root: Path) -> dict[str, Any]:
         if relative not in represented_sources:
             issues.append({"code": "source_missing_from_graph", "path": relative})
     try:
-        issues.extend(gate_edge_issues(project_root))
+        issues.extend(gate_edge_issues(project_root, graph_path=graph_path))
     except (OSError, SyntaxError, TypeError, ValueError, json.JSONDecodeError) as exc:
         issues.append(
             {
@@ -298,7 +330,7 @@ def check_freshness(project_root: Path) -> dict[str, Any]:
                 "detail": f"{type(exc).__name__}: {exc}",
             }
         )
-    needs_update = project_root / GRAPH_DIR_NAME / "needs_update"
+    needs_update = graph_path.parent / "needs_update"
     if needs_update.exists():
         issues.append(
             {

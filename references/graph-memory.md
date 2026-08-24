@@ -35,20 +35,28 @@ are canonical assertions. The durable graph stores the relationships the agent
 asserts with provenance and confidence.
 
 Graphify freshness is checked separately with
-`python scripts/graphify_freshness.py`. The gate compares the refreshed graph
-and manifest against a content-hash baseline, checks every current Python module
-under `canonical/`, `scripts/`, and `tests/` has graph source coverage, and
-honors Graphify's semantic `needs_update` marker. It requires all code roots,
-rejects linked/reparse-pointed artifact and source paths, refuses incomplete code
-coverage, and publishes the local baseline atomically. After a successful code refresh:
+`python scripts/graphify_freshness.py`. The gate compares the selected immutable
+generation's graph and manifest against a content-hash baseline, checks every
+current Python module under `canonical/`, `scripts/`, and `tests/` has graph source
+coverage, and honors Graphify's semantic `needs_update` marker. It requires all
+code roots, rejects linked/reparse-pointed artifact and source paths, and refuses
+incomplete code coverage.
+
+Never refresh the MCP-served `graphify-out/graph.json` in place. An explicitly
+authorized code refresh runs one isolated source snapshot and candidate transaction:
 
 ```bash
-graphify update .
-python scripts/graphify_gate_edges.py
-graphify diagnose multigraph --graph graphify-out/graph.json --json
-python scripts/graphify_freshness.py --write-baseline
+python scripts/cron_graphify_code_refresh.py --promote-once
 python scripts/graphify_freshness.py
 ```
+
+The transaction takes a kernel-backed writer lock before fingerprinting, builds a
+code-only graph in the Git-visible candidate snapshot, reconciles declared gate
+edges, runs structural diagnostics, writes/checks the candidate baseline, probes
+the fixed MCP facade, rechecks live source hashes, then atomically swaps one
+complete read-only generation pointer. Failed post-publication freshness restores
+the prior pointer. The A18 schedule stays paused; unflagged invocations remain
+read-only.
 
 `graphify_gate_edges.py` derives `runs_gate` edges from the literal
 `DEFAULT_GATES` contract in `scripts/workspace_status.py`. The freshness gate

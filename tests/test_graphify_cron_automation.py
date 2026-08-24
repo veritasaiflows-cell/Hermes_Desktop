@@ -69,36 +69,29 @@ class GraphifyArtifactMonitorTests(unittest.TestCase):
 
 class GraphifyMcpContractTests(unittest.TestCase):
     def _valid_config(self) -> dict[str, object]:
-        from scripts.cron_graphify_mcp_contract import GRAPHIFY_PIN
+        from scripts.cron_graphify_mcp_contract import EXPECTED_ARGS, EXPECTED_COMMAND
         from scripts.graphify_mcp_benchmark import ALLOWED_OPERATIONS
 
         return {
-            "command": "uvx",
-            "args": [
-                "--from",
-                f"graphifyy[mcp]=={GRAPHIFY_PIN}",
-                "graphify-mcp",
-                "C:/Users/Veritas/Documents/HermesWorkspace/graphify-out/graph.json",
-            ],
+            "command": EXPECTED_COMMAND,
+            "args": list(EXPECTED_ARGS),
             "connect_timeout": 60.0,
             "tools": {"include": list(ALLOWED_OPERATIONS)},
             "enabled": True,
         }
 
     def _list_output(self) -> str:
-        from scripts.cron_graphify_mcp_contract import EXCLUDED_TOOLS
         from scripts.graphify_mcp_benchmark import ALLOWED_OPERATIONS
 
         lines = ["graphify [enabled] (stdio)", f"{len(ALLOWED_OPERATIONS)} selected"]
-        lines.extend(f"  {name}" for name in (*ALLOWED_OPERATIONS, *EXCLUDED_TOOLS))
+        lines.extend(f"  {name}" for name in ALLOWED_OPERATIONS)
         return "\n".join(lines)
 
     def _test_output(self) -> str:
-        from scripts.cron_graphify_mcp_contract import EXCLUDED_TOOLS
         from scripts.graphify_mcp_benchmark import ALLOWED_OPERATIONS
 
-        lines = ["Connected", f"Tools discovered: {len(ALLOWED_OPERATIONS) + len(EXCLUDED_TOOLS)}"]
-        lines.extend(f"{name} schema" for name in (*ALLOWED_OPERATIONS, *EXCLUDED_TOOLS))
+        lines = ["Connected", f"Tools discovered: {len(ALLOWED_OPERATIONS)}"]
+        lines.extend(f"{name} schema" for name in ALLOWED_OPERATIONS)
         return "\n".join(lines)
 
     def _clean_schemas(self) -> dict[str, dict[str, object]]:
@@ -124,6 +117,24 @@ class GraphifyMcpContractTests(unittest.TestCase):
 
         issues = cron_graphify_mcp_contract.contract_issues(
             self._valid_config(),
+            self._list_output(),
+            self._test_output(),
+        )
+
+        self.assertEqual(issues, [])
+
+    def test_contract_accepts_equivalent_windows_path_separators(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        config = self._valid_config()
+        config["command"] = str(config["command"]).replace("\\", "/")
+        config["args"] = [
+            str(argument).replace("\\", "/") if index in {0, 2} else argument
+            for index, argument in enumerate(config["args"])
+        ]
+
+        issues = cron_graphify_mcp_contract.contract_issues(
+            config,
             self._list_output(),
             self._test_output(),
         )
@@ -303,7 +314,7 @@ class GraphifyMcpContractTests(unittest.TestCase):
             {issue["code"] for issue in issues},
         )
 
-    def test_default_watchdog_checks_raw_configured_server_schema(self) -> None:
+    def test_default_watchdog_checks_fixed_facade_schema(self) -> None:
         from scripts import cron_graphify_mcp_contract
 
         commands: list[tuple[str, ...]] = []
@@ -442,10 +453,9 @@ class GraphifyVersionAdvisoryTests(unittest.TestCase):
 
 
 class GraphifyCodeRefreshHoldTests(unittest.TestCase):
-    def test_stale_artifact_is_blocked_without_publication_implementation(self) -> None:
+    def test_stale_artifact_requires_an_explicit_one_shot_promotion(self) -> None:
         from scripts import cron_graphify_code_refresh
 
-        self.assertFalse(hasattr(cron_graphify_code_refresh, "PROMOTION_ARTIFACTS"))
         report = {
             "schema": "graphify-freshness.v1",
             "status": "stale",
@@ -468,7 +478,7 @@ class GraphifyCodeRefreshHoldTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(before, after)
-        self.assertIn("atomic_publication_not_activated", stdout.getvalue())
+        self.assertIn("explicit_promotion_required", stdout.getvalue())
 
     def test_fresh_artifact_skips_without_writer(self) -> None:
         from scripts import cron_graphify_code_refresh
@@ -488,6 +498,29 @@ class GraphifyCodeRefreshHoldTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("GRAPHIFY CODE REFRESH SKIP", stderr.getvalue())
+
+    def test_explicit_one_shot_invokes_the_atomic_promotion_transaction(self) -> None:
+        from scripts import cron_graphify_code_refresh
+
+        report = {
+            "schema": "graphify-freshness.v1",
+            "status": "stale",
+            "issues": [{"code": "source_changed", "path": "scripts/example.py"}],
+        }
+        events: list[str] = []
+        stdout = io.StringIO()
+        with TemporaryDirectory() as directory, redirect_stdout(stdout):
+            result = cron_graphify_code_refresh.main(
+                Path(directory),
+                check=lambda _root: report,
+                promote_once=True,
+                promote=lambda _root, generation_id: events.append(generation_id)
+                or {"status": "promoted", "generation_id": generation_id},
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(events), 1)
+        self.assertIn("GRAPHIFY CODE REFRESH PROMOTED", stdout.getvalue())
 
     def test_freshness_exception_fails_closed(self) -> None:
         from scripts import cron_graphify_code_refresh

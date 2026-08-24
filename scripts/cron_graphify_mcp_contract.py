@@ -16,24 +16,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.graphify_mcp_benchmark import (
-    ALLOWED_OPERATIONS,
-    GRAPHIFY_MCP_VERSION,
-    _protocol_error,
-)
+from scripts.graphify_mcp_benchmark import ALLOWED_OPERATIONS, _protocol_error
 
-GRAPHIFY_PIN = GRAPHIFY_MCP_VERSION
-GRAPH_PATH = "C:/Users/Veritas/Documents/HermesWorkspace/graphify-out/graph.json"
-EXPECTED_COMMAND = "uvx"
+FACADE_PATH = PROJECT_ROOT / "scripts" / "graphify_mcp_facade.py"
+EXPECTED_COMMAND = sys.executable
 EXPECTED_ARGS = (
-    "--from",
-    f"graphifyy[mcp]=={GRAPHIFY_PIN}",
-    "graphify-mcp",
-    GRAPH_PATH,
+    str(FACADE_PATH),
+    "--project-root",
+    str(PROJECT_ROOT),
 )
 ALLOWED_TOOLS = frozenset(ALLOWED_OPERATIONS)
-EXCLUDED_TOOLS = frozenset({"list_prs", "get_pr_impact", "triage_prs"})
-ADVERTISED_TOOLS = ALLOWED_TOOLS | EXCLUDED_TOOLS
+ADVERTISED_TOOLS = ALLOWED_TOOLS
 _APPROVED_CONFIG_FIELDS = frozenset(
     {"command", "args", "connect_timeout", "tools", "enabled"}
 )
@@ -64,6 +57,27 @@ def _issue(code: str, **details: Any) -> dict[str, Any]:
     return {"code": code, **details}
 
 
+def _same_absolute_path(value: object, expected: str) -> bool:
+    """Compare existing absolute Windows paths without treating separator style as drift."""
+    if not isinstance(value, str):
+        return False
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        return False
+    return candidate.resolve(strict=False) == Path(expected).resolve(strict=False)
+
+
+def _matches_facade_arguments(value: object) -> bool:
+    """Require the exact fixed-facade argument shape while normalizing path separators."""
+    if not isinstance(value, list) or len(value) != len(EXPECTED_ARGS):
+        return False
+    return (
+        _same_absolute_path(value[0], EXPECTED_ARGS[0])
+        and value[1] == "--project-root"
+        and _same_absolute_path(value[2], EXPECTED_ARGS[2])
+    )
+
+
 def _tool_names(output: str) -> set[str]:
     found: set[str] = set()
     for line in output.splitlines():
@@ -83,9 +97,9 @@ def contract_issues(
     unexpected_fields = sorted(set(config) - _APPROVED_CONFIG_FIELDS)
     if unexpected_fields:
         issues.append(_issue("unexpected_configuration_fields", fields=unexpected_fields))
-    if config.get("command") != EXPECTED_COMMAND:
+    if not _same_absolute_path(config.get("command"), EXPECTED_COMMAND):
         issues.append(_issue("command_drift", expected=EXPECTED_COMMAND))
-    if config.get("args") != list(EXPECTED_ARGS):
+    if not _matches_facade_arguments(config.get("args")):
         issues.append(_issue("argument_drift", expected=list(EXPECTED_ARGS)))
     if config.get("enabled") is not True:
         issues.append(_issue("server_disabled"))
@@ -108,7 +122,7 @@ def contract_issues(
     normalized_list = list_output.lower()
     if "graphify" not in normalized_list or f"{len(ALLOWED_TOOLS)} selected" not in normalized_list:
         issues.append(_issue("mcp_list_contract_drift"))
-    if "Connected" not in test_output or f"Tools discovered: {len(ADVERTISED_TOOLS)}" not in test_output:
+    if "Connected" not in test_output or f"Tools discovered: {len(ALLOWED_TOOLS)}" not in test_output:
         issues.append(_issue("mcp_test_contract_drift"))
     discovered = _tool_names(test_output)
     if discovered != ADVERTISED_TOOLS:
@@ -295,10 +309,11 @@ def _probe_command(command: tuple[str, ...]) -> ProbeResult:
 
 def _probe_candidate_graph(graph_path: Path) -> ProbeResult:
     command = (
-        "uvx",
-        "--from",
-        f"graphifyy[mcp]=={GRAPHIFY_PIN}",
-        "graphify-mcp",
+        sys.executable,
+        str(FACADE_PATH),
+        "--project-root",
+        str(PROJECT_ROOT),
+        "--candidate-graph",
         str(graph_path.resolve()),
     )
     return _probe_command(command)

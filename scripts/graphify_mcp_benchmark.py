@@ -6,6 +6,7 @@ import asyncio
 import argparse
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -101,14 +102,13 @@ def _safe_source_path(project_root: Path, source_path: str) -> Path:
 
 
 def default_mcp_server_command(project_root: Path) -> tuple[str, ...]:
-    """Return the isolated, version-pinned local stdio command for this graph."""
-    graph_path = (Path(project_root).resolve() / "graphify-out" / "graph.json").resolve()
+    """Return the fixed-generation facade command for this workspace graph."""
+    root = Path(project_root).resolve()
     return (
-        "uvx",
-        "--from",
-        f"graphifyy[mcp]=={GRAPHIFY_MCP_VERSION}",
-        "graphify-mcp",
-        str(graph_path),
+        sys.executable,
+        str((root / "scripts" / "graphify_mcp_facade.py").resolve()),
+        "--project-root",
+        str(root),
     )
 
 

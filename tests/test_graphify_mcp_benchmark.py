@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import sys
 
 from scripts import graphify_mcp_benchmark
 
@@ -49,11 +50,18 @@ class DirectSourceRouteTests(unittest.TestCase):
 
 
 class RawTransportTests(unittest.TestCase):
-    def test_default_server_command_is_version_pinned_to_the_workspace_graph(self) -> None:
+    def test_default_server_command_uses_the_fixed_generation_facade(self) -> None:
         command = graphify_mcp_benchmark.default_mcp_server_command(PROJECT_ROOT)
 
-        self.assertEqual(command[:4], ("uvx", "--from", "graphifyy[mcp]==0.9.45", "graphify-mcp"))
-        self.assertEqual(command[4], str((PROJECT_ROOT / "graphify-out" / "graph.json").resolve()))
+        self.assertEqual(
+            command,
+            (
+                sys.executable,
+                str((PROJECT_ROOT / "scripts" / "graphify_mcp_facade.py").resolve()),
+                "--project-root",
+                str(PROJECT_ROOT.resolve()),
+            ),
+        )
 
     def test_transport_runner_invokes_only_the_case_operation_and_records_output(self) -> None:
         case = graphify_mcp_benchmark.load_cases(CASE_PATH, PROJECT_ROOT)[0]

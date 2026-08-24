@@ -139,8 +139,8 @@
       "mcp_arguments": {"source": "graphify_freshness.py", "target": "check_freshness()", "max_hops": 4, "undirected": true},
       "expected_graph_behavior": "relationship",
       "source_path": "scripts/graphify_freshness.py",
-      "source_line_hint": 254,
-      "proof_pattern": "def check_freshness(project_root: Path) -> dict[str, Any]:",
+      "source_line_hint": 295,
+      "proof_pattern": "def check_freshness(",
       "search_terms": ["check_freshness", "project_root"],
       "fallback_policy": "source_fallback"
     },
@@ -204,8 +204,8 @@
       "mcp_arguments": {"label": "graphify_freshness.py", "token_budget": 1200},
       "expected_graph_behavior": "locator",
       "source_path": "scripts/graphify_freshness.py",
-      "source_line_hint": 171,
-      "proof_pattern": "def _artifact_paths(project_root: Path) -> tuple[Path, Path, Path]:",
+      "source_line_hint": 178,
+      "proof_pattern": "def _artifact_paths(",
       "search_terms": ["_artifact_paths", "graph_dir"],
       "fallback_policy": "source_fallback"
     },

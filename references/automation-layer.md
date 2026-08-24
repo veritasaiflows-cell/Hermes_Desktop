@@ -2,8 +2,9 @@
 
 Automation IDs A1-A17 are implemented as scheduled, deterministic jobs. A8 is
 the feedback/evaluation sweep; it creates review-only candidates from repeated
-metadata and never applies a production harness change. A18 is installed as a
-read-only fail-closed hold and remains paused; no Graphify writer is active.
+metadata and never applies a production harness change. A18 remains scheduled-paused,
+but its explicitly authorized `--promote-once` path builds and validates an isolated
+Graphify candidate before atomically selecting an immutable generation.
 
 ## Authoritative code (version-controlled)
 
@@ -24,9 +25,11 @@ read-only fail-closed hold and remains paused; no Graphify writer is active.
 - `scripts/cron_retrieval_refresh.py` — A12 logic (refreshes both retrieval indexes, then synchronizes routing through A5 even after degraded/failed refresh attempts)
 - `scripts/cron_canonical_integrity.py` — A13 logic (checks canonical SQLite integrity)
 - `scripts/cron_graphify_artifact_monitor.py` — A15 logic (read-only Graphify freshness monitor)
-- `scripts/cron_graphify_mcp_contract.py` — A16 logic (exact local stdio/config/allowlist watchdog plus raw MCP schema/data-boundary probe)
+- `scripts/cron_graphify_mcp_contract.py` — A16 logic (exact local facade/config/allowlist watchdog plus raw MCP schema/data-boundary probe)
 - `scripts/cron_graphify_version_advisory.py` — A17 logic (read-only Graphify release advisory; never installs)
-- `scripts/cron_graphify_code_refresh.py` — A18 hold (reads freshness, reports `atomic_publication_not_activated`, and never invokes a writer)
+- `scripts/cron_graphify_code_refresh.py` — A18 explicit one-shot transaction (snapshot, candidate build/validation, source-drift recheck, atomic selection, and rollback on failed post-publication freshness)
+- `scripts/graphify_generation.py` — same-volume immutable generation, pointer, rollback, artifact-integrity, and kernel-lock primitives used by A18
+- `scripts/graphify_mcp_facade.py` — fixed-project read-only MCP server that resolves the selected generation once and rejects `project_path`
 - `scripts/graph_backfill.py` — one-time idempotent backfill of durable graph edges from pre-graph canonical records
 - `scripts/cron_registration_validator.py` — verifies every cron wrapper resolves to an existing repo script (run by tests and A2)
 - `tests/test_cron_wrappers.py` — pins the exit-code + output contract for A1 and A2 wrappers
@@ -80,22 +83,25 @@ is missing.
 | A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic indexes and invokes A5 after successful, degraded, or exceptional refresh attempts |
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
 | A14 | lane lease watchdog | hourly at :55 | alerts on missing, expiring, or expired active-lane leases; saves locally |
-| A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable legacy artifacts |
-| A16 | Graphify MCP contract | daily 07:25 | checks the pinned local stdio configuration, selected/advertised tools, raw schemas, and `graph_stats`; alerts while stock schemas expose `project_path` |
+| A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable selected Graphify artifacts |
+| A16 | Graphify MCP contract | daily 07:25 | checks the fixed-facade configuration, seven advertised tools, closed raw schemas, and `graph_stats` |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
-| A18 | Graphify code refresh hold | daily 02:10 (paused) | reads freshness and fails closed with `atomic_publication_not_activated`; never executes a writer |
+| A18 | Graphify code refresh | daily 02:10 (paused) | scheduled runs require explicit one-shot authorization; `--promote-once` builds an isolated candidate and atomically selects it only after all gates pass |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
 except A8 intentionally emits a compact candidate ID when human review is
 required and A17 emits an update advisory when a strictly newer release exists;
 ready/current runs remain silent.
 
-A18 never runs semantic extraction, `graphify update`, or any publication path.
-Activation requires immutable same-volume generations, an atomic pointer switch,
-a fixed-project MCP facade that rejects `project_path`, kernel-backed coordination,
-candidate verification, source-drift rechecks, recovery tests, and explicit
-operator approval for the Hermes configuration change. Until then, the stale
-legacy graph remains visible as a warning rather than being refreshed unsafely.
+A18 never invokes semantic extraction, `graphify update`, or any Graphify writer
+against the selected or legacy `graphify-out/` artifact. Its paused schedule remains
+read-only. An explicitly authorized `--promote-once` acquires a kernel-backed writer
+lock before source fingerprinting, creates a Git-visible source snapshot, builds an
+isolated code-only candidate, reconciles/diagnoses/baselines it, checks the fixed MCP
+facade against that candidate, rechecks source hashes, and atomically replaces one
+pointer only after the complete immutable generation is accepted. A failed
+post-publication freshness check restores the prior pointer. Hermes configuration
+changes still require explicit operator approval.
 
 ## Feedback/evaluation loop (A8)
 

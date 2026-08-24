@@ -155,6 +155,51 @@ class GraphifyFreshnessTests(unittest.TestCase):
             {issue["code"] for issue in report["issues"]},
         )
 
+    def test_selected_immutable_generation_is_checked_instead_of_legacy_artifact(self) -> None:
+        from scripts import graphify_generation
+
+        directory, root = self._project()
+        self.addCleanup(directory.cleanup)
+        graphify_freshness.write_baseline(root)
+        candidate = root / "candidate" / "graphify-out"
+        shutil.copytree(root / "graphify-out", candidate)
+        source_hash = graphify_freshness._sha256(root / "scripts" / "example.py")
+        graphify_generation.publish_generation(
+            root,
+            candidate,
+            generation_id="g-001",
+            source_fingerprint={"scripts/example.py": source_hash},
+            snapshot_path="source/graphify-candidates/g-001",
+        )
+        (root / "graphify-out" / "graph.json").unlink()
+
+        report = graphify_freshness.check_freshness(root)
+
+        self.assertEqual(report["status"], "fresh")
+        self.assertIn("generations", report["graph_path"])
+
+    def test_selected_generation_can_be_checked_while_the_writer_lock_is_held(self) -> None:
+        from scripts import graphify_generation
+
+        directory, root = self._project()
+        self.addCleanup(directory.cleanup)
+        graphify_freshness.write_baseline(root)
+        candidate = root / "candidate" / "graphify-out"
+        shutil.copytree(root / "graphify-out", candidate)
+        source_hash = graphify_freshness._sha256(root / "scripts" / "example.py")
+        graphify_generation.publish_generation(
+            root,
+            candidate,
+            generation_id="g-001",
+            source_fingerprint={"scripts/example.py": source_hash},
+            snapshot_path="source/graphify-candidates/g-001",
+        )
+
+        with graphify_generation.publication_lock(root, shared=False):
+            report = graphify_freshness.check_freshness(root, lock_held=True)
+
+        self.assertEqual(report["status"], "fresh")
+
     def test_baseline_rejects_manifest_path_outside_workspace(self) -> None:
         directory, root = self._project()
         self.addCleanup(directory.cleanup)
