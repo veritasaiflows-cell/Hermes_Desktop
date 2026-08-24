@@ -139,8 +139,15 @@ def schema_contract_issues(
         if not isinstance(properties, Mapping):
             issues.append(_issue("tool_schema_invalid", tool=tool))
             continue
-        if _schema_contains_key(schema, "$ref"):
+        if any(
+            _schema_contains_key(schema, keyword)
+            for keyword in ("$ref", "$dynamicRef", "$recursiveRef")
+        ):
             issues.append(_issue("tool_schema_reference_unsupported", tool=tool))
+        if _schema_contains_key(schema, "patternProperties"):
+            issues.append(
+                _issue("tool_schema_pattern_properties_unsupported", tool=tool)
+            )
         if _schema_has_permissive_object(schema):
             issues.append(_issue("tool_schema_permissive", tool=tool))
         if "project_path" in _schema_property_names(schema):
@@ -177,7 +184,23 @@ def _schema_contains_key(value: object, target: str) -> bool:
 def _schema_has_permissive_object(value: object) -> bool:
     """Reject object schemas that accept undeclared input fields by default."""
     if isinstance(value, Mapping):
-        is_object_schema = value.get("type") == "object" or "properties" in value
+        schema_type = value.get("type")
+        type_includes_object = schema_type == "object" or (
+            isinstance(schema_type, list) and "object" in schema_type
+        )
+        object_keywords = {
+            "properties",
+            "patternProperties",
+            "additionalProperties",
+            "unevaluatedProperties",
+            "required",
+            "dependentRequired",
+            "dependentSchemas",
+            "propertyNames",
+            "minProperties",
+            "maxProperties",
+        }
+        is_object_schema = type_includes_object or bool(object_keywords & set(value))
         if is_object_schema and value.get("additionalProperties") is not False:
             return True
         return any(_schema_has_permissive_object(child) for child in value.values())

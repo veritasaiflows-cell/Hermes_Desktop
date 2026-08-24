@@ -226,6 +226,26 @@ class GraphifyMcpContractTests(unittest.TestCase):
 
         self.assertIn("tool_schema_permissive", {issue["code"] for issue in issues})
 
+    def test_nullable_object_type_array_cannot_bypass_closed_schema(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        schemas = self._clean_schemas()
+        first_name = next(iter(schemas))
+        schemas[first_name] = {
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": ["object", "null"],
+                    "additionalProperties": True,
+                }
+            },
+            "additionalProperties": False,
+        }
+
+        issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
+
+        self.assertIn("tool_schema_permissive", {issue["code"] for issue in issues})
+
     def test_schema_reference_fails_closed(self) -> None:
         from scripts import cron_graphify_mcp_contract
 
@@ -242,6 +262,44 @@ class GraphifyMcpContractTests(unittest.TestCase):
 
         self.assertIn(
             "tool_schema_reference_unsupported",
+            {issue["code"] for issue in issues},
+        )
+
+    def test_dynamic_schema_reference_fails_closed(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        schemas = self._clean_schemas()
+        first_name = next(iter(schemas))
+        schemas[first_name] = {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+            "allOf": [{"$dynamicRef": "https://example.invalid/tool-schema.json"}],
+        }
+
+        issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
+
+        self.assertIn(
+            "tool_schema_reference_unsupported",
+            {issue["code"] for issue in issues},
+        )
+
+    def test_pattern_properties_fail_closed(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        schemas = self._clean_schemas()
+        first_name = next(iter(schemas))
+        schemas[first_name] = {
+            "type": "object",
+            "properties": {},
+            "patternProperties": {".*": {"type": "string"}},
+            "additionalProperties": False,
+        }
+
+        issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
+
+        self.assertIn(
+            "tool_schema_pattern_properties_unsupported",
             {issue["code"] for issue in issues},
         )
 
