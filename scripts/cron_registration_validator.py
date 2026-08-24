@@ -29,6 +29,11 @@ EXPECTED_JOBS = [
     ("a11_workspace_status.py", PROJECT_ROOT / "scripts" / "workspace_status.py"),
     ("a12_retrieval_refresh.py", PROJECT_ROOT / "scripts" / "cron_retrieval_refresh.py"),
     ("a13_canonical_integrity.py", PROJECT_ROOT / "scripts" / "cron_canonical_integrity.py"),
+    ("a14_lane_lease_check.py", PROJECT_ROOT / "scripts" / "cron_lane_lease_check.py"),
+    ("a15_graphify_artifact_monitor.py", PROJECT_ROOT / "scripts" / "cron_graphify_artifact_monitor.py"),
+    ("a16_graphify_mcp_contract.py", PROJECT_ROOT / "scripts" / "cron_graphify_mcp_contract.py"),
+    ("a17_graphify_version_advisory.py", PROJECT_ROOT / "scripts" / "cron_graphify_version_advisory.py"),
+    ("a18_graphify_code_refresh.py", PROJECT_ROOT / "scripts" / "cron_graphify_code_refresh.py"),
 ]
 
 DIRECT_REPO_JOBS: list[tuple[str, Path]] = []

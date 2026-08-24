@@ -438,12 +438,25 @@ class WorkspaceStatusTests(unittest.TestCase):
             "archive_stale": 'print("OK")',
         }
         root = self._make_minimal_project(gate_scripts)
+        snapshot = correctness_snapshot(root)
+        with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+            db.record_run(
+                request_type="run_checks",
+                route_selected="deterministic",
+                resource_usage_json={"test_count": 1, "test_failure_count": 0, **snapshot},
+                verification_result="pass",
+                final_outcome="accepted",
+                acceptance_status="accepted",
+                completed_at="2026-08-20T04:00:02Z",
+            )
 
         code, brief = self._run_workspace_status(root, gate_scripts)
 
         self.assertEqual(code, 0)
         self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
         self.assertIn("graphify_stale", brief["health"]["warnings"])
+        self.assertIn("isolated candidate", brief["recommended_next_action"])
+        self.assertNotIn("--write-baseline", brief["recommended_next_action"])
 
     def test_current_correctness_run_is_surfaced(self) -> None:
         gate_scripts = {
@@ -612,6 +625,68 @@ class WorkspaceStatusTests(unittest.TestCase):
 
         self.assertEqual(status["status"], "unavailable")
         self.assertIn("fingerprint", status["reason"])
+
+    def test_added_source_file_marks_correctness_stale_not_inconsistent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            (root / "scripts").mkdir()
+            (root / "scripts" / "existing.py").write_text("VALUE = 1\n", encoding="utf-8")
+            snapshot = correctness_snapshot(root)
+            with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                db.record_run(
+                    request_type="run_checks",
+                    route_selected="deterministic",
+                    resource_usage_json={
+                        "source_fingerprint": snapshot["source_fingerprint"],
+                        "test_count": 1,
+                        "test_failure_count": 0,
+                        "source_file_count": snapshot["source_file_count"],
+                        "tested_commit": snapshot["tested_commit"],
+                    },
+                    verification_result="pass",
+                    final_outcome="accepted",
+                    acceptance_status="accepted",
+                    completed_at="2026-08-20T04:00:02Z",
+                )
+            (root / "scripts" / "added.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+            status = workspace_status._correctness_status(root)
+
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status"], "stale")
+        self.assertTrue(status["stale"])
+        self.assertNotIn("reason", status)
+
+    def test_stale_correctness_run_with_missing_source_count_is_inconsistent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            (root / "scripts").mkdir()
+            (root / "scripts" / "existing.py").write_text("VALUE = 1\n", encoding="utf-8")
+            snapshot = correctness_snapshot(root)
+            with CanonicalDB(root / "canonical" / "efficiens.db") as db:
+                db.record_run(
+                    request_type="run_checks",
+                    route_selected="deterministic",
+                    resource_usage_json={
+                        "source_fingerprint": "0" * 64,
+                        "test_count": 1,
+                        "test_failure_count": 0,
+                        "source_file_count": 0,
+                        "tested_commit": snapshot["tested_commit"],
+                    },
+                    verification_result="pass",
+                    final_outcome="accepted",
+                    acceptance_status="accepted",
+                    completed_at="2026-08-20T04:00:02Z",
+                )
+
+            status = workspace_status._correctness_status(root)
+
+        self.assertFalse(status["available"])
+        self.assertEqual(status["status"], "unavailable")
+        self.assertIn("inconsistent", status["reason"])
 
     def test_source_change_marks_correctness_stale_and_warns(self) -> None:
         gate_scripts = {

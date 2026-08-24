@@ -61,6 +61,33 @@ class ScriptDocValidatorTests(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertEqual(report["issues"][0]["code"], "scripts_dir_missing")
 
+    def test_graphify_cron_scripts_share_the_aggregate_test_anchor(self) -> None:
+        directory, root = self._workspace()
+        self.addCleanup(directory.cleanup)
+        script_names = (
+            "cron_graphify_artifact_monitor.py",
+            "cron_graphify_mcp_contract.py",
+            "cron_graphify_version_advisory.py",
+            "cron_graphify_code_refresh.py",
+        )
+        for name in script_names:
+            (root / "scripts" / name).write_text(
+                '"""A documented Graphify maintenance cron implementation."""\n\n'
+                "def main() -> int:\n"
+                '    """Run the deterministic maintenance operation."""\n'
+                "    return 0\n",
+                encoding="utf-8",
+            )
+        (root / "tests" / "test_graphify_cron_automation.py").write_text(
+            "# aggregate Graphify cron coverage\n",
+            encoding="utf-8",
+        )
+        (root / "README.md").write_text("\n".join(script_names), encoding="utf-8")
+
+        report = validate_script_docs(root)
+
+        self.assertTrue(report["ok"], report["issues"])
+
 
 if __name__ == "__main__":
     unittest.main()

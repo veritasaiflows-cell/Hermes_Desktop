@@ -26,6 +26,11 @@ class CronRegistrationValidatorTests(unittest.TestCase):
             "a11_workspace_status.py",
             "a12_retrieval_refresh.py",
             "a13_canonical_integrity.py",
+            "a14_lane_lease_check.py",
+            "a15_graphify_artifact_monitor.py",
+            "a16_graphify_mcp_contract.py",
+            "a17_graphify_version_advisory.py",
+            "a18_graphify_code_refresh.py",
         }
         self.assertTrue(expected.issubset(checked_names))
 

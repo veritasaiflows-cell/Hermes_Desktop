@@ -47,10 +47,10 @@ baseline.
 A safe writer must acquire its lock before fingerprinting, build from an
 immutable source snapshot into an isolated candidate directory, validate the
 candidate without changing the accepted artifact, re-check the source
-fingerprint, and atomically promote the complete accepted artifact set only
-after every gate passes. The current A18 code-only writer does not yet satisfy
-that contract and must remain paused. Leave the graph honestly stale rather than
-using the in-place commands below as a fallback.
+fingerprint, and promote the complete accepted artifact set only after every gate
+passes. A18 does not yet implement that transaction: it is a read-only,
+fail-closed hold and its schedule remains paused. Leave the graph honestly stale
+rather than using the in-place commands below as a fallback.
 
 Within a future isolated candidate workflow, `graphify update .` refreshes code
 structure without an LLM. When prose or other semantic sources changed, use the
@@ -82,6 +82,7 @@ python scripts/graphify_gate_edges.py
 graphify diagnose multigraph --graph graphify-out/graph.json --json
 python scripts/graphify_freshness.py --write-baseline
 python scripts/graphify_freshness.py
+python scripts/cron_graphify_mcp_contract.py --candidate-graph graphify-out/graph.json
 ```
 
 `graphify_gate_edges.py` statically extracts `DEFAULT_GATES` from
@@ -90,10 +91,12 @@ python scripts/graphify_freshness.py
 the reconciliation again before candidate acceptance.
 
 After candidate freshness and the MCP contract pass, require an unchanged source
-fingerprint and atomically promote the complete artifact set. If any stage fails,
-discard the candidate and leave the previously accepted graph and baseline
-untouched. Sequentially copying a few files back after failure is not atomic
-rollback and is not sufficient.
+fingerprint and publish by atomically selecting one immutable, complete artifact
+generation. Do not publish via a hard-coded artifact list or sequential file
+replacement; neither can guarantee complete-set atomicity or reliable rollback.
+The fixed-project MCP facade must resolve the selected generation once at startup,
+expose only approved tools, and reject `project_path`. A kernel-backed lock must
+coordinate selection and monitoring. These controls are not yet active.
 
 Never write a baseline after failed diagnostics, missing gate edges, pending
 `needs_update`, incomplete code coverage, or unresolved artifact-path safety
@@ -111,7 +114,11 @@ Use Hermes-supported controls only:
 
 Do not hand-edit profile configuration. For a catalog server, prefer the inline
 MCP setup/consent surface when available. Graphify is a custom local server, so
-record the exact version-pinned command and absolute graph path.
+record the exact version-pinned command and absolute graph path. Stock Graphify
+0.9.45 advertises `project_path` on every tool, so the command-line path alone is
+not a fixed data boundary. Keep A18 paused and treat A16's `project_path_exposed`
+result as a blocker until an approved fixed-project facade replaces the stock
+command.
 
 Start a fresh Hermes session after add/remove/filter changes. Do not assume
 `/reload-mcp` exists; use a desktop reload action only when the current command

@@ -1,8 +1,9 @@
 # Workspace automation layer
 
-Automation IDs A1-A13 are implemented as scheduled, deterministic jobs. A8 is
+Automation IDs A1-A17 are implemented as scheduled, deterministic jobs. A8 is
 the feedback/evaluation sweep; it creates review-only candidates from repeated
-metadata and never applies a production harness change.
+metadata and never applies a production harness change. A18 is installed as a
+read-only fail-closed hold and remains paused; no Graphify writer is active.
 
 ## Authoritative code (version-controlled)
 
@@ -22,12 +23,17 @@ metadata and never applies a production harness change.
 - `scripts/workspace_status.py` — A11 logic (single-command JSON operating brief; runs gates serially to avoid shared-state races)
 - `scripts/cron_retrieval_refresh.py` — A12 logic (refreshes both retrieval indexes, then synchronizes routing through A5 even after degraded/failed refresh attempts)
 - `scripts/cron_canonical_integrity.py` — A13 logic (checks canonical SQLite integrity)
+- `scripts/cron_graphify_artifact_monitor.py` — A15 logic (read-only Graphify freshness monitor)
+- `scripts/cron_graphify_mcp_contract.py` — A16 logic (exact local stdio/config/allowlist watchdog plus raw MCP schema/data-boundary probe)
+- `scripts/cron_graphify_version_advisory.py` — A17 logic (read-only Graphify release advisory; never installs)
+- `scripts/cron_graphify_code_refresh.py` — A18 hold (reads freshness, reports `atomic_publication_not_activated`, and never invokes a writer)
 - `scripts/graph_backfill.py` — one-time idempotent backfill of durable graph edges from pre-graph canonical records
 - `scripts/cron_registration_validator.py` — verifies every cron wrapper resolves to an existing repo script (run by tests and A2)
 - `tests/test_cron_wrappers.py` — pins the exit-code + output contract for A1 and A2 wrappers
 - `tests/test_queue_hygiene.py` — pins A7 and A2-full wrapper contracts
 - `tests/test_cron_registration_validator.py` — pins the A9 wrapper + registration contract
 - `tests/test_workspace_status.py` — pins A11 healthy/degraded/warning contracts
+- `tests/test_graphify_cron_automation.py` — pins A15-A18 silence, drift, isolation, rollback, and contract behavior
 
 ## Cron launchers (in ~/AppData/Local/hermes/scripts/, required location for cron)
 
@@ -45,6 +51,11 @@ metadata and never applies a production harness change.
 - `a11_workspace_status.py` -> execs `scripts/workspace_status.py`
 - `a12_retrieval_refresh.py` -> execs `scripts/cron_retrieval_refresh.py`
 - `a13_canonical_integrity.py` -> execs `scripts/cron_canonical_integrity.py`
+- `a14_lane_lease_check.py` -> execs `scripts/cron_lane_lease_check.py`
+- `a15_graphify_artifact_monitor.py` -> execs `scripts/cron_graphify_artifact_monitor.py`
+- `a16_graphify_mcp_contract.py` -> execs `scripts/cron_graphify_mcp_contract.py`
+- `a17_graphify_version_advisory.py` -> execs `scripts/cron_graphify_version_advisory.py`
+- `a18_graphify_code_refresh.py` -> execs `scripts/cron_graphify_code_refresh.py`
 
 These are thin launchers so the real logic stays in the repo. Launchers fall
 back to a repo root discovered from the launcher path if the hardcoded `TARGET`
@@ -68,10 +79,23 @@ is missing.
 | A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
 | A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic indexes and invokes A5 after successful, degraded, or exceptional refresh attempts |
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
+| A14 | lane lease watchdog | every 5m | alerts on missing, expiring, or expired active-lane leases |
+| A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable legacy artifacts |
+| A16 | Graphify MCP contract | daily 07:25 | checks the pinned local stdio configuration, selected/advertised tools, raw schemas, and `graph_stats`; alerts while stock schemas expose `project_path` |
+| A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
+| A18 | Graphify code refresh hold | daily 02:10 (paused) | reads freshness and fails closed with `atomic_publication_not_activated`; never executes a writer |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
 except A8 intentionally emits a compact candidate ID when human review is
-required; a ready A8 run remains silent.
+required and A17 emits an update advisory when a strictly newer release exists;
+ready/current runs remain silent.
+
+A18 never runs semantic extraction, `graphify update`, or any publication path.
+Activation requires immutable same-volume generations, an atomic pointer switch,
+a fixed-project MCP facade that rejects `project_path`, kernel-backed coordination,
+candidate verification, source-drift rechecks, recovery tests, and explicit
+operator approval for the Hermes configuration change. Until then, the stale
+legacy graph remains visible as a warning rather than being refreshed unsafely.
 
 ## Feedback/evaluation loop (A8)
 

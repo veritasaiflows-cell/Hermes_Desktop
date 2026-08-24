@@ -282,10 +282,13 @@ def _correctness_status(project_root: Path) -> dict[str, Any]:
         row["verification_result"] == "pass"
         and row["acceptance_status"] == "accepted"
     )
+    accepted_proof_is_valid = test_count > 0 and test_failure_count == 0
+    current_proof_metadata_is_consistent = (
+        source_file_count > 0
+        and (stale or source_file_count == current["source_file_count"])
+    )
     if accepted and not (
-        test_count > 0
-        and test_failure_count == 0
-        and source_file_count == current["source_file_count"]
+        accepted_proof_is_valid and current_proof_metadata_is_consistent
     ):
         return {
             "available": False,
@@ -453,7 +456,8 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
         )
     elif "graphify_stale" in warnings or "graphify_unavailable" in warnings:
         recommended_next_action = (
-            "Refresh Graphify, then run python scripts/graphify_freshness.py --write-baseline."
+            "Build and validate an isolated candidate before promoting Graphify; "
+            "do not write or baseline the MCP-served artifact in place."
         )
     elif "feedback_review_required" in warnings:
         recommended_next_action = (
