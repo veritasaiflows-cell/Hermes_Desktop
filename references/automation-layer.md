@@ -79,7 +79,7 @@ is missing.
 | A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
 | A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic indexes and invokes A5 after successful, degraded, or exceptional refresh attempts |
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
-| A14 | lane lease watchdog | every 5m | alerts on missing, expiring, or expired active-lane leases |
+| A14 | lane lease watchdog | hourly at :55 | alerts on missing, expiring, or expired active-lane leases; saves locally |
 | A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable legacy artifacts |
 | A16 | Graphify MCP contract | daily 07:25 | checks the pinned local stdio configuration, selected/advertised tools, raw schemas, and `graph_stats`; alerts while stock schemas expose `project_path` |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
@@ -124,10 +124,12 @@ so partial or degraded retrieval changes cannot silently leave routing stale.
 
 ## Delivery
 
-All jobs use `deliver: origin` so failure/degraded output reaches the originating
-chat. A job with no gateway-connected channel falls back to local save (no
-notification); update delivery to a connected platform (e.g. `deliver='telegram'`
-or `deliver='all'`) once a channel is wired.
+All jobs except A14 use `deliver: origin` so failure/degraded output reaches the
+originating chat. A14 intentionally uses `deliver: local`; its hourly lease
+watchdog result is retained without chat delivery. An origin-delivered job with
+no gateway-connected channel falls back to local save (no notification); update
+delivery to a connected platform (e.g. `deliver='telegram'` or `deliver='all'`)
+once a channel is wired.
 
 ## Deferred
 
