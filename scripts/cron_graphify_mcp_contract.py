@@ -139,6 +139,10 @@ def schema_contract_issues(
         if not isinstance(properties, Mapping):
             issues.append(_issue("tool_schema_invalid", tool=tool))
             continue
+        if _schema_contains_key(schema, "$ref"):
+            issues.append(_issue("tool_schema_reference_unsupported", tool=tool))
+        if _schema_has_permissive_object(schema):
+            issues.append(_issue("tool_schema_permissive", tool=tool))
         if "project_path" in _schema_property_names(schema):
             issues.append(_issue("project_path_exposed", tool=tool))
     return issues
@@ -157,6 +161,29 @@ def _schema_property_names(value: object) -> set[str]:
         for child in value:
             names.update(_schema_property_names(child))
     return names
+
+
+def _schema_contains_key(value: object, target: str) -> bool:
+    """Return whether a nested JSON-schema object contains an unsupported key."""
+    if isinstance(value, Mapping):
+        return target in value or any(
+            _schema_contains_key(child, target) for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(_schema_contains_key(child, target) for child in value)
+    return False
+
+
+def _schema_has_permissive_object(value: object) -> bool:
+    """Reject object schemas that accept undeclared input fields by default."""
+    if isinstance(value, Mapping):
+        is_object_schema = value.get("type") == "object" or "properties" in value
+        if is_object_schema and value.get("additionalProperties") is not False:
+            return True
+        return any(_schema_has_permissive_object(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_schema_has_permissive_object(child) for child in value)
+    return False
 
 
 def _probe_issues(

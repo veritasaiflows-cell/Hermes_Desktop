@@ -105,7 +105,11 @@ class GraphifyMcpContractTests(unittest.TestCase):
         from scripts.cron_graphify_mcp_contract import ADVERTISED_TOOLS
 
         return {
-            name: {"type": "object", "properties": {}}
+            name: {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            }
             for name in ADVERTISED_TOOLS
         }
 
@@ -166,6 +170,7 @@ class GraphifyMcpContractTests(unittest.TestCase):
         schemas[first_name] = {
             "type": "object",
             "properties": {"project_path": {"type": "string"}},
+            "additionalProperties": False,
         }
 
         issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
@@ -181,8 +186,13 @@ class GraphifyMcpContractTests(unittest.TestCase):
         schemas[first_name] = {
             "type": "object",
             "properties": {},
+            "additionalProperties": False,
             "allOf": [
-                {"type": "object", "properties": {"project_path": {"type": "string"}}}
+                {
+                    "type": "object",
+                    "properties": {"project_path": {"type": "string"}},
+                    "additionalProperties": False,
+                }
             ],
         }
 
@@ -200,6 +210,40 @@ class GraphifyMcpContractTests(unittest.TestCase):
         issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
 
         self.assertIn("tool_schema_invalid", {issue["code"] for issue in issues})
+
+    def test_permissive_additional_properties_fail_closed(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        schemas = self._clean_schemas()
+        first_name = next(iter(schemas))
+        schemas[first_name] = {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
+
+        issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
+
+        self.assertIn("tool_schema_permissive", {issue["code"] for issue in issues})
+
+    def test_schema_reference_fails_closed(self) -> None:
+        from scripts import cron_graphify_mcp_contract
+
+        schemas = self._clean_schemas()
+        first_name = next(iter(schemas))
+        schemas[first_name] = {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+            "allOf": [{"$ref": "https://example.invalid/tool-schema.json"}],
+        }
+
+        issues = cron_graphify_mcp_contract.schema_contract_issues(schemas)
+
+        self.assertIn(
+            "tool_schema_reference_unsupported",
+            {issue["code"] for issue in issues},
+        )
 
     def test_default_watchdog_checks_raw_configured_server_schema(self) -> None:
         from scripts import cron_graphify_mcp_contract
@@ -244,6 +288,7 @@ class GraphifyMcpContractTests(unittest.TestCase):
                 schemas[name] = {
                     "type": "object",
                     "properties": {"project_path": {"type": "string"}},
+                    "additionalProperties": False,
                 }
             stdout = io.StringIO()
             with redirect_stdout(stdout):
