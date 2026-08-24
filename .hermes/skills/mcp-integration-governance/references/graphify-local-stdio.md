@@ -37,8 +37,29 @@ interpreter. Do not modify either interpreter to make it work.
 
 ## Refresh ownership and ordering
 
-`graphify update .` refreshes code structure without an LLM. When prose or other
-semantic sources changed, use the version-pinned Ollama extra and a local model:
+Do not run `update`, `extract`, `cluster-only`, or `label` against the accepted
+`graphify-out/` while that graph can be served by MCP. Graphify can replace
+`graph.json` before workspace reconciliation and acceptance complete, and MCP
+hot reload can expose that unaccepted candidate. Classifying drift before a
+writer lock also permits concurrent source changes to enter the published
+baseline.
+
+A safe writer must acquire its lock before fingerprinting, build from an
+immutable source snapshot into an isolated candidate directory, validate the
+candidate without changing the accepted artifact, re-check the source
+fingerprint, and atomically promote the complete accepted artifact set only
+after every gate passes. The current A18 code-only writer does not yet satisfy
+that contract and must remain paused. Leave the graph honestly stale rather than
+using the in-place commands below as a fallback.
+
+Within a future isolated candidate workflow, `graphify update .` refreshes code
+structure without an LLM. When prose or other semantic sources changed, use the
+version-pinned Ollama extra and a local model against the immutable candidate
+source snapshot:
+
+The commands below document stage ordering only. Do not execute them from the
+live workspace root. A staging implementation must direct every Graphify and
+workspace-owned command to the isolated candidate workspace/artifact paths.
 
 ```bash
 uvx --from "graphifyy[ollama]==0.9.45" \
@@ -53,8 +74,8 @@ coverage, not semantic completeness of every document.
 
 After extraction, run `graphify cluster-only .`; run `graphify label` with the
 same pinned runtime/model only when named-community quality is required. The
-**last Graphify writer** must be followed by the workspace-owned reconciliation
-and acceptance sequence:
+**last candidate writer** must be followed by the workspace-owned reconciliation
+and acceptance sequence against that same isolated candidate:
 
 ```bash
 python scripts/graphify_gate_edges.py
@@ -66,7 +87,13 @@ python scripts/graphify_freshness.py
 `graphify_gate_edges.py` statically extracts `DEFAULT_GATES` from
 `scripts/workspace_status.py` and writes cited `runs_gate` edges. Any later
 `update`, `extract`, `cluster-only`, or `label` can rewrite `graph.json`, so run
-the reconciliation again before trusting or rebaselining the artifact.
+the reconciliation again before candidate acceptance.
+
+After candidate freshness and the MCP contract pass, require an unchanged source
+fingerprint and atomically promote the complete artifact set. If any stage fails,
+discard the candidate and leave the previously accepted graph and baseline
+untouched. Sequentially copying a few files back after failure is not atomic
+rollback and is not sufficient.
 
 Never write a baseline after failed diagnostics, missing gate edges, pending
 `needs_update`, incomplete code coverage, or unresolved artifact-path safety

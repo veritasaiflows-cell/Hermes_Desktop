@@ -3,7 +3,7 @@ name: mcp-integration-governance
 title: Govern local MCP integrations and least-privilege pilots
 trigger: Use when piloting local MCP tools with least privilege.
 description: Use when piloting local MCP tools with least privilege.
-version: 1.1.1
+version: 1.2.0
 updated: 2026-08-23
 tags:
   - mcp
@@ -156,12 +156,22 @@ Once configuration, selection, behavior, and rollback are proven, use
 ## Graphify refresh discipline
 
 For the workspace Graphify pilot, `references/graphify-local-stdio.md` owns the
-exact sequence. The invariant is:
+exact sequence. Do not run a Graphify writer against `graph.json` while that
+artifact can be served by MCP. Validation after an in-place write is too late:
+MCP hot reload can expose the candidate before acceptance, and concurrent source
+changes can enter a baseline after the original drift classification.
 
-`final Graphify writer -> graphify_gate_edges.py -> diagnostics -> write baseline -> freshness check`
+The required publication invariant is:
 
-Any `update`, `extract`, `cluster-only`, or `label` run after gate reconciliation
-requires reconciliation again before the baseline is trusted.
+`locked immutable source snapshot -> isolated candidate writer -> gate reconciliation -> diagnostics -> candidate freshness -> MCP contract -> atomic promotion`
+
+Acquire the writer lock before the initial source fingerprint and require the
+same fingerprint immediately before promotion. Promote the complete accepted
+artifact set atomically or leave the prior accepted set untouched. Until a
+tested implementation satisfies that invariant, keep automatic writer jobs such
+as A18 paused and report the graph as stale; do not fall back to an in-place
+refresh. Any candidate `update`, `extract`, `cluster-only`, or `label` run after
+gate reconciliation requires reconciliation again before promotion.
 
 ## Expected output
 
@@ -209,3 +219,5 @@ the underlying artifact or modify unrelated profile configuration as rollback.
   explicit failure/rollback output.
 - v1.1.1 — Reworded the authority rule to avoid a project-skill scanner false
   positive while preserving the source-verification requirement.
+- v1.2.0 — Prohibited in-place publication to the MCP-served graph and required
+  locked immutable input, isolated candidate validation, and atomic promotion.
