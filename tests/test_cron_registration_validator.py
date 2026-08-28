@@ -51,6 +51,26 @@ class CronRegistrationValidatorTests(unittest.TestCase):
             finally:
                 validator.HERMES_SCRIPTS = original
 
+    def test_resolve_wrapper_target_single_line(self):
+        from scripts.cron_registration_validator import _resolve_wrapper_target
+        with TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "wrapper.py"
+            target = r"C:\Users\Veritas\Documents\HermesWorkspace\scripts\cron_example.py"
+            wrapper.write_text(
+                f'TARGET = Path(r"{target}")\n', encoding="utf-8"
+            )
+            self.assertEqual(_resolve_wrapper_target(wrapper), Path(target))
+
+    def test_resolve_wrapper_target_multi_line(self):
+        from scripts.cron_registration_validator import _resolve_wrapper_target
+        with TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "wrapper.py"
+            target = r"C:\Users\Veritas\Documents\HermesWorkspace\scripts\cron_example.py"
+            wrapper.write_text(
+                f'TARGET = Path(\n    r"{target}"\n)\n', encoding="utf-8"
+            )
+            self.assertEqual(_resolve_wrapper_target(wrapper), Path(target))
+
 
 if __name__ == "__main__":
     unittest.main()

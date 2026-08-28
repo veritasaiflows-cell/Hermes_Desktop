@@ -38,7 +38,7 @@ EXPECTED_JOBS = [
 
 DIRECT_REPO_JOBS: list[tuple[str, Path]] = []
 
-_TARGET_RE = re.compile(r'TARGET\s*=\s*Path\(r"([^"]+)"\)')
+_TARGET_RE = re.compile(r'TARGET\s*=\s*Path\(\s*r"([^"]+)"\s*\)')
 
 
 def _resolve_wrapper_target(wrapper_path: Path) -> Path | None:
