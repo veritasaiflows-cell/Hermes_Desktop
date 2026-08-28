@@ -93,6 +93,75 @@ def _retention_completed(*, returncode: int = 0, status: str = "ok") -> SimpleNa
 
 
 class FeedbackEvaluationLoopTests(unittest.TestCase):
+    def test_tool_error_signals_require_recurrence_across_turns_and_exclude_blocks(self):
+        with TemporaryDirectory() as directory:
+            turn_path = Path(directory) / "turn-metrics.sqlite"
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE turn_metrics (
+                        turn_key TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL,
+                        tool_error_count INTEGER NOT NULL,
+                        tool_error_categories_json TEXT
+                    )
+                    """
+                )
+                rows = [
+                    (
+                        "turn-a",
+                        "2026-08-21T01:00:00Z",
+                        5,
+                        json.dumps(
+                            {
+                                "search_files_invalid_regex": 3,
+                                "terminal_blocked": 1,
+                                "terminal_timeout": 1,
+                            }
+                        ),
+                    ),
+                    (
+                        "turn-b",
+                        "2026-08-21T02:00:00Z",
+                        3,
+                        json.dumps(
+                            {"terminal_blocked": 1, "terminal_timeout": 2}
+                        ),
+                    ),
+                    (
+                        "turn-c",
+                        "2026-08-21T03:00:00Z",
+                        1,
+                        json.dumps({"terminal_blocked": 1}),
+                    ),
+                ]
+                connection.executemany(
+                    "INSERT INTO turn_metrics VALUES (?, ?, ?, ?)", rows
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            signals = feedback_evaluation_loop._turn_tool_error_signals(
+                turn_path,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(
+                signals,
+                [
+                    {
+                        "signal_key": "turn_tool_error:terminal_timeout",
+                        "source": "turn_telemetry",
+                        "category": "terminal_timeout",
+                        "occurrences": 3,
+                        "affected_turns": 2,
+                        "recommendation": "review_tool_reliability",
+                    }
+                ],
+            )
+
     def test_turn_signal_requires_minimum_repeated_count(self):
         with TemporaryDirectory() as directory:
             turn_path = Path(directory) / "turn-metrics.sqlite"

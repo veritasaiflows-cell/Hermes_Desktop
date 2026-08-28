@@ -36,6 +36,7 @@ def _create_turn_database(path: Path, rows: list[dict[str, object]]) -> None:
                 tool_round_count INTEGER NOT NULL,
                 tool_call_count INTEGER NOT NULL,
                 tool_error_count INTEGER NOT NULL,
+                tool_error_categories_json TEXT NOT NULL DEFAULT '{}',
                 tool_duration_ms INTEGER NOT NULL,
                 tool_names_json TEXT NOT NULL,
                 approx_input_tokens INTEGER,
@@ -51,6 +52,9 @@ def _create_turn_database(path: Path, rows: list[dict[str, object]]) -> None:
                 tool_work_ms INTEGER,
                 tool_wall_ms INTEGER,
                 observed_external_wall_ms INTEGER,
+                tool_diagnostics_dropped_count INTEGER NOT NULL DEFAULT 0,
+                tool_error_diagnostics_dropped_count INTEGER NOT NULL DEFAULT 0,
+                tool_success_diagnostics_dropped_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
             """
@@ -73,6 +77,9 @@ def _create_turn_database(path: Path, rows: list[dict[str, object]]) -> None:
                 "tool_round_count": 0,
                 "tool_call_count": row.get("tool_call_count", 0),
                 "tool_error_count": row.get("tool_error_count", 0),
+                "tool_error_categories_json": row.get(
+                    "tool_error_categories_json", "{}"
+                ),
                 "tool_duration_ms": row.get("tool_duration_ms", 0),
                 "tool_names_json": row.get("tool_names_json", "[]"),
                 "approx_input_tokens": row.get("approx_input_tokens", 1000),
@@ -90,6 +97,15 @@ def _create_turn_database(path: Path, rows: list[dict[str, object]]) -> None:
                 "observed_external_wall_ms": (
                     row.get("api_duration_ms", 800) + row.get("tool_duration_ms", 0)
                 ),
+                "tool_diagnostics_dropped_count": row.get(
+                    "tool_diagnostics_dropped_count", 0
+                ),
+                "tool_error_diagnostics_dropped_count": row.get(
+                    "tool_error_diagnostics_dropped_count", 0
+                ),
+                "tool_success_diagnostics_dropped_count": row.get(
+                    "tool_success_diagnostics_dropped_count", 0
+                ),
                 "created_at": row["completed_at"],
             }
             columns = list(payload)
@@ -104,6 +120,58 @@ def _create_turn_database(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 class TelemetryRetentionTests(unittest.TestCase):
+    def test_daily_rollup_aggregates_tool_error_categories_and_coverage(self):
+        rows = [
+            {
+                "turn_key": "turn-a",
+                "completed_at": "2026-08-28T01:00:00Z",
+                "duration_ms": 1000,
+                "outcome": "complete",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-sol",
+                "tool_error_count": 2,
+                "tool_error_categories_json": json.dumps(
+                    {"terminal_timeout": 2}
+                ),
+                "tool_error_diagnostics_dropped_count": 1,
+                "tool_success_diagnostics_dropped_count": 10,
+            },
+            {
+                "turn_key": "turn-b",
+                "completed_at": "2026-08-28T02:00:00Z",
+                "duration_ms": 2000,
+                "outcome": "complete",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-sol",
+                "tool_error_count": 2,
+                "tool_error_categories_json": json.dumps(
+                    {
+                        "search_files_invalid_regex": 1,
+                        "terminal_timeout": 1,
+                    }
+                ),
+                "tool_error_diagnostics_dropped_count": 0,
+                "tool_success_diagnostics_dropped_count": 5,
+            },
+        ]
+
+        rollup = telemetry_retention._daily_rollup(
+            "2026-08-28",
+            rows,
+            generated_at="2026-08-29T00:00:00Z",
+            previous_rollup_sha256=None,
+        )
+
+        self.assertEqual(
+            rollup["tool_error_categories"],
+            {"search_files_invalid_regex": 1, "terminal_timeout": 3},
+        )
+        self.assertEqual(
+            rollup["tool_error_diagnostic_coverage"],
+            {"reported": 4, "retained": 3, "dropped": 1},
+        )
+        self.assertEqual(rollup["tool_success_diagnostics_dropped_count"], 15)
+
     def test_rolls_up_before_pruning_and_is_idempotent(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

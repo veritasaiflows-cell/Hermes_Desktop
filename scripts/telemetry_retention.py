@@ -82,6 +82,7 @@ SAFE_TURN_COLUMNS = (
     "tool_round_count",
     "tool_call_count",
     "tool_error_count",
+    "tool_error_categories_json",
     "tool_duration_ms",
     "tool_names_json",
     "approx_input_tokens",
@@ -100,6 +101,8 @@ SAFE_TURN_COLUMNS = (
     "error_host",
     "error_diagnostics_dropped_count",
     "tool_diagnostics_dropped_count",
+    "tool_error_diagnostics_dropped_count",
+    "tool_success_diagnostics_dropped_count",
     "created_at",
 )
 _VERSIONED_TIMING_COLUMNS = (
@@ -285,6 +288,33 @@ def _validate_json_list(
             raise _unsafe_value(column)
 
 
+def _validate_json_count_map(
+    value: Any,
+    column: str,
+    *,
+    maximum_items: int,
+) -> None:
+    if value in (None, ""):
+        return
+    if not isinstance(value, str):
+        raise _unsafe_value(column)
+    try:
+        counts = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise _unsafe_value(column) from exc
+    if not isinstance(counts, dict) or len(counts) > maximum_items:
+        raise _unsafe_value(column)
+    for key, count in counts.items():
+        if (
+            not isinstance(key, str)
+            or not _SAFE_TOKEN_RE.fullmatch(key)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or not 0 <= count <= 1_000_000_000
+        ):
+            raise _unsafe_value(column)
+
+
 def _validate_safe_row(value: dict[str, Any]) -> None:
     _validate_token(value.get("turn_key"), "turn_key", optional=False)
     for column in (
@@ -335,6 +365,11 @@ def _validate_safe_row(value: dict[str, Any]) -> None:
         and not isinstance(item, bool)
         and 100 <= item <= 599,
     )
+    _validate_json_count_map(
+        value.get("tool_error_categories_json"),
+        "tool_error_categories_json",
+        maximum_items=32,
+    )
 
     integer_columns = (
         "duration_ms",
@@ -356,6 +391,8 @@ def _validate_safe_row(value: dict[str, Any]) -> None:
         "observed_external_wall_ms",
         "error_diagnostics_dropped_count",
         "tool_diagnostics_dropped_count",
+        "tool_error_diagnostics_dropped_count",
+        "tool_success_diagnostics_dropped_count",
     )
     for column in integer_columns:
         item = value.get(column)
@@ -383,6 +420,18 @@ def _percentile(values: list[int], percentile: float) -> int | None:
 
 def _sum(rows: list[dict[str, Any]], column: str) -> int:
     return sum(int(row.get(column) or 0) for row in rows)
+
+
+def _tool_error_category_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    totals: Counter[str] = Counter()
+    for row in rows:
+        value = row.get("tool_error_categories_json")
+        if value in (None, ""):
+            continue
+        _validate_json_count_map(value, "tool_error_categories_json", maximum_items=32)
+        counts = json.loads(str(value))
+        totals.update({str(category): int(count) for category, count in counts.items()})
+    return dict(sorted(totals.items()))
 
 
 def _daily_rollup(
@@ -413,6 +462,10 @@ def _daily_rollup(
             if row.get("metric_semantics")
         }
     )
+    tool_error_count = _sum(rows, "tool_error_count")
+    tool_error_diagnostics_dropped = _sum(
+        rows, "tool_error_diagnostics_dropped_count"
+    )
     payload: dict[str, Any] = {
         "schema": ROLLUP_SCHEMA,
         "day": day,
@@ -433,7 +486,16 @@ def _daily_rollup(
         "api_error_count": _sum(rows, "api_error_count"),
         "retry_count": _sum(rows, "retry_count"),
         "tool_call_count": _sum(rows, "tool_call_count"),
-        "tool_error_count": _sum(rows, "tool_error_count"),
+        "tool_error_count": tool_error_count,
+        "tool_error_categories": _tool_error_category_counts(rows),
+        "tool_error_diagnostic_coverage": {
+            "reported": tool_error_count,
+            "retained": max(0, tool_error_count - tool_error_diagnostics_dropped),
+            "dropped": tool_error_diagnostics_dropped,
+        },
+        "tool_success_diagnostics_dropped_count": _sum(
+            rows, "tool_success_diagnostics_dropped_count"
+        ),
         "duration_p50_ms": _percentile(durations, 0.50),
         "duration_p95_ms": _percentile(durations, 0.95),
         "duration_max_ms": max(durations) if durations else None,

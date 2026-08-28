@@ -153,6 +153,73 @@ def _turn_error_signals(
     ]
 
 
+def _turn_tool_error_signals(
+    turn_database: Path,
+    *,
+    now: str,
+    min_count: int = MIN_REPEATED_SIGNAL_COUNT,
+) -> list[dict[str, object]]:
+    """Return repeated normalized tool failures across at least two turns."""
+    if not turn_database.is_file():
+        return []
+    cutoff = (_parse_timestamp(now) - timedelta(days=WINDOW_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    connection = sqlite3.connect(turn_database)
+    try:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(turn_metrics)").fetchall()
+        }
+        if "tool_error_categories_json" not in columns:
+            return []
+        rows = connection.execute(
+            "SELECT tool_error_categories_json FROM turn_metrics "
+            "WHERE completed_at >= ? AND tool_error_count > 0",
+            (cutoff,),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    counts: dict[str, int] = {}
+    affected_turns: dict[str, int] = {}
+    for (value,) in rows:
+        try:
+            categories = json.loads(value or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(categories, dict):
+            continue
+        seen_in_turn: set[str] = set()
+        for raw_category, raw_count in categories.items():
+            category = _safe_token(raw_category)
+            if (
+                category is None
+                or category.endswith("_blocked")
+                or not isinstance(raw_count, int)
+                or isinstance(raw_count, bool)
+                or raw_count <= 0
+            ):
+                continue
+            counts[category] = counts.get(category, 0) + raw_count
+            seen_in_turn.add(category)
+        for category in seen_in_turn:
+            affected_turns[category] = affected_turns.get(category, 0) + 1
+
+    return [
+        {
+            "signal_key": f"turn_tool_error:{category}",
+            "source": "turn_telemetry",
+            "category": category,
+            "occurrences": count,
+            "affected_turns": affected_turns[category],
+            "recommendation": "review_tool_reliability",
+        }
+        for category, count in sorted(counts.items())
+        if count >= min_count and affected_turns.get(category, 0) >= 2
+    ]
+
+
 def _canonical_error_signals(
     canonical_database: Path,
     *,
@@ -558,6 +625,7 @@ def refresh_loop(
     signals = [
         *_canonical_error_signals(Path(canonical_database), now=generated_at),
         *_turn_error_signals(Path(turn_database), now=generated_at),
+        *_turn_tool_error_signals(Path(turn_database), now=generated_at),
     ]
     candidates: list[dict[str, object]] = []
     created_count = 0

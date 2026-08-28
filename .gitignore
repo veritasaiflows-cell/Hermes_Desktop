@@ -22,6 +22,10 @@ derived/
 
 # Graphify knowledge-graph artifacts (disposable derived output)
 graphify-out/
+# Isolated candidate snapshots built by A18 before promotion. Rebuildable from
+# live source via `cron_graphify_code_refresh.py --promote-once`; ~38MB/wave and
+# never committed since the layout was introduced.
+source/graphify-candidates/
 
 # Runtime logs and temporary files
 telemetry/runtime/
