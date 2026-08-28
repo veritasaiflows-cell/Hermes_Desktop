@@ -114,6 +114,30 @@ def _check_stale_replays(db: CanonicalDB) -> list[dict]:
     return stale
 
 
+def _claim_coverage(db: CanonicalDB) -> dict[str, int]:
+    """Return claim counts by status so a green gate cannot hide an empty corpus.
+
+    The drift checks below only inspect ``status='active'`` claims. When no
+    active claim exists they scan an empty set and report OK — a green light
+    over an unmeasured road. Surfacing the coverage counts alongside the result
+    makes that distinction visible without changing exit semantics: an empty
+    claims table is legitimate (workflows may be gated), but it must never be
+    mistaken for verified coverage.
+    """
+    coverage: dict[str, int] = {}
+    try:
+        rows = db.connection.execute(
+            "SELECT status, COUNT(*) AS n FROM claims GROUP BY status"
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+    for row in rows:
+        coverage[str(row["status"])] = int(row["n"])
+    coverage["total"] = sum(coverage.values())
+    coverage["active"] = coverage.get("active", 0)
+    return coverage
+
+
 def main() -> int:
     """Scan for expiring claims, tampered runs, and stale replays; exit 1 on drift."""
     now = _utc_now()
@@ -129,6 +153,7 @@ def main() -> int:
             expiring = _check_expiring_claims(db, now, CLAIM_WARNING_HOURS)
             tampered = _check_tampered_workflow_runs(db)
             stale = _check_stale_replays(db)
+            coverage = _claim_coverage(db)
     except sqlite3.Error as exc:
         print(f"CLAIM DRIFT FAIL {now_iso} error={exc}")
         return 1
@@ -142,13 +167,22 @@ def main() -> int:
                     "tampered_workflow_runs": tampered,
                     "stale_replays": stale,
                     "warning_hours": CLAIM_WARNING_HOURS,
+                    "claim_coverage": coverage,
                 },
                 indent=2,
             )
         )
         return 1
 
-    print(f"CLAIM DRIFT OK {now_iso}", file=sys.stderr)
+    active = coverage.get("active", 0)
+    total = coverage.get("total", 0)
+    # Qualify the green result: OK over zero active claims is "nothing to check",
+    # not "everything verified". Exit code is unchanged either way.
+    scope = "no_active_claims" if active == 0 else f"active={active}"
+    print(
+        f"CLAIM DRIFT OK {now_iso} {scope} total_claims={total}",
+        file=sys.stderr,
+    )
     return 0
 
 

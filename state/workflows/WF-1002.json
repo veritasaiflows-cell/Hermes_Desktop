@@ -22,7 +22,7 @@
   "display_name": "Workflow C - Creative Generation",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-28T21:35:05Z",
+  "generated_at": "2026-08-28T22:35:06Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
