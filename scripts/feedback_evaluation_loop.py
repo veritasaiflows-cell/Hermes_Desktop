@@ -69,6 +69,13 @@ def _candidate_id(signal_key: str) -> str:
     return f"feedback-candidate-{digest}"
 
 
+def _days_between(earlier: str, later: str) -> float:
+    """Signed whole-fractional days between two ISO-8601 timestamps."""
+    return (
+        _parse_timestamp(later) - _parse_timestamp(earlier)
+    ).total_seconds() / 86400.0
+
+
 def run_fixed_cohort(*, project_root: Path = PROJECT_ROOT) -> dict[str, object]:
     """Run the stable, small feedback/harness cohort without persisting raw output."""
     started = time.perf_counter_ns()
@@ -194,7 +201,8 @@ def _canonical_error_signals(
 
 def _existing_task(db: CanonicalDB, task_id: str) -> dict[str, object] | None:
     row = db.connection.execute(
-        "SELECT task_id, status, scope FROM tasks WHERE task_id = ?", (task_id,)
+        "SELECT task_id, status, scope, updated_at FROM tasks WHERE task_id = ?",
+        (task_id,),
     ).fetchone()
     return dict(row) if row is not None else None
 
@@ -591,8 +599,43 @@ def refresh_loop(
                 created_count += 1
                 task = {"task_id": candidate_id, "status": "candidate"}
 
-            if task["status"] in {"accepted", "rejected"}:
+            if task["status"] == "accepted":
                 continue
+
+            if task["status"] == "rejected":
+                # Rejections are terminal for the *decision*, not for the signal.
+                # If the same category recurs beyond the rolling signal window,
+                # reopen the candidate so a post-fix review can be measured
+                # against fresh evidence. Within the window, treat rejection as
+                # authoritative and skip.
+                decided_at = str(task.get("updated_at") or "")
+                if not decided_at or _days_between(decided_at, generated_at) < WINDOW_DAYS:
+                    continue
+                db.update(
+                    "tasks",
+                    candidate_id,
+                    {"status": "candidate", "updated_at": generated_at},
+                )
+                db.insert(
+                    "events",
+                    {
+                        "event_type": "feedback_candidate_reopened",
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "payload_json": json.dumps(
+                            {
+                                "previous_status": "rejected",
+                                "rejected_at": decided_at,
+                                "reopened_reason": "signal_recurred_after_window",
+                                "signal": signal,
+                            },
+                            sort_keys=True,
+                        ),
+                        "occurred_at": generated_at,
+                        "recorded_at": generated_at,
+                    },
+                )
+                task = {"task_id": candidate_id, "status": "candidate"}
 
             baseline = None
             latest_baseline = _latest_validation(

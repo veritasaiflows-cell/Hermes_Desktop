@@ -773,7 +773,8 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual(validation_count, 2)
 
-    def test_rejected_candidate_remains_rejected_when_signal_repeats(self):
+    def test_rejected_candidate_remains_rejected_when_signal_repeats_within_window(self):
+        """Same-window recurrence still honours the terminal-rejection semantics."""
         with TemporaryDirectory() as directory:
             root = Path(directory)
             canonical_path = root / "efficiens.db"
@@ -789,6 +790,7 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                         "task_type": "improvement_candidate",
                         "status": "rejected",
                         "scope": "feedback_evaluation",
+                        "updated_at": "2026-08-20T12:00:00Z",
                     },
                 )
             turn_path = root / "turn-metrics.sqlite"
@@ -810,6 +812,61 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                     "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
                 ).fetchone()[0]
             self.assertEqual(status, "rejected")
+
+    def test_rejected_candidate_reopens_when_signal_recurs_after_window(self):
+        """A new rolling window containing the same signal must re-open a
+        previously-rejected candidate so post-fix reviews can be measured."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = feedback_evaluation_loop._candidate_id(
+                "turn_api_error:APIConnectionError"
+            )
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Rejected feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "rejected",
+                        "scope": "feedback_evaluation",
+                        # Rejected >WINDOW_DAYS before 'now' so the recurrence is fresh.
+                        "updated_at": "2026-08-13T04:00:00Z",
+                    },
+                )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            cohort_calls: list[str] = []
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: cohort_calls.append("called") or {
+                    "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                    "result": "pass",
+                    "test_count": 1,
+                    "test_failure_count": 0,
+                    "duration_ms": 1,
+                    "source_fingerprint": "abc",
+                    "failure_ids_sha256": "def",
+                    "tested_commit": "head",
+                },
+                now="2026-08-21T04:00:00Z",
+            )
+
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                events = db.connection.execute(
+                    "SELECT event_type FROM events WHERE subject_id = ? AND event_type = ?",
+                    (candidate_id, "feedback_candidate_reopened"),
+                ).fetchall()
+            self.assertNotEqual(status, "rejected")
+            self.assertEqual(len(events), 1)
+            self.assertEqual(len(cohort_calls), 1)
+            self.assertEqual(report["created_candidate_count"], 0)
 
     def test_safe_end_to_end_cycle_records_evidence_and_human_decision(self):
         with TemporaryDirectory() as directory:
