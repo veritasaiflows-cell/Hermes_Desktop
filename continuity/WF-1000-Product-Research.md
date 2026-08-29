@@ -21,6 +21,10 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
 ## Last meaningful progress
 - Phase 1A hardening: dedupe, dry-run preflight enforcement, telemetry, regression tests (13 tests green).
 - Phase-3 queue scaffolding: WF-1001/1002/1003 registered with blockers and stop lines.
+- TopDawg free-route verification (2026-08-29): all 7 shortlist leads rejected on public
+  per-tier cost evidence — 4 home leads fail the 55% margin gate at every membership tier
+  (best 48.1%), 3 pet leads sit below the $30 retail floor, 2 of them out of stock.
+  Record: `derived/research/wf1000-topdawg-verification-2026-08-29.md`. $0 spent.
 
 ## In-scope
 - In-place controls for workflow ownership, state, aliases, overrides, and freshness.
@@ -54,7 +58,11 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
 - [x] Phase-3 downstream workflows scaffolded as route_only.
 
 ## Next pass
-- Ingest an approved production catalog through dry-run + lane write.
+- TopDawg route is exhausted for the current leads (economics, not missing data).
+  Return to the rank-1 Doba 40L trunk-organizer SKU verification (Doba free tier
+  exposes unit cost), or sweep TopDawg's broader catalog on operator direction.
+- Ingest an approved production catalog through dry-run + lane write once a lead
+  passes pre-sample gates.
 - Emit `derived/research/top-opportunities-*.json` handoff packets.
 - Await operator approval for WF-1001/1002/1003 activation.
 
