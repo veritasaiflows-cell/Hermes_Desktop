@@ -25,6 +25,10 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
   per-tier cost evidence — 4 home leads fail the 55% margin gate at every membership tier
   (best 48.1%), 3 pet leads sit below the $30 retail floor, 2 of them out of stock.
   Record: `derived/research/wf1000-topdawg-verification-2026-08-29.md`. $0 spent.
+- Doba 40L trunk-organizer verification (2026-08-29): rejected before account-gated
+  unit-cost access. Exact-title current retail listings are $22.77–$23.99, below the
+  $30 launch-policy floor. Doba's current public route is a $0.99 trial, not a permanent
+  free tier. Record: `derived/research/wf1000-doba-verification-2026-08-29.md`. $0 spent.
 
 ## In-scope
 - In-place controls for workflow ownership, state, aliases, overrides, and freshness.
@@ -58,9 +62,10 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
 - [x] Phase-3 downstream workflows scaffolded as route_only.
 
 ## Next pass
-- TopDawg route is exhausted for the current leads (economics, not missing data).
-  Return to the rank-1 Doba 40L trunk-organizer SKU verification (Doba free tier
-  exposes unit cost), or sweep TopDawg's broader catalog on operator direction.
+- TopDawg and the Doba 40L trunk-organizer routes are exhausted for the current leads:
+  TopDawg fails economics; the Doba SKU fails realistic-retail evidence before cost data
+  could matter. Prioritize a new supplier/product lead with verified retail support above
+  the $30 policy floor before pursuing any account-gated cost verification.
 - Ingest an approved production catalog through dry-run + lane write once a lead
   passes pre-sample gates.
 - Emit `derived/research/top-opportunities-*.json` handoff packets.
