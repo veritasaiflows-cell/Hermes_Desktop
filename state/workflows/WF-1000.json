@@ -1,33 +1,33 @@
 {
-  "authoritative_next_action": "Run product_research_workflow.py against approved source catalog and review candidates before any external connector action.",
+  "authoritative_next_action": "Treat WF-1000 as the worked example behind WF-1004. Keep the Creator Desk Reset shortlist empty unless a named supplier SKU proves the complete public evidence contract.",
   "authority_boundary": "canary",
   "authority_class": "review_ready",
   "blocker_count": 0,
   "blockers": [],
   "commands": {
-    "dry_run": "python scripts/product_research_workflow.py <catalog.csv> --dry-run --top-n 5",
-    "write": "python scripts/product_research_workflow.py <catalog.csv> --database canonical/efficiens.db --top-n 5 --lane-id WF-1000::product-research --lane-owner agent-main"
+    "dry_run": "python scripts/product_research_workflow.py <catalog.csv> --launch-policy state/commerce-launch-policy.json --interest-profile state/operator-interest-profile.json --qualification-mode organic_sample --dry-run --top-n 3",
+    "write": "python scripts/product_research_workflow.py <catalog.csv> --launch-policy state/commerce-launch-policy.json --interest-profile state/operator-interest-profile.json --qualification-mode organic_sample --database canonical/efficiens.db --top-n 3 --lane-id WF-1000::product-research --lane-owner agent-main"
   },
   "continuity_note": "continuity\\WF-1000-Product-Research.md",
   "control_override": null,
-  "current_state": "Workflow A processes supplier catalogs into scored product_candidate entities with business-key dedupe, dry-run-first preflight, and phase-3 handoff packets.",
+  "current_state": "Workflow A is re-scoped as a PROOF LAB, not a revenue engine. Its production shortlist is empty by design: 30 real supplier leads were evaluated across 5 platforms and 0 passed the launch-policy gates. Its ongoing value is as the reference implementation and evidence corpus for gate-enforced agent decisions, which WF-1004 monetizes as a service.",
   "default_resume_command": "python scripts/workflow_router.py WF-1000 --answer next --validate",
   "dependency_blockers": [],
   "depends_on": [],
   "display_name": "Workflow A - Product Research",
   "effective_status": "active",
   "freshness_sla": "daily",
-  "generated_at": "2026-08-28T22:35:06Z",
+  "generated_at": "2026-08-30T04:29:20Z",
   "graph_dependency_blockers": [],
   "helper_safe": true,
   "human_approval_owner": "operator",
   "implementation_script": "scripts/product_research_workflow.py",
   "lifecycle": "active",
-  "next_action": "Run product_research_workflow.py against approved source catalogs and review top-opportunity packets in derived/research before any connector activation.",
+  "next_action": "Maintain as a proof corpus. Do not resume broad supplier sweeps without a new route or a material evidence change; feed gate-refusal evidence to WF-1004.",
   "owner_action_required": false,
   "primary_owner_lane": "agent-main",
   "primary_route_artifact": "state/workflows/WF-1000.json",
-  "priority": "high",
+  "priority": "medium",
   "proof_artifact": "continuity\\WF-1000-Product-Research.md",
   "readiness": "active",
   "recall_context": {
@@ -36,28 +36,28 @@
     "result_count": 3,
     "results": [
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L74-L81",
-        "excerpt": "## 5. Phase 1 milestone outcomes\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\state\\README.md:L6-L23",
+        "excerpt": "- `workflow-control-overrides.json` \u2014 operator pause, halt, and gate controls.\n- `commerce-launch-policy.json` \u2014 operator-approved WF-1000 market, economics,\n  fulfillment, risk, evidence-freshness, and sample-budget gates.",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.6965748669418722,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
+        "score": 0.6840077250447256,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\state\\README.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L3-L7",
-        "excerpt": "## 1) Purpose\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L164-L177",
+        "excerpt": "## 7) Verification\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.6914068634460775,
+        "score": 0.6814332205557985,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L7-L27",
-        "excerpt": "## 1. Canonical entities currently in use\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L1-L2",
+        "excerpt": "# Workflow A \u2014 Product Research",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.6731271222560652,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
+        "score": 0.6746421282464974,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
       }
     ]
   },

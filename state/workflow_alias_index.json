@@ -21,6 +21,14 @@
     "campaign execution": "WF-1003",
     "campaign-execution": "WF-1003",
     "campaigns": "WF-1003",
-    "workflow d": "WF-1003"
+    "workflow d": "WF-1003",
+    "workflow-e": "WF-1004",
+    "workflow e": "WF-1004",
+    "agent trust audit": "WF-1004",
+    "agent-trust-audit": "WF-1004",
+    "trust-audit": "WF-1004",
+    "trust audit": "WF-1004",
+    "proof-lab": "WF-1000",
+    "proof lab": "WF-1000"
   }
 }

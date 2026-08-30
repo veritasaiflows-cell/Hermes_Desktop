@@ -1,7 +1,19 @@
 # Workflow 1000 continuity note
 
 ## Objective
-Build and harden Workflow A before enabling any new monetization workflows.
+**Re-scoped 2026-08-30: WF-1000 is a PROOF LAB, not a revenue engine.**
+
+Its original objective was to build and harden Workflow A before enabling new
+monetization workflows. That hardening is complete, and the funnel's verdict is
+in: 30 real supplier leads across 5 platforms, 0 qualified, $0 spent. The empty
+shortlist is the finished result, not an unfinished one.
+
+WF-1000's ongoing value is as the reference implementation and evidence corpus
+behind WF-1004 (AI Agent Trust Audit), which monetizes the control plane rather
+than the storefront. See `continuity/WF-1004-Agent-Trust-Audit.md`.
+
+Do not loosen launch-policy gates to force a non-empty shortlist. The refusal is
+the asset.
 
 ## Current state
 `Workflow A - Product Research` is implemented in `scripts/product_research_workflow.py`.
@@ -12,6 +24,17 @@ Phase-3 hardening is complete:
 - Mandatory dry-run preflight per source before any canonical write.
 - WF-A summary telemetry (business_key_dedupe, source_preflight, confidence_profile).
 - Idempotent run-key replay with bundle integrity hashes.
+
+Interest-alignment hardening is implemented:
+- `state/operator-interest-profile.json` makes the AI revenue-systems audience and
+  approved physical-product theses explicit, versioned, hashed, and fail-closed.
+- Strategic fit is independent from commercial viability and is the primary ranking axis.
+- Executable `research`, `organic_sample`, and `paid_launch` modes prevent an
+  organic-only candidate from being mislabeled for paid acquisition.
+- Product-character requirements, contribution-dollar floors, profitable CAC,
+  reason-count telemetry, and production-event-backed reporting are enforced.
+- The default opportunity report excludes the five legacy/demo entities; diagnostics
+  require `--include-unverified`.
 
 Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
 - WF-1001 Listing Drafts (blocked on storefront connector approval)
@@ -29,6 +52,13 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
   unit-cost access. Exact-title current retail listings are $22.77–$23.99, below the
   $30 launch-policy floor. Doba's current public route is a $0.99 trial, not a permanent
   free tier. Record: `derived/research/wf1000-doba-verification-2026-08-29.md`. $0 spent.
+- CJdropshipping/Zendrop and second no-drill cable-management pass (2026-08-29):
+  both platforms remain gated supplier leads, but 0 exact offers qualified for
+  research, organic sample, or paid launch. The strongest exact lead, TopDawg SKU
+  `3239-HG_DeskCableTray_GPCT3729`, was publicly out of stock; Doba withheld unit
+  cost, TVCMALL did not prove US stock or <=7-day landed delivery, and the reviewed
+  Zendrop pages did not expose an evidence-complete SKU. Record:
+  `derived/research/wf1000-cj-zendrop-public-review-2026-08-29.md`. $0 spent.
 
 ## In-scope
 - In-place controls for workflow ownership, state, aliases, overrides, and freshness.
@@ -62,10 +92,16 @@ Phase-3 downstream workflows are scaffolded in the active queue as `route_only`:
 - [x] Phase-3 downstream workflows scaffolded as route_only.
 
 ## Next pass
-- TopDawg and the Doba 40L trunk-organizer routes are exhausted for the current leads:
-  TopDawg fails economics; the Doba SKU fails realistic-retail evidence before cost data
-  could matter. Prioritize a new supplier/product lead with verified retail support above
-  the $30 policy floor before pursuing any account-gated cost verification.
+- WF-1000 is now a proof lab. Its evidence corpus feeds WF-1004; see
+  `scripts/gate_counterfactual.py` for the measured gated-vs-ungated baseline.
+- Keep the Creator Desk Reset shortlist empty unless a named supplier SKU proves the
+  complete public evidence contract. Do not repeat broad public searches without a new
+  route or a material evidence change.
+- If the operator approves account-gated verification, inspect only one named SKU and
+  target ZIP with stop lines for exact variant stock, product cost, shipping, delivery,
+  return applicability, and compliance before any sample purchase.
+- Secondary hypotheses are a Shopify content-capture mount kit and a seller operations
+  station kit. Generic pet, automotive, kitchen, garden, and household sweeps remain out.
 - Ingest an approved production catalog through dry-run + lane write once a lead
   passes pre-sample gates.
 - Emit `derived/research/top-opportunities-*.json` handoff packets.
@@ -77,4 +113,5 @@ Run:
 ```bash
 python scripts/run_checks.py --skip-smoke
 python scripts/workflow_router.py WF-1000 --answer summary --validate --write-index
+python scripts/top_opportunities_report.py canonical/efficiens.db --as-json
 ```

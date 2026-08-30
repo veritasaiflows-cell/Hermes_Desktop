@@ -4,28 +4,29 @@
 {
   "schema": "active-workflows.v1",
   "routing_schema_version": "workflow-routing-index.v1",
-  "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-08-16T04:10:00Z",
+  "generated_by": "control-plane sync from state/active_workflows.json",
+  "generated_at": "2026-08-30T04:10:00Z",
   "workflows": [
     {
       "workflow_id": "WF-1000",
       "display_name": "Workflow A - Product Research",
       "aliases": [
         "workflow-a",
-        "product-research"
+        "product-research",
+        "proof-lab"
       ],
       "tier": "P1",
-      "priority": "high",
+      "priority": "medium",
       "lifecycle": "active",
       "readiness": "active",
       "effective_status": "active",
-      "state_description": "Workflow A processes supplier catalogs into scored product_candidate entities with business-key dedupe, dry-run-first preflight, and phase-3 handoff packets.",
-      "next_action": "Run product_research_workflow.py against approved source catalogs and review top-opportunity packets in derived/research before any connector activation.",
-      "authoritative_next_action": "Run product_research_workflow.py against approved source catalog and review candidates before any external connector action.",
+      "state_description": "Workflow A is re-scoped as a PROOF LAB, not a revenue engine. Its production shortlist is empty by design: 30 real supplier leads were evaluated across 5 platforms and 0 passed the launch-policy gates. Its ongoing value is as the reference implementation and evidence corpus for gate-enforced agent decisions, which WF-1004 monetizes as a service.",
+      "next_action": "Maintain as a proof corpus. Do not resume broad supplier sweeps without a new route or a material evidence change; feed gate-refusal evidence to WF-1004.",
+      "authoritative_next_action": "Treat WF-1000 as the worked example behind WF-1004. Keep the Creator Desk Reset shortlist empty unless a named supplier SKU proves the complete public evidence contract.",
       "implementation_script": "scripts/product_research_workflow.py",
       "commands": {
-        "dry_run": "python scripts/product_research_workflow.py <catalog.csv> --dry-run --top-n 5",
-        "write": "python scripts/product_research_workflow.py <catalog.csv> --database canonical/efficiens.db --top-n 5 --lane-id WF-1000::product-research --lane-owner agent-main"
+        "dry_run": "python scripts/product_research_workflow.py <catalog.csv> --launch-policy state/commerce-launch-policy.json --interest-profile state/operator-interest-profile.json --qualification-mode organic_sample --dry-run --top-n 3",
+        "write": "python scripts/product_research_workflow.py <catalog.csv> --launch-policy state/commerce-launch-policy.json --interest-profile state/operator-interest-profile.json --qualification-mode organic_sample --database canonical/efficiens.db --top-n 3 --lane-id WF-1000::product-research --lane-owner agent-main"
       },
       "helper_safe": true,
       "owner_action_required": false,
@@ -205,6 +206,59 @@
       "validator_commands": [
         "python -m unittest discover -s tests -v",
         "python scripts/workflow_router.py WF-1003 --answer summary --validate"
+      ]
+    },
+    {
+      "workflow_id": "WF-1004",
+      "display_name": "Workflow E - AI Agent Trust Audit",
+      "aliases": [
+        "workflow-e",
+        "agent-trust-audit",
+        "trust-audit"
+      ],
+      "tier": "P1",
+      "priority": "high",
+      "lifecycle": "active",
+      "readiness": "active",
+      "effective_status": "active",
+      "state_description": "Productized service pivot. Applies the WF-1000 control plane (policy gates, evidence contracts, staged authority, freshness harness, claim-drift detection) to a client's own agent stack to find claims their agents cannot substantiate. WF-1000's empty shortlist is the reference case study; no revenue has been earned yet and pricing is an untested hypothesis.",
+      "next_action": "Validate demand through direct conversations before building further tooling. Building is not the bottleneck; selling is.",
+      "authoritative_next_action": "Do not build additional audit tooling until at least one prospective buyer conversation has happened. Report the counterfactual baseline honestly, including that avoided cost is not earned revenue.",
+      "implementation_script": "scripts/gate_counterfactual.py",
+      "commands": {
+        "dry_run": "python scripts/gate_counterfactual.py --as-json",
+        "write": null
+      },
+      "helper_safe": true,
+      "owner_action_required": false,
+      "authority_boundary": "review_only",
+      "authority_class": "review_ready",
+      "primary_owner_lane": "agent-main",
+      "secondary_consumers": [
+        "review",
+        "operations"
+      ],
+      "human_approval_owner": "operator",
+      "proof_artifact": "continuity/WF-1004-Agent-Trust-Audit.md",
+      "freshness_sla": "weekly",
+      "default_resume_command": "python scripts/workflow_router.py WF-1004 --answer next --validate",
+      "control_override": null,
+      "depends_on": [
+        "WF-1000"
+      ],
+      "blockers": [
+        "No paying client engagement exists; demand is unvalidated.",
+        "No measured comparison of gated versus ungated agent behavior beyond the WF-1000 corpus."
+      ],
+      "stop_lines": [
+        "No external messages, outreach, or publication without operator approval",
+        "No pricing or capability claims presented as validated until a real engagement exists",
+        "Avoided cost must never be reported as earned revenue"
+      ],
+      "primary_route_artifact": "state/workflows/WF-1004.json",
+      "validator_commands": [
+        "python -m unittest discover -s tests -v",
+        "python scripts/workflow_router.py WF-1004 --answer summary --validate"
       ]
     }
   ]

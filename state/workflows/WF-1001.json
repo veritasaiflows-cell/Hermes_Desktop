@@ -22,7 +22,7 @@
   "display_name": "Workflow B - Listing Drafts",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-28T22:35:06Z",
+  "generated_at": "2026-08-30T04:29:20Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -57,11 +57,11 @@
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       },
       {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L74-L81",
-        "excerpt": "## 5. Phase 1 milestone outcomes\n",
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L28-L71",
+        "excerpt": "\nWF-1000 interest-aligned metrics also include `thesis_id`, `audience_id`,\n`qualification_mode`, `quality_status`, and `margin_basis` dimensions.",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
-        "score": 0.6193568138062124,
+        "score": 0.613160239530964,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       }
     ]

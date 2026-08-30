@@ -22,7 +22,7 @@
   "display_name": "Workflow C - Creative Generation",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-28T22:35:06Z",
+  "generated_at": "2026-08-30T04:29:20Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -49,20 +49,20 @@
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
       },
       {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L8-L32",
+        "excerpt": "profile, qualification mode, and scoring configuration to have passed a dry run,\nplus an active WF-1000 write lane. Research and shortlist creation do not authorize\nordering, publication, advertising, or external messages.",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.5985949670190458,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
+      },
+      {
         "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md:L112-L129",
         "excerpt": "## Mandatory write preflight\n",
         "freshness_state": "fresh",
         "retrieval_mode": "hybrid",
         "score": 0.5922300422052554,
         "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-routing-control-plane.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L82-L90",
-        "excerpt": "## 6. Reporting surface\n",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.5843137766722512,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
       }
     ]
   },
