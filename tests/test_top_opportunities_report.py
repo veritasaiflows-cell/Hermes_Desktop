@@ -60,6 +60,40 @@ def _seed_database(db: CanonicalDB) -> None:
             )
 
 
+def _mark_candidate_quality(
+    db: CanonicalDB,
+    *,
+    name: str,
+    quality_status: str,
+    strategic_fit_score: float = 82.0,
+) -> None:
+    entity_id = db.connection.execute(
+        "SELECT entity_id FROM entities WHERE entity_type = ? AND name = ? ORDER BY rowid DESC LIMIT 1",
+        ("product_candidate", name),
+    ).fetchone()[0]
+    db.insert(
+        "events",
+        {
+            "event_type": "workflow.product_research.candidate_selected",
+            "subject_type": "entities",
+            "subject_id": entity_id,
+            "payload_json": json.dumps(
+                {
+                    "quality_status": quality_status,
+                    "qualification_mode": "organic_sample",
+                    "strategic_fit": {
+                        "score": strategic_fit_score,
+                        "thesis_id": "creator-desk-reset",
+                    },
+                },
+                sort_keys=True,
+            ),
+            "occurred_at": "2026-08-29T00:00:00Z",
+            "recorded_at": "2026-08-29T00:00:00Z",
+        },
+    )
+
+
 class TopOpportunitiesReportTests(unittest.TestCase):
     def _database(self) -> tuple[TemporaryDirectory, Path]:
         directory = TemporaryDirectory(ignore_cleanup_errors=True)
@@ -72,7 +106,7 @@ class TopOpportunitiesReportTests(unittest.TestCase):
         directory, path = self._database()
         self.addCleanup(directory.cleanup)
 
-        rows = generate(path, top_n=10, min_viability=0.0)
+        rows = generate(path, top_n=10, min_viability=0.0, include_unverified=True)
 
         # 4 seeded rows collapse to 3 unique (name, supplier) pairs.
         self.assertEqual(len(rows), 3)
@@ -89,7 +123,7 @@ class TopOpportunitiesReportTests(unittest.TestCase):
         directory, path = self._database()
         self.addCleanup(directory.cleanup)
 
-        rows = generate(path, top_n=10, min_viability=0.60)
+        rows = generate(path, top_n=10, min_viability=0.60, include_unverified=True)
 
         names = {row["name"] for row in rows}
         self.assertEqual(names, {"Aero Travel Mug", "Foldable Keyboard"})
@@ -99,11 +133,34 @@ class TopOpportunitiesReportTests(unittest.TestCase):
         directory, path = self._database()
         self.addCleanup(directory.cleanup)
 
-        rows = generate(path, top_n=2, min_viability=0.0)
+        rows = generate(path, top_n=2, min_viability=0.0, include_unverified=True)
 
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["name"], "Aero Travel Mug")
         self.assertEqual(rows[1]["name"], "Foldable Keyboard")
+
+    def test_generate_excludes_unverified_candidates_by_default(self) -> None:
+        directory, path = self._database()
+        self.addCleanup(directory.cleanup)
+
+        self.assertEqual(generate(path, top_n=10, min_viability=0.0), [])
+
+    def test_generate_includes_only_candidates_with_production_quality_evidence(self) -> None:
+        directory, path = self._database()
+        self.addCleanup(directory.cleanup)
+        with CanonicalDB(path, schema_path=SCHEMA) as db:
+            _mark_candidate_quality(
+                db,
+                name="Foldable Keyboard",
+                quality_status="organic_sample_candidate",
+            )
+
+        rows = generate(path, top_n=10, min_viability=0.0)
+
+        self.assertEqual([row["name"] for row in rows], ["Foldable Keyboard"])
+        self.assertEqual(rows[0]["quality_status"], "organic_sample_candidate")
+        self.assertEqual(rows[0]["strategic_fit_score"], 82.0)
+        self.assertEqual(rows[0]["thesis_id"], "creator-desk-reset")
 
     def test_cli_emits_json(self) -> None:
         directory, path = self._database()
@@ -116,6 +173,7 @@ class TopOpportunitiesReportTests(unittest.TestCase):
                 str(path),
                 "--top-n",
                 "3",
+                "--include-unverified",
                 "--as-json",
             ],
             cwd=str(PROJECT_ROOT),
@@ -146,6 +204,7 @@ class TopOpportunitiesReportTests(unittest.TestCase):
         self.assertIn("opportunity shortlist", completed.stdout)
         self.assertIn("--top-n", completed.stdout)
         self.assertIn("--min-viability", completed.stdout)
+        self.assertIn("--include-unverified", completed.stdout)
 
 
 if __name__ == "__main__":

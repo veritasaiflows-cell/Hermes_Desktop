@@ -8,6 +8,10 @@ operator overrides, lane coordination, and generated workflow summaries.
 - `active_workflows.json` — authoritative active-workflow queue.
 - `workflow_alias_index.json` — authoritative workflow alias mapping.
 - `workflow-control-overrides.json` — operator pause, halt, and gate controls.
+- `commerce-launch-policy.json` — operator-approved WF-1000 market, economics,
+  fulfillment, risk, evidence-freshness, and sample-budget gates.
+- `operator-interest-profile.json` — operator-approved WF-1000 audience, thesis,
+  strategic-fit, content-angle, and default category-exclusion contract.
 - `ACTIVE_WORKFLOWS.md` and `WORKFLOW_ALIAS_INDEX.md` — human-readable mirrors.
 - `concurrent-lane-register.sqlite` — durable lane coordination state.
 - `implementation-jobs/` — authoritative machine-readable long-work jobs and phase state.
