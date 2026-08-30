@@ -35,6 +35,7 @@ DEFAULT_WIKI_ROOT = PROJECT_ROOT / "wiki"
 DEFAULT_MANIFEST_PATH = DEFAULT_WIKI_ROOT / "bootstrap-manifest.json"
 DEFAULT_LKG_MANIFEST_PATH = DEFAULT_WIKI_ROOT / ".lkg" / "bootstrap-manifest.json"
 MANIFEST_SCHEMA = "wiki-bootstrap-manifest.v1"
+REATTEST_SCHEMA = "wiki-reattest-report.v1"
 
 REQUIRED_PAGE_MARKERS = (
     "page_type",
@@ -631,11 +632,200 @@ def publish_wiki(*, project_root: Path = PROJECT_ROOT, manifest_path: Path | Non
     return report
 
 
+def _page_source_drift(
+    project_root: Path,
+    metadata: dict[str, Any],
+    manifest_entry: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Report source artifacts whose current bytes differ from the published manifest.
+
+    Re-attestation is only safe when every declared source artifact still hashes
+    to the value recorded at publish time. A `pending` manifest hash is treated
+    as drift because it never proved anything about the source in the first
+    place.
+    """
+    drift: list[dict[str, Any]] = []
+    source_artifacts = metadata.get("source_artifacts", [])
+    if isinstance(source_artifacts, str):
+        source_artifacts = [source_artifacts]
+
+    recorded = manifest_entry.get("source_hashes", {})
+    if not isinstance(recorded, dict):
+        recorded = {}
+
+    for artifact in source_artifacts:
+        if not isinstance(artifact, str) or not artifact.strip():
+            continue
+        artifact_path = Path(artifact.strip())
+        absolute = (project_root / artifact_path).resolve()
+        if not absolute.exists():
+            drift.append({"path": artifact, "reason": "missing_source_artifact"})
+            continue
+
+        manifest_hash = recorded.get(
+            str(artifact_path), recorded.get(artifact_path.as_posix())
+        )
+        if manifest_hash is None:
+            drift.append({"path": artifact, "reason": "missing_in_manifest"})
+            continue
+        if str(manifest_hash).strip().lower() == "pending":
+            drift.append({"path": artifact, "reason": "unproven_pending_hash"})
+            continue
+
+        current_hash = file_sha256(absolute)
+        if str(manifest_hash) != current_hash:
+            drift.append(
+                {
+                    "path": artifact,
+                    "reason": "hash_mismatch",
+                    "manifest": manifest_hash,
+                    "current": current_hash,
+                }
+            )
+
+    return drift
+
+
+def _rewrite_generated_time(page_path: Path, timestamp: str) -> bool:
+    """Replace the `generated_time` marker in place, preserving line endings."""
+    raw = page_path.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.split(newline)
+    pattern = re.compile(r"^(\s*-\s*generated_time\s*:\s*).*$", re.IGNORECASE)
+
+    replaced = False
+    for index, line in enumerate(lines):
+        match = pattern.match(line)
+        if match:
+            lines[index] = f"{match.group(1)}{timestamp}"
+            replaced = True
+            break
+
+    if not replaced:
+        return False
+
+    page_path.write_bytes(newline.join(lines).encode("utf-8"))
+    return True
+
+
+def reattest_wiki(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    manifest_path: Path | None = None,
+) -> dict[str, Any]:
+    """Re-attest wiki pages that are stale only because time passed.
+
+    This closes the publish deadlock recorded in `wiki/gaps/open-gaps.md`:
+    `publish` refuses stale pages, but nothing in the publish path can refresh a
+    page's `generated_time`, so a page that ages past its freshness window can
+    never be republished by its own owner command.
+
+    A page is eligible for re-attestation only when BOTH hold:
+
+    1. its sole outstanding validation issue is `stale_freshness`, and
+    2. every declared source artifact still hashes to the value recorded in the
+       published manifest.
+
+    A page with real source drift, a missing marker, forbidden authority
+    language, or an unproven `pending` hash is refused and reported. This keeps
+    the semantics honest: re-attestation asserts "sources re-verified unchanged",
+    never "content regenerated".
+    """
+    project_root = Path(project_root)
+    if manifest_path is None:
+        manifest_path = project_root / "wiki" / "bootstrap-manifest.json"
+
+    if not manifest_path.exists():
+        return {
+            "schema": REATTEST_SCHEMA,
+            "status": "refused",
+            "reason": "manifest_missing",
+            "manifest_path": str(manifest_path.as_posix()),
+            "reattested": [],
+            "refused": [],
+        }
+
+    try:
+        payload = _load_manifest(manifest_path)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        return {
+            "schema": REATTEST_SCHEMA,
+            "status": "refused",
+            "reason": f"manifest_unreadable:{error}",
+            "manifest_path": str(manifest_path.as_posix()),
+            "reattested": [],
+            "refused": [],
+        }
+
+    report = _validate_manifest_payload(payload, project_root, require_lkg=False)
+    issues_by_page: dict[str, set[str]] = {}
+    for issue in report.issues:
+        page = issue.get("page")
+        if isinstance(page, str):
+            issues_by_page.setdefault(page, set()).add(str(issue.get("type")))
+
+    page_payloads = payload.get("pages", {})
+    if not isinstance(page_payloads, dict):
+        page_payloads = {}
+
+    timestamp = _utc_now()
+    reattested: list[dict[str, Any]] = []
+    refused: list[dict[str, Any]] = []
+
+    for page in _required_page_order(project_root):
+        issue_types = issues_by_page.get(page, set())
+        if not issue_types:
+            continue
+
+        if issue_types != {"stale_freshness"}:
+            refused.append(
+                {
+                    "page": page,
+                    "reason": "blocking_issues",
+                    "detail": sorted(issue_types),
+                }
+            )
+            continue
+
+        page_path = project_root / page
+        if not page_path.exists():
+            refused.append({"page": page, "reason": "missing_page"})
+            continue
+
+        metadata = _parse_markdown_metadata(page_path.read_text(encoding="utf-8"))
+        manifest_entry = page_payloads.get(page, {})
+        if not isinstance(manifest_entry, dict):
+            manifest_entry = {}
+
+        drift = _page_source_drift(project_root, metadata, manifest_entry)
+        if drift:
+            refused.append({"page": page, "reason": "source_drift", "detail": drift})
+            continue
+
+        previous = str(metadata.get("generated_time", "")).strip()
+        if not _rewrite_generated_time(page_path, timestamp):
+            refused.append({"page": page, "reason": "generated_time_marker_missing"})
+            continue
+
+        reattested.append(
+            {"page": page, "previous_generated_time": previous, "generated_time": timestamp}
+        )
+
+    return {
+        "schema": REATTEST_SCHEMA,
+        "status": "refused" if refused else ("reattested" if reattested else "noop"),
+        "manifest_path": str(manifest_path.as_posix()),
+        "generated_time": timestamp,
+        "reattested": reattested,
+        "refused": refused,
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("validate", "publish"),
+        choices=("validate", "publish", "reattest"),
         default="validate",
         nargs="?",
         help="Wiki bootstrap action to run",
@@ -658,6 +848,11 @@ def main() -> int:
         result = validate_wiki(project_root=project_root, manifest_path=manifest_path)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["status"] == "fresh" else 2
+
+    if args.action == "reattest":
+        result = reattest_wiki(project_root=project_root, manifest_path=manifest_path)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["status"] in {"reattested", "noop"} else 2
 
     try:
         result = publish_wiki(project_root=project_root, manifest_path=manifest_path)

@@ -145,5 +145,132 @@ class WikiBootstrapTests(unittest.TestCase):
         self.assertGreaterEqual(len(backups_after), len(backups))
 
 
+    def _age_page(self, relative_path: str, timestamp: str) -> None:
+        """Rewrite a page's generated_time to simulate the passage of time."""
+        path = self.project_root / relative_path
+        content = path.read_text(encoding="utf-8")
+        lines = content.split("\n")
+        for index, line in enumerate(lines):
+            if line.strip().startswith("- generated_time:"):
+                lines[index] = f"- generated_time: {timestamp}"
+                break
+        path.write_text("\n".join(lines), encoding="utf-8")
+
+    def _publish_with_real_hashes(self) -> None:
+        """Publish the fixture wiki.
+
+        `_build_candidate_manifest` always computes real digests, so a normal
+        publish is sufficient; `pending` markers live only in page markdown and
+        never reach the manifest.
+        """
+        self._bootstrap_base_pages()
+        wiki_bootstrap.publish_wiki(project_root=self.project_root)
+
+    def test_reattest_clears_time_only_staleness(self):
+        """A page stale purely from age is re-attested and republishes cleanly."""
+        self._publish_with_real_hashes()
+
+        self._age_page("wiki/index.md", "2026-01-01T00:00:00Z")
+        stale = wiki_bootstrap.validate_wiki(project_root=self.project_root)
+        self.assertEqual("stale", stale["status"])
+        self.assertIn(
+            "stale_freshness", {issue["type"] for issue in stale["issues"]}
+        )
+
+        result = wiki_bootstrap.reattest_wiki(project_root=self.project_root)
+        self.assertEqual("reattested", result["status"])
+        self.assertEqual(
+            ["wiki/index.md"], [entry["page"] for entry in result["reattested"]]
+        )
+        self.assertEqual([], result["refused"])
+
+        # The deadlock is closed: publish now succeeds where it previously could not.
+        publish_report = wiki_bootstrap.publish_wiki(project_root=self.project_root)
+        self.assertEqual("fresh", publish_report["status"])
+
+    def test_reattest_refuses_when_source_actually_changed(self):
+        """Real source drift must NOT be papered over by a timestamp bump."""
+        self._publish_with_real_hashes()
+
+        self._age_page("wiki/index.md", "2026-01-01T00:00:00Z")
+        # Mutate a declared source artifact so the content genuinely diverges.
+        (self.project_root / "AGENTS.md").write_text(
+            "agent identity CHANGED", encoding="utf-8"
+        )
+
+        result = wiki_bootstrap.reattest_wiki(project_root=self.project_root)
+        self.assertEqual("refused", result["status"])
+        self.assertEqual([], result["reattested"])
+
+        refused_pages = {entry["page"] for entry in result["refused"]}
+        self.assertIn("wiki/index.md", refused_pages)
+
+        # The stale timestamp must survive untouched - no silent attestation.
+        content = (self.project_root / "wiki/index.md").read_text(encoding="utf-8")
+        self.assertIn("- generated_time: 2026-01-01T00:00:00Z", content)
+
+    def test_reattest_refuses_pending_hashes(self):
+        """A `pending` hash never proved anything, so it cannot be re-attested.
+
+        A normal publish always writes real digests, so this defends the
+        hand-edited / legacy-manifest case by injecting `pending` directly.
+        """
+        self._publish_with_real_hashes()
+
+        manifest_path = self.project_root / "wiki/bootstrap-manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["pages"]["wiki/index.md"]["source_hashes"]["AGENTS.md"] = "pending"
+        manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        self._age_page("wiki/index.md", "2026-01-01T00:00:00Z")
+        result = wiki_bootstrap.reattest_wiki(project_root=self.project_root)
+
+        self.assertEqual("refused", result["status"])
+        reasons = {
+            detail["reason"]
+            for entry in result["refused"]
+            if entry.get("reason") == "source_drift"
+            for detail in entry.get("detail", [])
+        }
+        self.assertIn("unproven_pending_hash", reasons)
+
+    def test_reattest_is_noop_when_wiki_is_fresh(self):
+        """Nothing stale means nothing to re-attest; timestamps stay put."""
+        self._publish_with_real_hashes()
+        before = (self.project_root / "wiki/index.md").read_text(encoding="utf-8")
+
+        result = wiki_bootstrap.reattest_wiki(project_root=self.project_root)
+
+        self.assertEqual("noop", result["status"])
+        self.assertEqual([], result["reattested"])
+        self.assertEqual([], result["refused"])
+        self.assertEqual(
+            before, (self.project_root / "wiki/index.md").read_text(encoding="utf-8")
+        )
+
+    def test_reattest_preserves_crlf_line_endings(self):
+        """Re-attestation must not rewrite a CRLF page into LF."""
+        self._publish_with_real_hashes()
+
+        path = self.project_root / "wiki/index.md"
+        path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+        self._age_page_crlf(path, "2026-01-01T00:00:00Z")
+
+        result = wiki_bootstrap.reattest_wiki(project_root=self.project_root)
+        self.assertEqual("reattested", result["status"])
+
+        raw = path.read_bytes()
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+
+    def _age_page_crlf(self, path: Path, timestamp: str) -> None:
+        raw = path.read_bytes().decode("utf-8")
+        lines = raw.split("\r\n")
+        for index, line in enumerate(lines):
+            if line.strip().startswith("- generated_time:"):
+                lines[index] = f"- generated_time: {timestamp}"
+                break
+        path.write_bytes("\r\n".join(lines).encode("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
