@@ -19,12 +19,91 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_DIR = PROJECT_ROOT / "derived" / "research"
 POLICY_PATH = PROJECT_ROOT / "state" / "commerce-launch-policy.json"
 
+# `derived/` is gitignored by design (generated output), so on a clean checkout
+# the evidence corpus is legitimately absent and the corpus-dependent tests
+# below must skip. That skip is ONLY acceptable while it stays loud: a silent
+# skip turns this whole file into a green gate that verifies nothing, which is
+# precisely the failure mode the counterfactual exists to detect.
+#
+# The invariants that do NOT depend on generated output are asserted in
+# GateCounterfactualContractTests, which can never skip.
+REQUIRED_RECORDS = (
+    gc.DISCOVERY_RECORD,
+    gc.TOPDAWG_RECORD,
+    gc.DOBA_RECORD,
+    gc.CJ_RECORD,
+)
+
+
+def _missing_records() -> list[str]:
+    """Names of evidence records absent from the working tree."""
+    if not RESEARCH_DIR.exists():
+        return list(REQUIRED_RECORDS)
+    return [name for name in REQUIRED_RECORDS if not (RESEARCH_DIR / name).exists()]
+
+
+class GateCounterfactualContractTests(unittest.TestCase):
+    """Invariants that hold on ANY checkout. These must never skip.
+
+    If the launch policy goes missing or stops parsing, the corpus tests would
+    silently skip and the suite would still be green. These tests are the guard
+    against that: they depend only on committed files.
+    """
+
+    def test_launch_policy_is_committed_and_loadable(self):
+        """The policy is tracked state, not generated output; it must be here."""
+        self.assertTrue(
+            POLICY_PATH.exists(),
+            msg=(
+                f"{POLICY_PATH} is missing. It is authoritative operator-approved "
+                "state referenced by tracked code (scripts/gate_counterfactual.py, "
+                "scripts/product_research_workflow.py) and must be committed, not "
+                "left untracked."
+            ),
+        )
+        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        self.assertEqual("commerce-launch-policy.v1", policy.get("schema"))
+        self.assertIsNotNone(policy.get("min_gross_margin_percent"))
+        self.assertIsNotNone((policy.get("retail_price_usd") or {}).get("min"))
+
+    def test_corpus_absence_is_reported_not_hidden(self):
+        """A missing corpus must be explainable, never silently tolerated.
+
+        This test always runs. It does not require the corpus to exist - only
+        that its absence is detectable and attributable, so a green suite can
+        never be mistaken for a verified one.
+        """
+        missing = _missing_records()
+        self.assertIsInstance(missing, list)
+        if missing:
+            # Not a failure: derived/ is gitignored. But it must be visible.
+            print(
+                "\n[gate_counterfactual] evidence corpus incomplete; "
+                f"{len(missing)}/{len(REQUIRED_RECORDS)} records missing: "
+                f"{missing}. Corpus-dependent assertions are SKIPPED, not passed."
+            )
+
+    def test_empty_corpus_is_refused(self):
+        """An empty corpus must raise, never emit a hollow green baseline."""
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "research"
+            empty.mkdir()
+            with self.assertRaises(gc.CounterfactualError):
+                gc.build_report(research_dir=empty, policy_path=POLICY_PATH)
+
 
 class GateCounterfactualTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not RESEARCH_DIR.exists():
-            raise unittest.SkipTest("WF-1000 evidence corpus not present")
+        missing = _missing_records()
+        if missing:
+            raise unittest.SkipTest(
+                "WF-1000 evidence corpus incomplete - missing "
+                f"{len(missing)}/{len(REQUIRED_RECORDS)} records: {missing}. "
+                "derived/ is gitignored, so this is expected on a clean checkout. "
+                "These assertions are NOT passing, they are skipped. Regenerate "
+                "the corpus to exercise them."
+            )
         cls.report = gc.build_report(
             research_dir=RESEARCH_DIR, policy_path=POLICY_PATH
         )
@@ -102,14 +181,6 @@ class GateCounterfactualTests(unittest.TestCase):
                 row["margin_gate_verdict"],
                 {"passes_margin_gate", "fails_margin_gate"},
             )
-
-    def test_empty_corpus_is_refused(self):
-        """An empty corpus must raise, never emit a hollow green baseline."""
-        with tempfile.TemporaryDirectory() as tmp:
-            empty = Path(tmp) / "research"
-            empty.mkdir()
-            with self.assertRaises(gc.CounterfactualError):
-                gc.build_report(research_dir=empty, policy_path=POLICY_PATH)
 
     def test_corrupt_record_is_refused(self):
         """A malformed evidence record must fail loudly, not silently degrade."""

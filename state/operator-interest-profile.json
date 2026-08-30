@@ -1,0 +1,112 @@
+{
+  "schema": "commerce-interest-profile.v1",
+  "profile_id": "RANDALL-AI-REVENUE-SYSTEMS-2026-08-29",
+  "approved_at": "2026-08-29T00:00:00Z",
+  "approved_by": "operator",
+  "mission": "Build and publicly demonstrate practical AI revenue systems for owner-led businesses.",
+  "primary_audience_ids": [
+    "small_shopify_operators",
+    "solo_ai_builders",
+    "practical_creators"
+  ],
+  "approved_problem_spaces": [
+    "creator_workspace_organization",
+    "product_content_capture",
+    "merchant_operating_station_efficiency"
+  ],
+  "minimum_strategic_fit_score": 70.0,
+  "minimum_content_angles": 5,
+  "operator_fit_statuses": [
+    "approved"
+  ],
+  "required_candidate_fields": [
+    "thesis_id",
+    "audience_id",
+    "problem_space",
+    "problem_statement",
+    "why_operator_cares",
+    "why_customer_cares",
+    "interest_tags",
+    "content_angles",
+    "audience_fit_score",
+    "operator_fit_score",
+    "content_demo_score",
+    "brand_extension_score",
+    "bundle_potential_score",
+    "case_study_value_score",
+    "operator_fit_status",
+    "product_character_tags"
+  ],
+  "strategic_fit_weights": {
+    "audience_fit_score": 0.25,
+    "operator_fit_score": 0.2,
+    "content_demo_score": 0.2,
+    "brand_extension_score": 0.15,
+    "bundle_potential_score": 0.1,
+    "case_study_value_score": 0.1
+  },
+  "approved_theses": [
+    {
+      "thesis_id": "creator-desk-reset",
+      "name": "Creator Desk Reset Kit",
+      "priority": 1,
+      "audience_ids": [
+        "small_shopify_operators",
+        "solo_ai_builders",
+        "practical_creators"
+      ],
+      "problem_spaces": [
+        "creator_workspace_organization"
+      ],
+      "interest_tags": [
+        "ai_operators",
+        "creator_workspaces",
+        "ecommerce_operations"
+      ]
+    },
+    {
+      "thesis_id": "shopify-content-capture",
+      "name": "Shopify Content-Capture Mount Kit",
+      "priority": 2,
+      "audience_ids": [
+        "small_shopify_operators",
+        "practical_creators"
+      ],
+      "problem_spaces": [
+        "product_content_capture"
+      ],
+      "interest_tags": [
+        "creator_workflows",
+        "ecommerce_operations"
+      ]
+    },
+    {
+      "thesis_id": "seller-operations-station",
+      "name": "Seller Operations Station Kit",
+      "priority": 3,
+      "audience_ids": [
+        "small_shopify_operators"
+      ],
+      "problem_spaces": [
+        "merchant_operating_station_efficiency"
+      ],
+      "interest_tags": [
+        "ecommerce_operations",
+        "merchant_productivity"
+      ]
+    }
+  ],
+  "default_excluded_categories": [
+    "pet",
+    "automotive",
+    "kitchen",
+    "garden",
+    "general_home"
+  ],
+  "notes": [
+    "WF-1000 must reject candidates outside an approved thesis before supplier-verification work.",
+    "Strategic fit and commercial viability remain separate scores; one cannot compensate for failure of the other.",
+    "The operator retains a veto over any candidate regardless of score.",
+    "The store is an operating case study for AI revenue systems, not a miscellaneous catalog."
+  ]
+}

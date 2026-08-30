@@ -1,0 +1,108 @@
+{
+  "schema": "commerce-launch-policy.v1",
+  "policy_id": "US-CONSERVATIVE-DTC-2026-08-29",
+  "approved_at": "2026-08-29T00:00:00Z",
+  "approved_by": "operator",
+  "market": "US",
+  "currency": "USD",
+  "retail_price_usd": {
+    "min": 30.0,
+    "max": 80.0
+  },
+  "retail_price_basis": "offer_total",
+  "bundle_rules": {
+    "single_supplier_required": true,
+    "minimum_component_count": 2,
+    "component_retail_price_floor_applies": false,
+    "offer_total_must_pass_all_economic_gates": true
+  },
+  "margin_basis_values": [
+    "landed_cost",
+    "product_cost_only",
+    "supplier_claim_unknown"
+  ],
+  "comparable_margin_basis": "landed_cost",
+  "max_shipping_days": 7,
+  "max_moq": 1,
+  "min_gross_margin_percent": 55.0,
+  "min_pre_ad_contribution_percent": 35.0,
+  "max_margin_reconciliation_delta_percent": 5.0,
+  "evidence_max_age_days": 14,
+  "require_tracking": true,
+  "required_inventory_statuses": [
+    "in_stock"
+  ],
+  "required_warehouse_countries": [
+    "US"
+  ],
+  "sample_budget_usd": 250.0,
+  "sample_shortlist_size": 3,
+  "pilot_product_count": 1,
+  "qualification_modes": {
+    "research": {
+      "max_shortlist_size": 10,
+      "min_product_only_margin_percent": 40.0,
+      "quality_status": "research_candidate"
+    },
+    "organic_sample": {
+      "max_shortlist_size": 3,
+      "min_gross_margin_percent": 45.0,
+      "min_pre_ad_contribution_percent": 35.0,
+      "min_pre_ad_contribution_usd": 20.0,
+      "sample_pending_status": "organic_sample_candidate",
+      "sample_passed_status": "organic_pilot_ready"
+    },
+    "paid_launch": {
+      "max_shortlist_size": 1,
+      "min_gross_margin_percent": 55.0,
+      "min_pre_ad_contribution_percent": 35.0,
+      "min_post_ad_contribution_percent": 10.0,
+      "quality_status": "paid_launch_ready"
+    }
+  },
+  "estimated_cac_rules": {
+    "research_candidate": "unknown_allowed",
+    "organic_sample_candidate": "unknown_allowed_with_warning",
+    "organic_pilot_ready": "unknown_allowed_no_paid_acquisition",
+    "paid_launch_ready": "numeric_required_and_must_leave_minimum_post_ad_contribution"
+  },
+  "product_character_requirements": [
+    "small",
+    "light",
+    "durable",
+    "visually_demonstrable",
+    "solves_obvious_problem"
+  ],
+  "excluded_risk_tags": [
+    "supplement",
+    "medical_claim",
+    "cosmetic",
+    "childrens_product",
+    "weapon",
+    "hazardous_material",
+    "fragile",
+    "counterfeit",
+    "unauthorized_branded",
+    "high_return_sizing",
+    "safety_sensitive_electronics"
+  ],
+  "quality_statuses": {
+    "research_candidate": "The product fits an approved operator thesis and clears the lightweight research economics and product-character gates; production evidence is not complete.",
+    "organic_sample_candidate": "All organic-sample evidence, economics, fulfillment, inventory, and risk gates pass; physical sample is pending.",
+    "organic_pilot_ready": "All organic gates pass and the physical sample has passed operator review; paid acquisition is not authorized.",
+    "paid_launch_ready": "All paid-launch gates pass, including a passed sample and profitable numeric CAC estimate.",
+    "rejected": "One or more production gates failed; the product cannot be selected."
+  },
+  "notes": [
+    "retail_price_usd is the total customer-facing offer price; sub-$30 bundle components are allowed when a one-supplier bundle passes the offer-level gates.",
+    "Supplier margin claims are reconciled only when margin_basis is landed_cost; product-only or unknown-basis claims remain advisory.",
+    "Research and shortlist creation do not authorize ordering, publication, or external messages.",
+    "A product may not be marked organic_pilot_ready or paid_launch_ready until sample_status is passed.",
+    "Supplier identity, return policy, compliance/IP review, and quality evidence state are required production fields.",
+    "Unknown estimated CAC is allowed for research and organic sample selection; paid_launch_ready requires a numeric estimate that leaves at least 10% post-ad contribution.",
+    "The 45% gross-margin threshold applies only to organic sample tests and must also clear both 35% and $20 pre-ad contribution floors.",
+    "The 55% gross-margin threshold remains the paid-launch minimum.",
+    "Authorized branded resale is not excluded solely for being branded; counterfeit and unauthorized branded products remain prohibited.",
+    "Supplier-provided margin is advisory; WF-1000 recomputes economics from row-level costs."
+  ]
+}
