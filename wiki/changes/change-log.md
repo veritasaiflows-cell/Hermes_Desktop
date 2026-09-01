@@ -3,7 +3,7 @@
 - page_type: change_log
 - owner: scripts/wiki_bootstrap.py
 - status: current
-- generated_time: 2026-08-23T06:12:00Z
+- generated_time: 2026-09-01T02:51:06Z
 - source_artifacts:
   - scripts/wiki_bootstrap.py
   - AGENTS.md
