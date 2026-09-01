@@ -86,9 +86,14 @@ The process is deliberately human-gated:
 
 ```bash
 python scripts/feedback_evaluation_loop.py status
+python scripts/feedback_evaluation_loop.py rebaseline <candidate-id> --reviewer operator --reason harness_maintenance
 python scripts/feedback_evaluation_loop.py evaluate <candidate-id>
 python scripts/feedback_evaluation_loop.py decide <candidate-id> --decision accepted --reviewer operator
 ```
+
+`rebaseline` is a human-invoked, pre-candidate maintenance step. It accepts
+only pending candidates and records the previous baseline ID, reviewer, and
+reason; it cannot overwrite evaluated or decided evidence.
 
 `refresh` may create a candidate and baseline only. It never applies source,
 prompt, model, provider, or authority changes. Raw prompts, completions, tool

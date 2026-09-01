@@ -652,6 +652,219 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                 ["feedback-harness-obsolete", feedback_evaluation_loop.COHORT_ID],
             )
 
+    def test_explicit_rebaseline_records_audited_pending_baseline(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-rebaseline"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Rebaseline candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "baseline_recorded",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+                previous_baseline_id = db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps(
+                            {
+                                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                                "result": "pass",
+                                "test_count": 4,
+                                "test_failure_count": 0,
+                                "duration_ms": 100,
+                                "source_fingerprint": "a" * 64,
+                                "tested_commit": "old-baseline",
+                            }
+                        ),
+                        "validated_at": "2026-08-21T04:00:00Z",
+                    },
+                )
+
+            result = feedback_evaluation_loop.rebaseline_candidate(
+                canonical_database=canonical_path,
+                candidate_id=candidate_id,
+                reviewer="operator",
+                reason="harness_maintenance",
+                cohort_runner=lambda: {
+                    "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                    "result": "pass",
+                    "test_count": 5,
+                    "test_failure_count": 0,
+                    "duration_ms": 105,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "fresh-baseline",
+                },
+                now="2026-08-21T05:00:00Z",
+            )
+
+            self.assertEqual(result["phase"], "baseline")
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                baselines = db.connection.execute(
+                    "SELECT evidence_json FROM validation_results "
+                    "WHERE subject_id = ? AND validator = ? ORDER BY validated_at, rowid",
+                    (candidate_id, "feedback_evaluation.baseline.v1"),
+                ).fetchall()
+                event_payload = json.loads(
+                    db.connection.execute(
+                        "SELECT payload_json FROM events WHERE subject_id = ? "
+                        "AND event_type = ?",
+                        (candidate_id, "feedback_candidate_rebaselined"),
+                    ).fetchone()[0]
+                )
+
+            self.assertEqual(task_status, "baseline_recorded")
+            self.assertEqual(len(baselines), 2)
+            self.assertEqual(json.loads(baselines[-1][0])["test_count"], 5)
+            self.assertEqual(
+                event_payload,
+                {
+                    "previous_baseline_validation_id": previous_baseline_id,
+                    "reason": "harness_maintenance",
+                    "reviewer": "operator",
+                },
+            )
+
+    def test_explicit_rebaseline_refuses_evaluated_candidate(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-already-evaluated"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Evaluated candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "evaluated",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+
+            with self.assertRaisesRegex(ValueError, "pending candidate"):
+                feedback_evaluation_loop.rebaseline_candidate(
+                    canonical_database=canonical_path,
+                    candidate_id=candidate_id,
+                    reviewer="operator",
+                    reason="harness_maintenance",
+                    cohort_runner=lambda: self.fail("Evaluated candidates cannot rebaseline."),
+                    now="2026-08-21T05:00:00Z",
+                )
+
+    def test_explicit_rebaseline_refuses_foreign_task_type_or_scope(self):
+        for task_type, scope in (
+            ("implementation", "feedback_evaluation"),
+            ("improvement_candidate", "unrelated_scope"),
+        ):
+            with self.subTest(task_type=task_type, scope=scope):
+                with TemporaryDirectory() as directory:
+                    canonical_path = Path(directory) / "efficiens.db"
+                    candidate_id = "feedback-candidate-foreign-probe"
+                    with CanonicalDB(canonical_path) as db:
+                        db.insert(
+                            "tasks",
+                            {
+                                "task_id": candidate_id,
+                                "title": "Foreign candidate probe",
+                                "task_type": task_type,
+                                "status": "candidate",
+                                "scope": scope,
+                            },
+                        )
+
+                    with self.assertRaisesRegex(ValueError, "requires a feedback"):
+                        feedback_evaluation_loop.rebaseline_candidate(
+                            canonical_database=canonical_path,
+                            candidate_id=candidate_id,
+                            reviewer="operator",
+                            reason="harness_maintenance",
+                            cohort_runner=lambda: self.fail(
+                                "Foreign tasks cannot be rebaselined."
+                            ),
+                            now="2026-08-21T05:00:00Z",
+                        )
+                    with CanonicalDB(canonical_path, read_only=True) as db:
+                        task_status = db.connection.execute(
+                            "SELECT status FROM tasks WHERE task_id = ?",
+                            (candidate_id,),
+                        ).fetchone()[0]
+                        baseline_rows = db.connection.execute(
+                            "SELECT COUNT(*) FROM validation_results WHERE subject_id = ?",
+                            (candidate_id,),
+                        ).fetchone()[0]
+                    self.assertEqual(task_status, "candidate")
+                    self.assertEqual(baseline_rows, 0)
+
+    def test_explicit_rebaseline_aborts_when_candidate_changed_during_cohort(self):
+        with TemporaryDirectory() as directory:
+            canonical_path = Path(directory) / "efficiens.db"
+            candidate_id = "feedback-candidate-concurrent-flip"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Concurrent flip candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "candidate",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+
+            def flipping_cohort_runner():
+                # Simulates a concurrent evaluate/decide flipping the task
+                # status while the rebaseline cohort is running.
+                with CanonicalDB(canonical_path) as db:
+                    db.update("tasks", candidate_id, {"status": "evaluated"})
+                return {
+                    "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                    "result": "pass",
+                    "test_count": 5,
+                    "test_failure_count": 0,
+                    "duration_ms": 105,
+                    "source_fingerprint": "b" * 64,
+                    "tested_commit": "fresh-baseline",
+                }
+
+            with self.assertRaisesRegex(
+                ValueError, "no longer pending; rebaseline aborted"
+            ):
+                feedback_evaluation_loop.rebaseline_candidate(
+                    canonical_database=canonical_path,
+                    candidate_id=candidate_id,
+                    reviewer="operator",
+                    reason="harness_maintenance",
+                    cohort_runner=flipping_cohort_runner,
+                    now="2026-08-21T05:00:00Z",
+                )
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+                baseline_rows = db.connection.execute(
+                    "SELECT COUNT(*) FROM validation_results WHERE subject_id = ?",
+                    (candidate_id,),
+                ).fetchone()[0]
+                event_rows = db.connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE subject_id = ? "
+                    "AND event_type = ?",
+                    (candidate_id, "feedback_candidate_rebaselined"),
+                ).fetchone()[0]
+            self.assertEqual(task_status, "evaluated")
+            self.assertEqual(baseline_rows, 0)
+            self.assertEqual(event_rows, 0)
+
     def test_candidate_evaluation_refuses_failed_baseline(self):
         with TemporaryDirectory() as directory:
             canonical_path = Path(directory) / "efficiens.db"
@@ -937,6 +1150,82 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
             self.assertEqual(len(cohort_calls), 1)
             self.assertEqual(report["created_candidate_count"], 0)
 
+    def test_reopened_rejected_candidate_refreshes_stale_baseline(self):
+        """A post-window recurrence must not reuse the rejected cycle's baseline."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = feedback_evaluation_loop._candidate_id(
+                "turn_api_error:APIConnectionError"
+            )
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "Rejected feedback candidate",
+                        "task_type": "improvement_candidate",
+                        "status": "rejected",
+                        "scope": "feedback_evaluation",
+                        "updated_at": "2026-08-13T04:00:00Z",
+                    },
+                )
+                db.insert(
+                    "validation_results",
+                    {
+                        "subject_type": "improvement_candidate",
+                        "subject_id": candidate_id,
+                        "validator": "feedback_evaluation.baseline.v1",
+                        "result": "pass",
+                        "evidence_json": json.dumps(
+                            {
+                                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                                "result": "pass",
+                                "test_count": 4,
+                                "test_failure_count": 0,
+                                "duration_ms": 100,
+                                "source_fingerprint": "a" * 64,
+                                "tested_commit": "rejected-cycle",
+                            }
+                        ),
+                        "validated_at": "2026-08-13T04:00:00Z",
+                    },
+                )
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            fresh_baseline = {
+                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                "result": "pass",
+                "test_count": 5,
+                "test_failure_count": 0,
+                "duration_ms": 110,
+                "source_fingerprint": "b" * 64,
+                "failure_ids_sha256": "def",
+                "tested_commit": "reopened-cycle",
+            }
+
+            feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                cohort_runner=lambda: fresh_baseline,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            with CanonicalDB(canonical_path, read_only=True) as db:
+                baselines = db.connection.execute(
+                    "SELECT evidence_json FROM validation_results WHERE subject_id = ? "
+                    "AND validator = ? ORDER BY validated_at, rowid",
+                    (candidate_id, "feedback_evaluation.baseline.v1"),
+                ).fetchall()
+                task_status = db.connection.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (candidate_id,)
+                ).fetchone()[0]
+
+            self.assertEqual(task_status, "baseline_recorded")
+            self.assertEqual(len(baselines), 2)
+            self.assertEqual(json.loads(baselines[-1][0])["test_count"], 5)
+
     def test_safe_end_to_end_cycle_records_evidence_and_human_decision(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1211,6 +1500,468 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
                     ).fetchone()[0],
                     "evaluated",
                 )
+
+
+    def test_dropped_error_diagnostics_become_a_repeated_telemetry_signal(self):
+        with TemporaryDirectory() as directory:
+            turn_path = Path(directory) / "turn-metrics.sqlite"
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE turn_metrics (
+                        turn_key TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL,
+                        tool_error_count INTEGER NOT NULL,
+                        tool_error_diagnostics_dropped_count INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.executemany(
+                    "INSERT INTO turn_metrics VALUES (?, ?, ?, ?)",
+                    [
+                        ("turn-a", "2026-08-21T01:00:00Z", 1, 5),
+                        ("turn-b", "2026-08-21T02:00:00Z", 1, 4),
+                        ("turn-c", "2026-08-21T03:00:00Z", 0, 2),
+                        ("turn-old", "2026-08-01T01:00:00Z", 1, 9),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            signals = feedback_evaluation_loop._turn_dropped_diagnostics_signals(
+                turn_path,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(
+                signals,
+                [
+                    {
+                        "signal_key": "turn_telemetry_dropped:dropped_error_diagnostics",
+                        "source": "turn_telemetry",
+                        "category": "dropped_error_diagnostics",
+                        "occurrences": 9,
+                        "affected_turns": 2,
+                        "recommendation": "review_telemetry_observability",
+                    }
+                ],
+            )
+
+    def test_dropped_diagnostics_signal_tolerates_missing_column(self):
+        with TemporaryDirectory() as directory:
+            turn_path = Path(directory) / "turn-metrics.sqlite"
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE turn_metrics (
+                        turn_key TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL,
+                        tool_error_count INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            signals = feedback_evaluation_loop._turn_dropped_diagnostics_signals(
+                turn_path,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(signals, [])
+
+    def test_refresh_report_adds_recommendations_trends_and_history(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            cohort = {
+                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                "result": "pass",
+                "test_count": 1,
+                "test_failure_count": 0,
+                "duration_ms": 1,
+                "source_fingerprint": "abc",
+                "failure_ids_sha256": "def",
+                "tested_commit": "head",
+            }
+            report_path = root / "report.json"
+            history_path = root / "history.jsonl"
+
+            first = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=report_path,
+                history_path=history_path,
+                cohort_runner=lambda: cohort,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertIn("recommendations", first)
+            api_recommendation = next(
+                item
+                for item in first["recommendations"]
+                if item["signal_key"] == "turn_api_error:APIConnectionError"
+            )
+            self.assertEqual(api_recommendation["surface"], "provider_config")
+            self.assertEqual(api_recommendation["rank"], 1)
+            self.assertEqual(
+                first["signal_trends"]["turn_api_error:APIConnectionError"],
+                {"previous_occurrences": None, "occurrences": 3, "delta": None},
+            )
+            history_lines = history_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(history_lines), 1)
+            self.assertEqual(
+                json.loads(history_lines[0])["signal_counts"],
+                {"turn_api_error:APIConnectionError": 3},
+            )
+
+            connection = sqlite3.connect(turn_path)
+            try:
+                for index in (3, 4):
+                    connection.execute(
+                        """
+                        INSERT INTO turn_metrics (
+                            turn_key, completed_at, provider, model, outcome,
+                            error_category, api_error_count, retry_count,
+                            api_request_count, tool_call_count, tool_error_count,
+                            duration_ms, api_duration_ms, tool_duration_ms,
+                            approx_input_tokens
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"turn-{index}",
+                            f"2026-08-21T0{index}:00:00Z",
+                            "openai-codex",
+                            "gpt-5.6-terra",
+                            "complete",
+                            "APIConnectionError",
+                            1,
+                            0,
+                            2,
+                            1,
+                            0,
+                            1000,
+                            900,
+                            50,
+                            1000,
+                        ),
+                    )
+                connection.commit()
+            finally:
+                connection.close()
+
+            second = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=report_path,
+                history_path=history_path,
+                cohort_runner=lambda: cohort,
+                now="2026-08-21T05:00:00Z",
+            )
+
+            self.assertEqual(
+                second["signal_trends"]["turn_api_error:APIConnectionError"],
+                {"previous_occurrences": 3, "occurrences": 5, "delta": 2},
+            )
+            self.assertEqual(
+                json.loads(
+                    history_path.read_text(encoding="utf-8").splitlines()[-1]
+                )["generated_at"],
+                "2026-08-21T05:00:00Z",
+            )
+
+    def test_refresh_tracks_history_only_signal_as_zero(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            turn_path = root / "turn-metrics.sqlite"
+            _seed_turn_metrics(turn_path)
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute("DELETE FROM turn_metrics WHERE turn_key = ?", ("turn-2",))
+                connection.commit()
+            finally:
+                connection.close()
+
+            signal_key = "turn_api_error:APIConnectionError"
+            report_path = root / "report.json"
+            history_path = root / "history.jsonl"
+            history_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "feedback-evaluation-history.v1",
+                        "generated_at": "2026-08-21T04:00:00Z",
+                        "signal_counts": {signal_key: 255},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=report_path,
+                history_path=history_path,
+                cohort_runner=lambda: self.fail("No signal should trigger a baseline."),
+                now="2026-08-21T05:00:00Z",
+            )
+
+            self.assertEqual(report["signals"], [])
+            self.assertEqual(
+                report["signal_trends"],
+                {
+                    signal_key: {
+                        "previous_occurrences": 255,
+                        "occurrences": 0,
+                        "delta": -255,
+                    }
+                },
+            )
+            self.assertEqual(
+                json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])["signal_counts"],
+                {signal_key: 0},
+            )
+
+    def test_refresh_keeps_existing_report_when_history_append_fails(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            report_path = root / "report.json"
+            report_path.write_text('{"status": "previous"}\n', encoding="utf-8")
+
+            with patch.object(
+                feedback_evaluation_loop,
+                "_append_history_line",
+                side_effect=OSError("history unavailable"),
+            ):
+                with self.assertRaisesRegex(OSError, "history unavailable"):
+                    feedback_evaluation_loop.refresh_loop(
+                        canonical_database=canonical_path,
+                        turn_database=root / "turn-metrics.sqlite",
+                        report_path=report_path,
+                        history_path=root / "history.jsonl",
+                        cohort_runner=lambda: self.fail("No signal should trigger a baseline."),
+                        now="2026-08-21T05:00:00Z",
+                    )
+
+            self.assertEqual(
+                json.loads(report_path.read_text(encoding="utf-8")),
+                {"status": "previous"},
+            )
+
+    def test_dropped_diagnostics_signal_creates_review_candidate(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            turn_path = root / "turn-metrics.sqlite"
+            connection = sqlite3.connect(turn_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE turn_metrics (
+                        turn_key TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL,
+                        error_category TEXT,
+                        api_error_count INTEGER NOT NULL,
+                        tool_error_categories_json TEXT,
+                        tool_error_count INTEGER NOT NULL,
+                        tool_error_diagnostics_dropped_count INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.executemany(
+                    "INSERT INTO turn_metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        ("turn-a", "2026-08-21T01:00:00Z", None, 0, None, 1, 5),
+                        ("turn-b", "2026-08-21T02:00:00Z", None, 0, None, 1, 4),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            report = feedback_evaluation_loop.refresh_loop(
+                canonical_database=canonical_path,
+                turn_database=turn_path,
+                report_path=root / "report.json",
+                history_path=root / "history.jsonl",
+                cohort_runner=lambda: {
+                    "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                    "result": "pass",
+                    "test_count": 1,
+                    "test_failure_count": 0,
+                    "duration_ms": 1,
+                    "source_fingerprint": "abc",
+                    "failure_ids_sha256": "def",
+                    "tested_commit": "head",
+                },
+                now="2026-08-21T04:00:00Z",
+            )
+
+            expected_id = feedback_evaluation_loop._candidate_id(
+                "turn_telemetry_dropped:dropped_error_diagnostics"
+            )
+            self.assertEqual(report["candidates"][0]["candidate_id"], expected_id)
+            self.assertEqual(report["candidates"][0]["status"], "baseline_recorded")
+            dropped_recommendation = next(
+                item
+                for item in report["recommendations"]
+                if item["signal_key"] == "turn_telemetry_dropped:dropped_error_diagnostics"
+            )
+            self.assertEqual(
+                dropped_recommendation["surface"], "telemetry_observability"
+            )
+
+    def test_refresh_without_history_path_never_writes_default_history(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path):
+                pass
+            sentinel_history = root / "derived" / "history.jsonl"
+            with patch.object(
+                feedback_evaluation_loop,
+                "DEFAULT_HISTORY_PATH",
+                sentinel_history,
+            ):
+                report = feedback_evaluation_loop.refresh_loop(
+                    canonical_database=canonical_path,
+                    turn_database=root / "turn-metrics.sqlite",
+                    report_path=root / "report.json",
+                    cohort_runner=lambda: {
+                        "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                        "result": "pass",
+                        "test_count": 1,
+                        "test_failure_count": 0,
+                        "duration_ms": 1,
+                        "source_fingerprint": "abc",
+                        "failure_ids_sha256": "def",
+                        "tested_commit": "head",
+                    },
+                    now="2026-08-21T04:00:00Z",
+                )
+            self.assertFalse(sentinel_history.exists())
+            self.assertIsNone(report["source_paths"]["history"])
+            self.assertEqual(report["signal_trends"], {})
+
+    def test_signal_recommendations_route_surfaces_rank_and_summaries(self):
+        signals = [
+            {
+                "signal_key": "turn_api_error:APIConnectionError",
+                "source": "turn_telemetry",
+                "category": "APIConnectionError",
+                "occurrences": 10,
+                "affected_turns": 5,
+                "recommendation": "review_provider_recovery",
+            },
+            {
+                "signal_key": "turn_tool_error:patch_error",
+                "source": "turn_telemetry",
+                "category": "patch_error",
+                "occurrences": 2,
+                "affected_turns": 1,
+                "recommendation": "review_tool_reliability",
+            },
+            {
+                "signal_key": "turn_tool_error:skill_manage_error",
+                "source": "turn_telemetry",
+                "category": "skill_manage_error",
+                "occurrences": 8,
+                "affected_turns": 4,
+                "recommendation": "review_tool_reliability",
+            },
+            {
+                "signal_key": "run_error:unit_tests_failed",
+                "source": "run_metrics",
+                "category": "unit_tests_failed",
+                "occurrences": 3,
+                "affected_turns": 3,
+                "recommendation": "review_regression_failure",
+            },
+        ]
+
+        recommendations = feedback_evaluation_loop._signal_recommendations(signals)
+
+        self.assertEqual(
+            [item["signal_key"] for item in recommendations],
+            [
+                "turn_api_error:APIConnectionError",
+                "turn_tool_error:skill_manage_error",
+                "run_error:unit_tests_failed",
+                "turn_tool_error:patch_error",
+            ],
+        )
+        self.assertEqual([item["rank"] for item in recommendations], [1, 2, 3, 4])
+        self.assertEqual(
+            [item["priority_score"] for item in recommendations], [50, 32, 9, 2]
+        )
+        self.assertEqual(
+            [item["surface"] for item in recommendations],
+            ["provider_config", "skill_procedure", "run_pipeline", "tool_wrapper"],
+        )
+        self.assertTrue(all(item["summary"] for item in recommendations))
+        self.assertEqual(
+            recommendations[1]["occurrences"],
+            8,
+        )
+        self.assertEqual(recommendations[1]["affected_turns"], 4)
+        self.assertEqual(
+            recommendations[1]["recommendation"], "review_tool_reliability"
+        )
+
+    def test_signal_recommendations_default_unknown_categories_to_safe_surfaces(self):
+        signals = [
+            {
+                "signal_key": "turn_tool_error:some_new_failure",
+                "source": "turn_telemetry",
+                "category": "some_new_failure",
+                "occurrences": 4,
+                "affected_turns": 2,
+                "recommendation": "review_tool_reliability",
+            },
+            {
+                "signal_key": "run_error:weird_gate",
+                "source": "run_metrics",
+                "category": "weird_gate",
+                "occurrences": 4,
+                "affected_turns": 2,
+                "recommendation": "review_repeated_run_error",
+            },
+            {
+                "signal_key": "turn_telemetry_dropped:dropped_error_diagnostics",
+                "source": "turn_telemetry",
+                "category": "dropped_error_diagnostics",
+                "occurrences": 4,
+                "affected_turns": 2,
+                "recommendation": "review_telemetry_observability",
+            },
+        ]
+
+        recommendations = feedback_evaluation_loop._signal_recommendations(signals)
+
+        self.assertEqual(
+            [item["surface"] for item in recommendations],
+            ["tool_wrapper", "run_pipeline", "telemetry_observability"],
+        )
+        self.assertTrue(all(item["summary"] for item in recommendations))
+        self.assertEqual(
+            [item["rank"] for item in recommendations], [1, 1, 1]
+        )
 
 
 if __name__ == "__main__":

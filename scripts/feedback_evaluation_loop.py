@@ -33,6 +33,9 @@ DEFAULT_CANONICAL_DATABASE = PROJECT_ROOT / "canonical" / "efficiens.db"
 DEFAULT_TURN_DATABASE = (
     Path.home() / "AppData" / "Local" / "hermes" / "telemetry" / "turn-metrics.sqlite"
 )
+DEFAULT_HISTORY_PATH = (
+    PROJECT_ROOT / "derived" / "feedback-evaluation" / "history.jsonl"
+)
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "derived" / "feedback-evaluation" / "latest.json"
 MIN_REPEATED_SIGNAL_COUNT = 3
 WINDOW_DAYS = 7
@@ -220,6 +223,57 @@ def _turn_tool_error_signals(
     ]
 
 
+def _turn_dropped_diagnostics_signals(
+    turn_database: Path,
+    *,
+    now: str,
+    min_count: int = MIN_REPEATED_SIGNAL_COUNT,
+) -> list[dict[str, object]]:
+    """Return a signal when the loop is silently dropping error diagnostics.
+
+    Dropped diagnostics are an observability blind spot: the loop can look
+    healthy while losing the evidence it needs to classify failures. Only
+    turns with actual errors are counted, so success-diagnostic drops alone
+    do not create review candidates.
+    """
+    if not turn_database.is_file():
+        return []
+    cutoff = (_parse_timestamp(now) - timedelta(days=WINDOW_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    connection = sqlite3.connect(turn_database)
+    try:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(turn_metrics)").fetchall()
+        }
+        if "tool_error_diagnostics_dropped_count" not in columns:
+            return []
+        rows = connection.execute(
+            "SELECT tool_error_diagnostics_dropped_count FROM turn_metrics "
+            "WHERE completed_at >= ? AND tool_error_count > 0 "
+            "AND tool_error_diagnostics_dropped_count > 0",
+            (cutoff,),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    occurrences = sum(max(0, int(row[0] or 0)) for row in rows)
+    affected_turns = len(rows)
+    if occurrences < min_count or affected_turns < 2:
+        return []
+    return [
+        {
+            "signal_key": "turn_telemetry_dropped:dropped_error_diagnostics",
+            "source": "turn_telemetry",
+            "category": "dropped_error_diagnostics",
+            "occurrences": occurrences,
+            "affected_turns": affected_turns,
+            "recommendation": "review_telemetry_observability",
+        }
+    ]
+
+
 def _canonical_error_signals(
     canonical_database: Path,
     *,
@@ -266,21 +320,109 @@ def _canonical_error_signals(
     ]
 
 
+RECOMMENDATION_SURFACE_BY_CATEGORY: dict[str, str] = {
+    "APIConnectionError": "provider_config",
+    "RateLimitError": "provider_config",
+    "NotFoundError": "provider_config",
+    "skill_manage_error": "skill_procedure",
+    "skill_view_error": "skill_procedure",
+    "read_file_missing_path": "skill_procedure",
+    "search_files_invalid_regex": "skill_procedure",
+    "terminal_error": "skill_procedure",
+    "terminal_timeout": "skill_procedure",
+    "patch_error": "tool_wrapper",
+    "web_extract_error": "tool_wrapper",
+    "web_search_error": "tool_wrapper",
+    "execute_code_error": "tool_wrapper",
+    "unit_tests_failed": "run_pipeline",
+    "wiki_not_fresh": "run_pipeline",
+    "dropped_error_diagnostics": "telemetry_observability",
+}
+
+_SURFACE_FALLBACK_BY_PREFIX: dict[str, str] = {
+    "turn_tool_error:": "tool_wrapper",
+    "turn_api_error:": "provider_config",
+    "run_error:": "run_pipeline",
+    "turn_telemetry_dropped:": "telemetry_observability",
+}
+
+_SURFACE_SUMMARY: dict[str, str] = {
+    "provider_config": (
+        "Provider-level failure; review retry/backoff/provider policy. "
+        "Human-gated: no autonomous model/provider changes."
+    ),
+    "skill_procedure": (
+        "Behavioral failure class; capture the working procedure and its "
+        "pitfalls into the governing skill so future sessions pre-check it."
+    ),
+    "tool_wrapper": (
+        "Structural tool failure; fix the wrapper (pre-checks, retry, "
+        "fallback) rather than individual call sites."
+    ),
+    "run_pipeline": (
+        "Pipeline-level failure; review the failing check and its upstream "
+        "producer before changing harness code."
+    ),
+    "telemetry_observability": (
+        "The loop is losing diagnostics; raise retention limits or fix "
+        "collection before trusting silence as success."
+    ),
+}
+
+
+def _signal_recommendations(signals: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Route repeated signals to improvement surfaces with a review priority.
+
+    Metadata-only: this never edits skills, harness code, or provider
+    configuration; it labels where a human-reviewed change should happen.
+    """
+    recommendations: list[dict[str, object]] = []
+    for signal in signals:
+        signal_key = str(signal.get("signal_key") or "")
+        category = str(signal.get("category") or "")
+        surface = RECOMMENDATION_SURFACE_BY_CATEGORY.get(category)
+        if surface is None:
+            for prefix, fallback in _SURFACE_FALLBACK_BY_PREFIX.items():
+                if signal_key.startswith(prefix):
+                    surface = fallback
+                    break
+        if surface is None:
+            surface = "tool_wrapper"
+        occurrences = int(signal.get("occurrences") or 0)
+        affected_turns = int(signal.get("affected_turns") or 0)
+        recommendations.append(
+            {
+                "signal_key": signal_key,
+                "category": category,
+                "surface": surface,
+                "summary": f"'{category}': {_SURFACE_SUMMARY[surface]}",
+                "occurrences": occurrences,
+                "affected_turns": affected_turns,
+                "priority_score": occurrences * affected_turns,
+                "recommendation": str(signal.get("recommendation") or ""),
+            }
+        )
+    recommendations.sort(key=lambda item: -int(item["priority_score"]))
+    rank = 0
+    previous_score: int | None = None
+    for index, item in enumerate(recommendations):
+        score = int(item["priority_score"])
+        if score != previous_score:
+            rank = index + 1
+            previous_score = score
+        item["rank"] = rank
+    return recommendations
+
+
 def _existing_task(db: CanonicalDB, task_id: str) -> dict[str, object] | None:
     row = db.connection.execute(
-        "SELECT task_id, status, scope, updated_at FROM tasks WHERE task_id = ?",
+        "SELECT task_id, task_type, status, scope, updated_at FROM tasks WHERE task_id = ?",
         (task_id,),
     ).fetchone()
     return dict(row) if row is not None else None
 
 
-def _write_baseline(
-    db: CanonicalDB,
-    *,
-    candidate_id: str,
-    cohort_runner: CohortRunner,
-    now: str,
-) -> dict[str, object]:
+def _run_cohort_evidence(cohort_runner: CohortRunner) -> dict[str, object]:
     evidence = dict(cohort_runner())
     required = {
         "cohort_id",
@@ -299,13 +441,35 @@ def _write_baseline(
         raise ValueError("Baseline cohort result must be 'pass' or 'fail'")
     evidence["result"] = result
     evidence["phase"] = "baseline"
+    return evidence
+
+
+def _write_baseline(
+    db: CanonicalDB,
+    *,
+    candidate_id: str,
+    cohort_runner: CohortRunner,
+    now: str,
+) -> dict[str, object]:
+    evidence = _run_cohort_evidence(cohort_runner)
+    _record_baseline_evidence(db, candidate_id=candidate_id, evidence=evidence, now=now)
+    return evidence
+
+
+def _record_baseline_evidence(
+    db: CanonicalDB,
+    *,
+    candidate_id: str,
+    evidence: dict[str, object],
+    now: str,
+) -> None:
     db.insert(
         "validation_results",
         {
             "subject_type": "improvement_candidate",
             "subject_id": candidate_id,
             "validator": "feedback_evaluation.baseline.v1",
-            "result": result,
+            "result": evidence["result"],
             "evidence_json": json.dumps(evidence, sort_keys=True),
             "validated_at": now,
         },
@@ -313,8 +477,81 @@ def _write_baseline(
     db.update(
         "tasks",
         candidate_id,
-        {"status": "baseline_recorded" if result == "pass" else "baseline_failed"},
+        {"status": "baseline_recorded" if evidence["result"] == "pass" else "baseline_failed"},
     )
+
+
+def rebaseline_candidate(
+    *,
+    canonical_database: Path = DEFAULT_CANONICAL_DATABASE,
+    candidate_id: str,
+    reviewer: str,
+    reason: str,
+    cohort_runner: CohortRunner,
+    now: str | None = None,
+) -> dict[str, object]:
+    """Explicitly capture a fresh baseline for a pending candidate.
+
+    Rebaselining is human-invoked before a candidate change. It is unavailable
+    once candidate evidence has been recorded, and preserves the replaced
+    baseline ID in an auditable event.
+    """
+    reviewer_token = _safe_token(reviewer)
+    reason_token = _safe_token(reason)
+    if reviewer_token is None:
+        raise ValueError("rebaseline requires a valid reviewer")
+    if reason_token is None:
+        raise ValueError("rebaseline requires a valid reason")
+    recorded_at = now or _utc_now()
+    with CanonicalDB(Path(canonical_database)) as db:
+        task = _existing_task(db, candidate_id)
+        if task is None:
+            raise ValueError("candidate does not exist")
+        if task["task_type"] != "improvement_candidate":
+            raise ValueError("rebaseline requires a feedback improvement candidate")
+        if task["scope"] != "feedback_evaluation":
+            raise ValueError("rebaseline requires a feedback_evaluation candidate")
+        if task["status"] not in {"candidate", "baseline_recorded", "baseline_failed"}:
+            raise ValueError("rebaseline requires a pending candidate")
+        previous_baseline = _latest_validation(
+            db,
+            candidate_id=candidate_id,
+            validator="feedback_evaluation.baseline.v1",
+        )
+        # Run the cohort first (it can take minutes), then re-check the task
+        # is still pending before any write, so a concurrent decision or
+        # evaluation cannot be silently overwritten by this rebaseline.
+        evidence = _run_cohort_evidence(cohort_runner)
+        current = _existing_task(db, candidate_id)
+        if current is None or current["status"] not in {
+            "candidate",
+            "baseline_recorded",
+            "baseline_failed",
+        }:
+            raise ValueError("candidate is no longer pending; rebaseline aborted")
+        _record_baseline_evidence(db, candidate_id=candidate_id, evidence=evidence, now=recorded_at)
+        db.insert(
+            "events",
+            {
+                "event_type": "feedback_candidate_rebaselined",
+                "subject_type": "improvement_candidate",
+                "subject_id": candidate_id,
+                "payload_json": json.dumps(
+                    {
+                        "previous_baseline_validation_id": (
+                            previous_baseline["validation_id"]
+                            if previous_baseline is not None
+                            else None
+                        ),
+                        "reviewer": reviewer_token,
+                        "reason": reason_token,
+                    },
+                    sort_keys=True,
+                ),
+                "occurred_at": recorded_at,
+                "recorded_at": recorded_at,
+            },
+        )
     return evidence
 
 
@@ -612,21 +849,69 @@ def record_decision(
     return decision_id
 
 
+def _read_latest_history_counts(
+    history_path: Path,
+) -> tuple[dict[str, int] | None, str | None]:
+    """Return (signal_counts, generated_at) of the newest valid history line."""
+    if not history_path.is_file():
+        return None, None
+    try:
+        lines = [
+            line
+            for line in history_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError:
+        return None, None
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+            counts = payload.get("signal_counts")
+            generated_at = payload.get("generated_at")
+            if isinstance(counts, dict) and generated_at:
+                return {
+                    str(key): int(value) for key, value in counts.items()
+                }, str(generated_at)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return None, None
+
+
+def _append_history_line(history_path: Path, entry: dict[str, object]) -> None:
+    """Append one refresh snapshot to the history log (never rewritten)."""
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
 def refresh_loop(
     *,
     canonical_database: Path = DEFAULT_CANONICAL_DATABASE,
     turn_database: Path = DEFAULT_TURN_DATABASE,
     report_path: Path = DEFAULT_REPORT_PATH,
+    history_path: Path | None = None,
     cohort_runner: CohortRunner,
     now: str | None = None,
 ) -> dict[str, object]:
-    """Aggregate repeated safe signals and record baseline-only review candidates."""
+    """Aggregate repeated safe signals and record baseline-only review candidates.
+
+    ``history_path`` is deliberately ``None``-defaulted: only the CLI (an
+    explicit operator action) writes history, so library and test calls can
+    never touch the production history file.
+    """
     generated_at = now or _utc_now()
+    history_target = Path(history_path) if history_path is not None else None
     signals = [
         *_canonical_error_signals(Path(canonical_database), now=generated_at),
         *_turn_error_signals(Path(turn_database), now=generated_at),
         *_turn_tool_error_signals(Path(turn_database), now=generated_at),
+        *_turn_dropped_diagnostics_signals(Path(turn_database), now=generated_at),
     ]
+    previous_counts = (
+        _read_latest_history_counts(history_target)[0]
+        if history_target is not None
+        else None
+    )
     candidates: list[dict[str, object]] = []
     created_count = 0
     baseline_cache: dict[str, object] | None = None
@@ -667,6 +952,7 @@ def refresh_loop(
                 created_count += 1
                 task = {"task_id": candidate_id, "status": "candidate"}
 
+            reopened = False
             if task["status"] == "accepted":
                 continue
 
@@ -704,6 +990,7 @@ def refresh_loop(
                     },
                 )
                 task = {"task_id": candidate_id, "status": "candidate"}
+                reopened = True
 
             baseline = None
             latest_baseline = _latest_validation(
@@ -724,7 +1011,10 @@ def refresh_loop(
                 and latest_baseline["result"] == "pass"
                 and baseline_cohort_id == COHORT_ID
             )
-            if task["status"] != "evaluated" and not baseline_is_current:
+            # A rejected candidate that recurs after the window begins a new
+            # review cycle. Its prior cohort evidence belongs to the rejected
+            # cycle, so the reopened candidate must receive a fresh baseline.
+            if task["status"] != "evaluated" and (reopened or not baseline_is_current):
                 baseline = _write_baseline(
                     db,
                     candidate_id=candidate_id,
@@ -758,6 +1048,29 @@ def refresh_loop(
     failed_candidate_count = sum(
         1 for candidate in candidates if candidate["status"] == "baseline_failed"
     )
+    signal_counts = (
+        {str(signal_key): 0 for signal_key in previous_counts}
+        if previous_counts is not None
+        else {}
+    )
+    signal_counts.update(
+        {
+            str(signal["signal_key"]): int(signal["occurrences"])
+            for signal in signals
+        }
+    )
+    signal_trends: dict[str, dict[str, int | None]] = {}
+    for signal_key, occurrences in signal_counts.items():
+        previous = (
+            None
+            if previous_counts is None
+            else int(previous_counts.get(signal_key, 0))
+        )
+        signal_trends[signal_key] = {
+            "previous_occurrences": previous,
+            "occurrences": occurrences,
+            "delta": None if previous is None else occurrences - previous,
+        }
     report: dict[str, object] = {
         "schema": "feedback-evaluation-report.v1",
         "generated_at": generated_at,
@@ -769,14 +1082,28 @@ def refresh_loop(
             else "review_required" if candidates else "ready"
         ),
         "signals": signals,
+        "signal_trends": signal_trends,
+        "recommendations": _signal_recommendations(signals),
         "candidates": candidates,
         "created_candidate_count": created_count,
         "failed_candidate_count": failed_candidate_count,
         "source_paths": {
             "canonical_database": str(Path(canonical_database).resolve()),
             "turn_database": str(Path(turn_database).resolve()),
+            "history": (
+                str(history_target.resolve()) if history_target is not None else None
+            ),
         },
     }
+    if history_target is not None:
+        _append_history_line(
+            history_target,
+            {
+                "schema": "feedback-evaluation-history.v1",
+                "generated_at": generated_at,
+                "signal_counts": signal_counts,
+            },
+        )
     _atomic_write_json(Path(report_path), report)
     return report
 
@@ -788,6 +1115,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     def add_storage_arguments(command: argparse.ArgumentParser, *, turn: bool = False) -> None:
         command.add_argument("--database", type=Path, default=DEFAULT_CANONICAL_DATABASE)
         command.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
+        command.add_argument("--history", type=Path, default=DEFAULT_HISTORY_PATH)
         if turn:
             command.add_argument("--turn-database", type=Path, default=DEFAULT_TURN_DATABASE)
 
@@ -796,6 +1124,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     status = commands.add_parser("status", help="read feedback/evaluation freshness and review state")
     add_storage_arguments(status)
+
+    rebaseline = commands.add_parser(
+        "rebaseline",
+        help="explicitly renew a pending candidate baseline before candidate changes",
+    )
+    rebaseline.add_argument("candidate_id")
+    rebaseline.add_argument("--reviewer", required=True)
+    rebaseline.add_argument("--reason", required=True)
+    rebaseline.add_argument("--database", type=Path, default=DEFAULT_CANONICAL_DATABASE)
 
     evaluate = commands.add_parser("evaluate", help="run the fixed cohort for one prepared candidate")
     evaluate.add_argument("candidate_id")
@@ -817,12 +1154,21 @@ def main(argv: list[str] | None = None) -> int:
                 canonical_database=arguments.database,
                 turn_database=arguments.turn_database,
                 report_path=arguments.report,
+                history_path=arguments.history,
                 cohort_runner=run_fixed_cohort,
             )
         elif arguments.command == "status":
             payload = feedback_status(
                 canonical_database=arguments.database,
                 report_path=arguments.report,
+            )
+        elif arguments.command == "rebaseline":
+            payload = rebaseline_candidate(
+                canonical_database=arguments.database,
+                candidate_id=arguments.candidate_id,
+                reviewer=arguments.reviewer,
+                reason=arguments.reason,
+                cohort_runner=run_fixed_cohort,
             )
         elif arguments.command == "evaluate":
             payload = evaluate_candidate(

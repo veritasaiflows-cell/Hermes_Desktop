@@ -110,6 +110,7 @@ A2-full correctness telemetry + profile-local turn telemetry
   -> A8 `feedback_evaluation_loop.py refresh`
   -> derived/feedback-evaluation/latest.json
   -> canonical tasks + baseline validation_results + events
+  -> explicit human `rebaseline` for a pending candidate after harness maintenance and before candidate work
   -> explicit `evaluate` against the fixed feedback-harness-v2 cohort
   -> explicit human `decide`
   -> canonical decisions/events history
@@ -119,12 +120,16 @@ Repeated category-only signals require at least three observations in seven
 days. A8 can create candidates and baselines, but cannot evaluate a prepared
 change, accept/reject it, alter source code, or change model/provider settings.
 Those actions require explicit CLI invocation and existing workspace approval
-rules. `accepted` requires passing baseline and candidate cohort evidence with
-no additional test failures, identical test count, and no more than 20% cohort
-duration regression. Candidate evaluation pins the exact baseline validation ID,
-so a later baseline row cannot silently change the decision comparison. A failed
-or zero-test baseline makes A8 exit nonzero, remains visible as `baseline_failed`,
-and is retried by the next refresh. A5 fails closed on timeout or malformed router
+rules. `rebaseline <candidate-id> --reviewer <token> --reason <token>` is the
+explicit human path for a pending candidate whose harness baseline must be
+renewed after maintenance and before the candidate change. It rejects evaluated
+or decided candidates and records the replaced baseline validation ID, reviewer,
+and reason in the event history. `accepted` requires passing baseline and
+candidate cohort evidence with no additional test failures, identical test count,
+and no more than 20% cohort duration regression. Candidate evaluation pins the
+exact baseline validation ID, so a later baseline row cannot silently change the
+decision comparison. A failed or zero-test baseline makes A8 exit nonzero,
+remains visible as `baseline_failed`, and is retried by the next refresh. A5 fails closed on timeout or malformed router
 JSON. A12 invokes it after every completed refresh and best-effort after exceptions,
 so partial or degraded retrieval changes cannot silently leave routing stale.
 
