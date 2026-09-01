@@ -22,7 +22,7 @@
   "display_name": "Workflow E - AI Agent Trust Audit",
   "effective_status": "active",
   "freshness_sla": "weekly",
-  "generated_at": "2026-08-30T04:29:20Z",
+  "generated_at": "2026-09-01T03:35:45Z",
   "graph_dependency_blockers": [],
   "helper_safe": true,
   "human_approval_owner": "operator",
