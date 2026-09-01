@@ -311,6 +311,7 @@ def _canonical_error_signals(
             "source": "run_metrics",
             "category": category,
             "occurrences": count,
+            "affected_turns": count,
             "recommendation": recommendation_by_category.get(
                 category, "review_repeated_run_error"
             ),
@@ -866,6 +867,8 @@ def _read_latest_history_counts(
     for line in reversed(lines):
         try:
             payload = json.loads(line)
+            if not isinstance(payload, dict):
+                continue
             counts = payload.get("signal_counts")
             generated_at = payload.get("generated_at")
             if isinstance(counts, dict) and generated_at:
@@ -1191,6 +1194,11 @@ def main(argv: list[str] | None = None) -> int:
             }
     except Exception as exc:
         print(json.dumps({"status": "error", "error": type(exc).__name__}, sort_keys=True))
+        return 1
+    if (
+        arguments.command == "rebaseline"
+        and str(payload.get("result")) != "pass"
+    ):
         return 1
     print(json.dumps(payload, sort_keys=True))
     return 0

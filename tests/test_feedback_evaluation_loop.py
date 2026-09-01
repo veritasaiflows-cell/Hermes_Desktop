@@ -865,6 +865,103 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
             self.assertEqual(baseline_rows, 0)
             self.assertEqual(event_rows, 0)
 
+    def test_rebaseline_cli_fails_closed_on_failed_cohort(self):
+        """A failed rebaseline cohort must exit nonzero even though the
+        baseline row is recorded as baseline_failed."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = "feedback-candidate-cli-fail-closed"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "CLI fail-closed probe",
+                        "task_type": "improvement_candidate",
+                        "status": "candidate",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+            cohort = {
+                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                "result": "fail",
+                "test_count": 5,
+                "test_failure_count": 1,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "cli-fail",
+            }
+
+            exit_code = None
+            with patch.object(
+                feedback_evaluation_loop,
+                "run_fixed_cohort",
+                side_effect=lambda: cohort,
+            ):
+                with redirect_stdout(io.StringIO()):
+                    exit_code = feedback_evaluation_loop.main(
+                        [
+                            "rebaseline",
+                            candidate_id,
+                            "--reviewer",
+                            "operator",
+                            "--reason",
+                            "harness_maintenance",
+                            "--database",
+                            str(canonical_path),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 1)
+
+    def test_rebaseline_cli_exits_zero_on_passing_cohort(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            candidate_id = "feedback-candidate-cli-pass"
+            with CanonicalDB(canonical_path) as db:
+                db.insert(
+                    "tasks",
+                    {
+                        "task_id": candidate_id,
+                        "title": "CLI pass probe",
+                        "task_type": "improvement_candidate",
+                        "status": "candidate",
+                        "scope": "feedback_evaluation",
+                    },
+                )
+            cohort = {
+                "cohort_id": feedback_evaluation_loop.COHORT_ID,
+                "result": "pass",
+                "test_count": 5,
+                "test_failure_count": 0,
+                "duration_ms": 100,
+                "source_fingerprint": "a" * 64,
+                "tested_commit": "cli-pass",
+            }
+
+            with patch.object(
+                feedback_evaluation_loop,
+                "run_fixed_cohort",
+                side_effect=lambda: cohort,
+            ):
+                with redirect_stdout(io.StringIO()):
+                    exit_code = feedback_evaluation_loop.main(
+                        [
+                            "rebaseline",
+                            candidate_id,
+                            "--reviewer",
+                            "operator",
+                            "--reason",
+                            "harness_maintenance",
+                            "--database",
+                            str(canonical_path),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 0)
+
     def test_candidate_evaluation_refuses_failed_baseline(self):
         with TemporaryDirectory() as directory:
             canonical_path = Path(directory) / "efficiens.db"
@@ -1962,6 +2059,64 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
         self.assertEqual(
             [item["rank"] for item in recommendations], [1, 1, 1]
         )
+
+    def test_canonical_error_signals_include_affected_turns(self):
+        """Run-metric signals must carry affected_runs so pipeline failures
+        are not deprioritized to priority_score=0 in recommendations."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_path = root / "efficiens.db"
+            with CanonicalDB(canonical_path) as db:
+                for index in range(3):
+                    db.record_run(
+                        request_type="run_checks",
+                        errors_json=["unit_tests_failed"],
+                        verification_result="fail",
+                        acceptance_status="rejected",
+                        started_at=f"2026-08-21T0{index}:00:00Z",
+                    )
+
+            signals = feedback_evaluation_loop._canonical_error_signals(
+                canonical_path,
+                now="2026-08-21T04:00:00Z",
+            )
+
+            self.assertEqual(len(signals), 1)
+            self.assertEqual(signals[0]["category"], "unit_tests_failed")
+            self.assertEqual(signals[0]["affected_turns"], 3)
+            recommendations = feedback_evaluation_loop._signal_recommendations(signals)
+            self.assertEqual(recommendations[0]["priority_score"], 9)
+
+    def test_history_reader_skips_non_object_and_malformed_lines(self):
+        """Malformed or non-object history lines must never block refreshes."""
+        with TemporaryDirectory() as directory:
+            history_path = Path(directory) / "history.jsonl"
+            history_path.write_text(
+                "\n".join(
+                    [
+                        "[]",
+                        "null",
+                        '"a string"',
+                        "not json at all",
+                        json.dumps(
+                            {
+                                "schema": "feedback-evaluation-history.v1",
+                                "generated_at": "2026-08-21T04:00:00Z",
+                                "signal_counts": {"run_error:unit_tests_failed": 3},
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            counts, generated_at = feedback_evaluation_loop._read_latest_history_counts(
+                history_path
+            )
+
+            self.assertEqual(counts, {"run_error:unit_tests_failed": 3})
+            self.assertEqual(generated_at, "2026-08-21T04:00:00Z")
 
 
 if __name__ == "__main__":
