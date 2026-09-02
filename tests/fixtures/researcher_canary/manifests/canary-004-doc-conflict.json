@@ -1,0 +1,51 @@
+{
+  "schema": "researcher-canary-case.v1",
+  "case_id": "canary-004-doc-conflict",
+  "task_class": "doc_conflict",
+  "profile": "researchercanary",
+  "model": "gpt-5.6-luna",
+  "provider": "openai-codex",
+  "pack_root": "packs/canary-004-doc-conflict",
+  "timeout_seconds": 900,
+  "task_instructions": "For backup retention and restore confirmation, report the values the code and tests actually enforce (the behavioral authority), not the runbook claims.",
+  "finding_specs": [
+    {
+      "id": "retention-days-enforced",
+      "kind": "string",
+      "description": "the retention period the code and test actually enforce (e.g. '30 days')"
+    },
+    {
+      "id": "restore-requires-confirm",
+      "kind": "string",
+      "description": "the exact flag the restore command requires (e.g. '--confirm')"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "repo/retention-docs.md",
+      "sha256": "9f9ca404610df0c8240f9a9a02ddbfa7ed900e0c5f1cf200a0049e5cd96bfa41"
+    }
+  ],
+  "expected_findings": [
+    {
+      "id": "retention-days-enforced",
+      "value": "30 days",
+      "citations": [
+        {
+          "path": "repo/retention-docs.md",
+          "contains": "prunes backups older than 30 days"
+        }
+      ]
+    },
+    {
+      "id": "restore-requires-confirm",
+      "value": "--confirm",
+      "citations": [
+        {
+          "path": "repo/retention-docs.md",
+          "contains": "requires an explicit --confirm flag"
+        }
+      ]
+    }
+  ]
+}

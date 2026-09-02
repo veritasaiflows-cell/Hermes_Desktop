@@ -1,0 +1,66 @@
+{
+  "schema": "researcher-canary-case.v1",
+  "case_id": "canary-005-scoped-audit",
+  "task_class": "scoped_audit",
+  "profile": "researchercanary",
+  "model": "gpt-5.6-luna",
+  "provider": "openai-codex",
+  "pack_root": "packs/canary-005-scoped-audit",
+  "timeout_seconds": 900,
+  "task_instructions": "Within the audit scope ONLY (duplicate rows, negative amounts, invalid currency codes), report each defect with an exact citation. Out-of-scope conclusions must not be reported as findings.",
+  "finding_specs": [
+    {
+      "id": "duplicate-rows",
+      "kind": "string",
+      "description": "the duplicate invoice rows, exactly as they appear (the duplicated '2026-02-10,1150.00,USD' row)"
+    },
+    {
+      "id": "negative-amount",
+      "kind": "string",
+      "description": "the negative-amount row exactly as it appears"
+    },
+    {
+      "id": "invalid-currency",
+      "kind": "string",
+      "description": "the invalid currency row exactly as it appears"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "repo/audit-scope.md",
+      "sha256": "28b5c8a47eb186695ac51805e8f664ff13e0e9c9f7ec88dc71212c955387bf24"
+    }
+  ],
+  "expected_findings": [
+    {
+      "id": "duplicate-rows",
+      "value": "2026-02-10,1150.00,USD",
+      "citations": [
+        {
+          "path": "repo/audit-scope.md",
+          "contains": "2026-02-10,1150.00,USD   <- duplicate of the row above"
+        }
+      ]
+    },
+    {
+      "id": "negative-amount",
+      "value": "2026-02-17,-40.00,USD",
+      "citations": [
+        {
+          "path": "repo/audit-scope.md",
+          "contains": "2026-02-17,-40.00,USD    <- negative amount (refund posted as invoice)"
+        }
+      ]
+    },
+    {
+      "id": "invalid-currency",
+      "value": "2026-03-31,1025.00,GBR",
+      "citations": [
+        {
+          "path": "repo/audit-scope.md",
+          "contains": "2026-03-31,1025.00,GBR   <- invalid currency code (should be GBP)"
+        }
+      ]
+    }
+  ]
+}
