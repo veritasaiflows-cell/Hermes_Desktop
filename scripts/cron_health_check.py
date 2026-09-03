@@ -14,9 +14,10 @@ Checks performed:
   2. python scripts/wiki_bootstrap.py validate  (wiki manifest integrity)
   3. python scripts/cron_alias_sweep.py  (alias consistency)
   4. python scripts/cron_registration_validator.py  (cron targets exist)
-  5. python scripts/graph_memory.py validate  (graph orphan/contradiction sweep)
-  6. python scripts/cron_graph_freshness.py  (graph coverage drift)
-  7. python scripts/vector_memory_index.py status  (recall index non-empty)
+  5. python scripts/vector_memory_index.py status  (recall index non-empty)
+
+Graph depth checks (orphan sweep, coverage drift) intentionally live on the
+hourly A10 job and the A11 brief, not here: one drift should page one job.
 
 This is NOT a code-correctness gate. The full unit/smoke suite is run by
 cron_test_gate.py (separate schedule). A2 is a fast operational liveness
@@ -24,8 +25,10 @@ probe for the live control plane.
 
 Stale wiki is NOT a hard failure on the watchdog path -- it is reported
 as a soft "stale" status so the daily A1 regen can correct it without
-alerting. Hard failures are routing errors, alias drift, graph integrity
-or coverage drift, empty recall index, and uncaught exceptions.
+alerting. A stale (but populated) vector index is likewise soft: A12
+refreshes it every 6h and source-direct fallback exists. Hard failures are
+routing errors, alias drift, cron registration drift, an empty or missing
+recall index, and uncaught exceptions.
 """
 from __future__ import annotations
 
@@ -129,46 +132,40 @@ def main() -> int:
         }
     )
 
-    # 5. Graph integrity sweep -- hard gate (orphan edges or duplicate active
-    #    triples mean the durable graph has drifted from canonical state).
-    graph = _run("graph_validate", ["scripts/graph_memory.py", "validate"])
-    graph_code = graph["exit"]
-    results.append(
-        {
-            "check": "graph_validate",
-            "exit": graph_code,
-            "passed": graph_code == 0,
-            "stderr_tail": graph["stderr"].strip().splitlines()[-3:] if graph["stderr"].strip() else [],
-        }
-    )
-
-    # 6. Graph coverage drift -- hard gate (canonical records that should have
-    #    edges but do not, e.g. a workflow run whose output is not wired).
-    graph_freshness = _run("graph_freshness", ["scripts/cron_graph_freshness.py"])
-    graph_freshness_code = graph_freshness["exit"]
-    results.append(
-        {
-            "check": "graph_freshness",
-            "exit": graph_freshness_code,
-            "passed": graph_freshness_code == 0,
-            "stderr_tail": graph_freshness["stderr"].strip().splitlines()[-3:] if graph_freshness["stderr"].strip() else [],
-        }
-    )
-
-    # 7. Vector memory index non-empty -- hard gate (recall must be populated).
+    # 5. Vector memory index -- hard gate only when empty or missing. A stale
+    #    but populated index is a soft warning (A12 refreshes every 6h and
+    #    source-direct fallback exists), mirroring the wiki-stale policy.
+    #    Graph depth checks (orphan sweep, coverage drift) intentionally
+    #    live on the hourly A10 job and the A11 brief, not here.
     vector_status = _run("vector_memory_status", ["scripts/vector_memory_index.py", "status"])
     vector_code = vector_status["exit"]
-    vector_document_count = 0
-    if vector_code == 0 and vector_status["stdout"].strip():
+    vector_payload: dict = {}
+    if vector_status["stdout"].strip():
         try:
-            vector_document_count = json.loads(vector_status["stdout"]).get("document_count", 0)
+            parsed = json.loads(vector_status["stdout"])
+            if isinstance(parsed, dict):
+                vector_payload = parsed
         except json.JSONDecodeError:
             pass
+    vector_document_count = vector_payload.get("document_count", 0)
+    if not isinstance(vector_document_count, int):
+        vector_document_count = 0
+    vector_stale_signal = (
+        vector_payload.get("status") in {"stale", "degraded"}
+        or (
+            isinstance(vector_payload.get("stale_source_count"), int)
+            and vector_payload["stale_source_count"] > 0
+        )
+    )
+    vector_populated = vector_document_count > 0
+    vector_passed = vector_code == 0 and vector_populated
+    vector_soft = vector_stale_signal and vector_populated and not vector_passed
     results.append(
         {
             "check": "vector_memory_status",
             "exit": vector_code,
-            "passed": vector_code == 0 and vector_document_count > 0,
+            "passed": vector_passed or vector_soft,
+            "stale": vector_soft,
             "document_count": vector_document_count,
             "stderr_tail": vector_status["stderr"].strip().splitlines()[-3:] if vector_status["stderr"].strip() else [],
         }
@@ -178,11 +175,10 @@ def main() -> int:
         "routing",
         "alias_sweep",
         "cron_registration",
-        "graph_validate",
-        "graph_freshness",
         "vector_memory_status",
     }]
     soft_warn = [r for r in results if r["check"] == "wiki_validate" and wiki_status == "stale"]
+    soft_warn.extend(r for r in results if r["check"] == "vector_memory_status" and r.get("stale"))
 
     if hard_fail:
         print(f"HEALTH FAIL {now}")
@@ -192,7 +188,8 @@ def main() -> int:
     # Green path: keep STDOUT EMPTY so a no_agent cron stays silent. The OK
     # line goes to stderr for log trails only (not delivered).
     if soft_warn:
-        print(f"HEALTH OK (wiki stale) {now}", file=sys.stderr)
+        names = ",".join(r["check"] for r in soft_warn)
+        print(f"HEALTH OK (soft warnings: {names}) {now}", file=sys.stderr)
         return 0
 
     print(f"HEALTH OK {now}", file=sys.stderr)

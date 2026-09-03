@@ -7,7 +7,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -81,17 +81,18 @@ class BlockingLaneScanTests(unittest.TestCase):
 
 class PreflightMainTests(unittest.TestCase):
 
-    def test_defers_with_exit_2_when_blocking(self):
+    def test_defers_silently_with_exit_0_when_blocking(self):
         with patch.object(
             cron_test_gate, "_active_write_lanes_blocking",
             return_value=[{"lane_id": "x", "owner": "o", "status": "running"}],
         ):
-            buf = io.StringIO()
-            with redirect_stdout(buf):
+            out = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
                 rc = cron_test_gate.main()
-        self.assertEqual(rc, 2)
-        self.assertIn("TEST GATE DEFERRED", buf.getvalue())
-        self.assertIn('"blocking_lanes"', buf.getvalue())
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("TEST GATE DEFERRED", err.getvalue())
 
     def test_runs_suite_when_clear(self):
         class FakeCompleted:

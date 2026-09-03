@@ -9,6 +9,7 @@ It reads authoritative local sources only and does not mutate state.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -25,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.workspace_fingerprint import correctness_snapshot
+from scripts.workspace_fingerprint import correctness_snapshot, correctness_sources, git_commit
 from canonical.db import read_only_database_uri
 
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state"
@@ -72,6 +73,40 @@ _GATES_ENV = os.environ.get("WORKSPACE_STATUS_GATES")
 GATES: list[tuple[str, list[str], int]] = (
     json.loads(_GATES_ENV) if _GATES_ENV else DEFAULT_GATES
 )
+
+# Fast startup tier: the minimum gates for trustworthy session orientation.
+# Heavier or heartbeat-covered gates (alias, cron_registration,
+# feedback_evaluation, claim_drift, graph_*, graphify, vector_memory,
+# workspace_index, archive_stale) stay in the full brief and the A11 cron
+# heartbeat. The fast routing gate allows cache reads (no --no-cache) since
+# A5 refreshes the index hourly.
+FAST_GATE_LABELS = ("organization", "routing", "wiki", "lane_register")
+
+
+def fast_gates() -> list[tuple[str, list[str], int]]:
+    """Return the startup-tier subset of DEFAULT_GATES in declared order."""
+    selected: list[tuple[str, list[str], int]] = []
+    for label, args, timeout in DEFAULT_GATES:
+        if label not in FAST_GATE_LABELS:
+            continue
+        if label == "routing":
+            args = [arg for arg in args if arg != "--no-cache"]
+        selected.append((label, args, timeout))
+    return selected
+
+
+def _is_stale_index_signal(stdout: Any) -> bool:
+    """Return whether an index gate payload reports staleness, not corruption.
+
+    Stale indexes have a source-direct fallback, so they warn; missing or
+    corrupt indexes still fail hard.
+    """
+    if not isinstance(stdout, dict):
+        return False
+    if stdout.get("status") in {"stale", "degraded"}:
+        return True
+    stale_count = stdout.get("stale_source_count")
+    return isinstance(stale_count, int) and stale_count > 0
 
 
 def _run(label: str, args: list[str], timeout: int, project_root: Path = PROJECT_ROOT) -> dict:
@@ -135,29 +170,33 @@ def _run_gates(
 
 
 def _git_head() -> dict:
+    """Collect branch, short commit, and worktree status in two git forks."""
     try:
-        branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip()
-        short = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip()
-        status = subprocess.run(
+        status_proc = subprocess.run(
             ["git", "status", "--short", "--branch"],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
             timeout=30,
-        ).stdout.strip()
-        return {"branch": branch, "commit_short": short, "status_lines": status.splitlines()}
+        )
+        rev_proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        status_lines = status_proc.stdout.strip().splitlines()
+        branch = "unknown"
+        if status_lines and status_lines[0].startswith("##"):
+            branch = status_lines[0][2:].split("...")[0].strip()
+            prefix = "No commits yet on "
+            if branch.startswith(prefix):
+                branch = branch[len(prefix):]
+            if not branch:
+                branch = "unknown"
+        short = rev_proc.stdout.strip() if rev_proc.returncode == 0 else ""
+        return {"branch": branch, "commit_short": short, "status_lines": status_lines}
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -194,6 +233,63 @@ def _routing_brief(routing_gate: dict) -> dict:
             for w in workflows
         ],
     }
+
+
+_FINGERPRINT_CACHE_NAME = "workspace-fingerprint-cache.json"
+
+
+def _fingerprint_cache_path(project_root: Path) -> Path:
+    return Path(project_root).resolve() / "tmp" / _FINGERPRINT_CACHE_NAME
+
+
+def _cached_correctness_snapshot(project_root: Path) -> dict[str, Any]:
+    """Return correctness_snapshot(), reusing a cache when sources are untouched.
+
+    The cache key is the per-file (mtime_ns, size) map over the fingerprinted
+    sources. Content is re-hashed only when the file set or any mtime/size
+    changes; a missing or corrupt cache fails open to a full recompute. The
+    tested commit is always read fresh since it never affects the fingerprint.
+    """
+    root = Path(project_root).resolve()
+    try:
+        stats = {}
+        for path in correctness_sources(root):
+            file_stat = path.stat()
+            stats[path.relative_to(root).as_posix()] = [file_stat.st_mtime_ns, file_stat.st_size]
+    except (OSError, ValueError):
+        return correctness_snapshot(project_root)
+    cache_path = _fingerprint_cache_path(root)
+    try:
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(cached, dict)
+            and cached.get("files") == stats
+            and isinstance(cached.get("source_fingerprint"), str)
+            and cached.get("source_file_count") == len(stats)
+        ):
+            return {
+                "source_fingerprint": cached["source_fingerprint"],
+                "source_file_count": len(stats),
+                "tested_commit": git_commit(root),
+            }
+    except (OSError, ValueError, KeyError, AttributeError):
+        pass
+    snapshot = correctness_snapshot(project_root)
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "source_fingerprint": snapshot["source_fingerprint"],
+                    "source_file_count": snapshot["source_file_count"],
+                    "files": stats,
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    return snapshot
 
 
 def _correctness_status(project_root: Path) -> dict[str, Any]:
@@ -269,7 +365,7 @@ def _correctness_status(project_root: Path) -> dict[str, Any]:
             "reason": "correctness_telemetry_incomplete",
         }
     try:
-        current = correctness_snapshot(project_root)
+        current = _cached_correctness_snapshot(project_root)
     except (OSError, ValueError) as exc:
         return {
             "available": False,
@@ -317,6 +413,8 @@ def _correctness_status(project_root: Path) -> dict[str, Any]:
 
 
 def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]:
+    # vector_memory and workspace_index are judged separately below: stale
+    # indexes warn (source-direct fallback exists), missing/corrupt ones fail.
     hard_labels = {
         "organization",
         "routing",
@@ -324,20 +422,36 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
         "cron_registration",
         "graph_integrity",
         "graph_freshness",
-        "vector_memory",
-        "workspace_index",
         "archive_stale",
     }
     hard_failures: list[str] = []
     warnings: list[str] = []
 
     for label in hard_labels:
-        gate = gates.get(label, {})
+        if label not in gates:
+            continue  # tier skipped this gate; the A11 heartbeat still covers it
+        gate = gates[label]
         if gate.get("exit", 1) != 0:
             hard_failures.append(label)
 
-    wiki_gate = gates.get("wiki", {})
-    if wiki_gate.get("exit", 1) == 0:
+    for label in ("vector_memory", "workspace_index"):
+        gate = gates.get(label)
+        if gate is None:
+            continue  # tier skipped this gate; the A11 heartbeat still covers it
+        if gate.get("exit", 1) != 0:
+            if _is_stale_index_signal(gate.get("stdout")):
+                warnings.append(f"{label}_stale")
+            else:
+                hard_failures.append(label)
+        else:
+            stdout = gate.get("stdout")
+            if isinstance(stdout, dict) and stdout.get("status") in {"stale", "degraded"}:
+                warnings.append(f"{label}_stale")
+
+    wiki_gate = gates.get("wiki")
+    if wiki_gate is None:
+        pass  # tier skipped this gate; the A11 heartbeat still covers it
+    elif wiki_gate.get("exit", 1) == 0:
         wiki_status = None
         stdout = wiki_gate.get("stdout")
         if isinstance(stdout, dict):
@@ -347,8 +461,8 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
     else:
         hard_failures.append("wiki")
 
-    claim_gate = gates.get("claim_drift", {})
-    if claim_gate.get("exit", 1) != 0:
+    claim_gate = gates.get("claim_drift")
+    if claim_gate is not None and claim_gate.get("exit", 1) != 0:
         warnings.append("claim_drift")
 
     lane_gate = gates.get("lane_register", {})
@@ -421,9 +535,38 @@ def _recent_commit(n: int = 3) -> list[str]:
         return []
 
 
-def main(project_root: Path = PROJECT_ROOT) -> int:
+def _write_compact_full_brief(project_root: Path, brief: dict, now: str) -> str:
+    """Persist the full brief for compact mode; returns the path (or a note)."""
+    stamp = now.replace(":", "").replace("-", "")
+    path = project_root / "tmp" / f"workspace-status-{stamp}.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(brief, indent=2, default=str), encoding="utf-8")
+        return str(path)
+    except OSError:
+        return "<full brief unwritable>"
+
+
+def main(project_root: Path = PROJECT_ROOT, argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="run the startup tier only (organization, routing, wiki, "
+        "lane_register); heavier gates stay on the A11 heartbeat",
+    )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="print a small summary (health, gate exits, next action) instead "
+        "of the full brief; keeps scheduler error stores small",
+    )
+    args = parser.parse_args([] if argv is None else argv)
+    # An explicit test gate list always wins over tier selection.
+    use_fast = bool(args.fast) and not _GATES_ENV
+    selected = fast_gates() if use_fast else GATES
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    gates = _run_gates(GATES, project_root=project_root)
+    gates = _run_gates(selected, project_root=project_root)
     decision, hard, warnings = _health_decision(gates)
     routing_brief = _routing_brief(gates.get("routing", {}))
     correctness = _correctness_status(Path(project_root))
@@ -476,6 +619,7 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
 
     brief = {
         "schema": "workspace-status.v1",
+        "mode": "fast" if use_fast else "full",
         "generated_at": now,
         "git": git_head,
         "recent_commits": recent,
@@ -492,9 +636,28 @@ def main(project_root: Path = PROJECT_ROOT) -> int:
         "recommended_next_action": recommended_next_action,
     }
 
-    print(json.dumps(brief, indent=2, default=str))
+    if args.compact:
+        full_path = _write_compact_full_brief(project_root, brief, now)
+        compact = {
+            "schema": "workspace-status-compact.v1",
+            "mode": brief["mode"],
+            "generated_at": now,
+            "health": brief["health"],
+            "gate_exits": {
+                label: gate.get("exit", 1) for label, gate in gates.items()
+            },
+            "correctness": {
+                key: correctness.get(key)
+                for key in ("status", "stale", "test_count", "completed_at")
+            },
+            "recommended_next_action": recommended_next_action,
+            "full_brief_path": full_path,
+        }
+        print(json.dumps(compact, indent=2, default=str))
+    else:
+        print(json.dumps(brief, indent=2, default=str))
     return 0 if not hard else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(argv=sys.argv[1:]))

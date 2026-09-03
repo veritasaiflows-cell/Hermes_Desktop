@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -317,6 +318,32 @@ class RunChecksTests(unittest.TestCase):
             code = run_checks.main()
 
         self.assertEqual(code, 1)
+
+    def test_pytest_timeout_returns_diagnostics_without_unittest_fallback(self) -> None:
+        partial = "12 passed, 3 failed in 239.5s\nFAILED tests/test_x.py::test_y"
+        timeout = subprocess.TimeoutExpired(
+            cmd=["pytest"], timeout=240, output=partial, stderr=""
+        )
+        with (
+            patch.object(run_checks.subprocess, "run", side_effect=timeout),
+            patch.object(
+                run_checks, "_write_timeout_log", return_value="<test-log>"
+            ) as log_mock,
+            patch.object(
+                run_checks.unittest.TestLoader, "discover",
+                side_effect=AssertionError("unittest fallback must not run after timeout"),
+            ),
+        ):
+            tests_ok, failures, _elapsed_ms, test_count, failure_count = (
+                run_checks.run_tests()
+            )
+
+        self.assertFalse(tests_ok)
+        self.assertEqual(failures[0], "pytest_timeout_after_240s")
+        self.assertIn("test_y", " ".join(failures))
+        self.assertEqual(test_count, 15)
+        self.assertGreaterEqual(failure_count, 1)
+        log_mock.assert_called_once()
 
 
 if __name__ == "__main__":

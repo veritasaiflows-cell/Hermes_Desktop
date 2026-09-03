@@ -122,8 +122,8 @@ class WorkspaceStatusTests(unittest.TestCase):
         }
         gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
         gates["claim_drift"] = {"exit": 0}
-        gates["vector_memory"] = {"exit": 1, "stdout": {"status": "degraded"}}
-        gates["workspace_index"] = {"exit": 1, "stdout": {"status": "degraded"}}
+        gates["vector_memory"] = {"exit": 1, "stdout": {"status": "unavailable"}}
+        gates["workspace_index"] = {"exit": 1, "stdout": None}
         gates["lane_register"] = {
             "exit": 0,
             "stdout": {"expired_leases": [], "collisions": [], "hard_failures": []},
@@ -134,6 +134,82 @@ class WorkspaceStatusTests(unittest.TestCase):
         self.assertEqual(status, "degraded")
         self.assertIn("vector_memory", hard)
         self.assertIn("workspace_index", hard)
+
+    def test_stale_vector_indexes_are_warnings_not_failures(self) -> None:
+        """Stale (not missing/corrupt) indexes warn; source-direct fallback exists."""
+        gates = {
+            label: {"exit": 0}
+            for label in (
+                "organization",
+                "routing",
+                "alias",
+                "cron_registration",
+                "graph_integrity",
+                "graph_freshness",
+                "archive_stale",
+            )
+        }
+        gates["wiki"] = {"exit": 0, "stdout": {"status": "fresh"}}
+        gates["claim_drift"] = {"exit": 0}
+        gates["vector_memory"] = {
+            "exit": 1,
+            "stdout": {"status": "degraded", "stale_source_count": 14},
+        }
+        gates["workspace_index"] = {
+            "exit": 1,
+            "stdout": {"available": True, "stale_source_count": 1},
+        }
+
+        status, hard, warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "healthy_with_warnings")
+        self.assertEqual(hard, [])
+        self.assertIn("vector_memory_stale", warnings)
+        self.assertIn("workspace_index_stale", warnings)
+
+    def test_fast_tier_covers_startup_gates_with_cached_routing(self) -> None:
+        fast = workspace_status.fast_gates()
+        self.assertEqual(
+            [label for label, _args, _timeout in fast],
+            ["organization", "routing", "wiki", "lane_register"],
+        )
+        routing = next(args for label, args, _timeout in fast if label == "routing")
+        self.assertIn("--validate", routing)
+        self.assertIn("--skip-recall-context", routing)
+        self.assertNotIn("--no-cache", routing)
+
+    def test_health_decision_ignores_gates_skipped_by_fast_tier(self) -> None:
+        gates = {
+            "organization": {"exit": 0},
+            "routing": {"exit": 0, "stdout": {"workflows": []}},
+            "wiki": {"exit": 0, "stdout": {"status": "fresh"}},
+            "lane_register": {"exit": 0, "stdout": {}},
+        }
+
+        status, hard, warnings = workspace_status._health_decision(gates)
+
+        self.assertEqual(status, "healthy")
+        self.assertEqual(hard, [])
+        self.assertEqual(warnings, [])
+
+    def test_fingerprint_cache_reuses_hash_until_sources_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "scripts" / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+            first = workspace_status._cached_correctness_snapshot(root)
+            with patch.object(
+                workspace_status,
+                "correctness_snapshot",
+                side_effect=AssertionError("must use cache"),
+            ):
+                second = workspace_status._cached_correctness_snapshot(root)
+            self.assertEqual(first["source_fingerprint"], second["source_fingerprint"])
+
+            (root / "scripts" / "example.py").write_text("VALUE = 22\n", encoding="utf-8")
+            third = workspace_status._cached_correctness_snapshot(root)
+            self.assertNotEqual(first["source_fingerprint"], third["source_fingerprint"])
 
     def test_lane_register_hard_failures_surface_as_a_warning(self) -> None:
         gates = {
@@ -221,6 +297,25 @@ class WorkspaceStatusTests(unittest.TestCase):
         self.assertTrue(completed.stdout.strip(), completed.stderr)
         self.assertEqual(json.loads(completed.stdout)["schema"], "workspace-status.v1")
 
+    def test_compact_mode_emits_summary_and_persists_full_brief(self) -> None:
+        gate_scripts = {"organization": "print('{\"status\": \"ok\"}')"}
+        project_root = self._make_minimal_project(gate_scripts)
+
+        returncode, parsed = self._run_workspace_status_argv(
+            project_root, gate_scripts, ["--compact"]
+        )
+
+        self.assertEqual(returncode, 0)
+        self.assertEqual(parsed["schema"], "workspace-status-compact.v1")
+        self.assertNotIn("gates", parsed)
+        self.assertIn("organization", parsed["gate_exits"])
+        full_path = Path(parsed["full_brief_path"])
+        self.assertTrue(full_path.is_file())
+        self.assertEqual(
+            json.loads(full_path.read_text(encoding="utf-8"))["schema"],
+            "workspace-status.v1",
+        )
+
     @staticmethod
     def _execute_mock_gate(label: str, body: str) -> dict:
         """Execute a tiny gate fixture in-process with the real gate-result shape."""
@@ -253,6 +348,18 @@ class WorkspaceStatusTests(unittest.TestCase):
             (label, [f"scripts/{label}.py"], 30)
             for label in gate_scripts
         ]
+        return self._run_workspace_status_argv(project_root, gate_scripts, None)
+
+    def _run_workspace_status_argv(
+        self,
+        project_root: Path,
+        gate_scripts: dict[str, str],
+        argv: list[str] | None,
+    ) -> tuple[int, dict]:
+        gates = [
+            (label, [f"scripts/{label}.py"], 30)
+            for label in gate_scripts
+        ]
 
         def fake_run(label, _args, _timeout, project_root):
             return self._execute_mock_gate(label, gate_scripts[label])
@@ -263,7 +370,7 @@ class WorkspaceStatusTests(unittest.TestCase):
             patch.object(workspace_status, "_run", side_effect=fake_run),
             redirect_stdout(stdout),
         ):
-            returncode = workspace_status.main(project_root)
+            returncode = workspace_status.main(project_root, argv=argv)
 
         raw_stdout = stdout.getvalue().strip()
         if not raw_stdout:

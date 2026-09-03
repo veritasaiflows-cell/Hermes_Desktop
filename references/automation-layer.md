@@ -9,7 +9,7 @@ Graphify candidate before atomically selecting an immutable generation.
 ## Authoritative code (version-controlled)
 
 - `scripts/cron_wiki_regen.py` — A1 logic (publish + report; silent on fresh, alerts on degraded/fail)
-- `scripts/cron_health_check.py` — A2 logic (fast operational gate: routing freshness + wiki validate + alias sweep + cron registration)
+- `scripts/cron_health_check.py` — A2 logic (fast operational gate: routing freshness + wiki validate + alias sweep + cron registration + recall-index liveness)
 - `scripts/cron_test_gate.py` — A2-full logic (full `run_checks.py --skip-smoke --record-telemetry` correctness gate)
 - `scripts/cron_routing_cache_sweep.py` — A3 logic (evicts expired routing cache rows and rows with mismatched source signatures)
 - `scripts/cron_archive_stale_workflows.py` — A4 logic (flags terminal-state workflows older than 30 days and archives derived capsules)
@@ -69,21 +69,21 @@ is missing.
 | ID | Job | Schedule | Behaviour |
 |----|-----|----------|-----------|
 | A1 | wiki freshness regen | daily 08:00 local | republishes wiki; alerts only on failure |
-| A2 | green-gate watchdog | every 4h | fast operational gate: routing + wiki + alias + cron registration; alerts on routing/alias/registration failure |
-| A2-full | code-correctness gate | daily 06:00 | runs full test/smoke suite with telemetry recording; alerts on regression |
+| A2 | green-gate watchdog | every 4h | fast operational gate: routing + wiki + alias + cron registration + recall-index liveness; alerts on routing/alias/registration failure; stale wiki/vector warn softly; graph depth checks live on A10/A11 |
+| A2-full | code-correctness gate | daily 06:00 | runs full test/smoke suite with telemetry recording; alerts on regression; defers silently (exit 0) when active write lanes touch the correctness surface; pytest budget 240s inside the 300s gate with partial-output logging, no double-rerun |
 | A3 | routing cache sweep | daily 09:00 | evicts expired and signature-mismatched `canonical/efficiens.db` routing_cache rows |
 | A4 | stale-workflow archive sweep | weekly Sunday 10:00 | flags terminal workflows older than 30 days; archives capsules |
 | A5 | routing index refresh | hourly at :35 | regenerates `state/workflow-routing-index.json` and capsules with bounded fail-closed reporting |
 | A6 | alias dead-target sweep | daily 09:30 | reports aliases that no longer point to active workflows |
 | A7 | authoritative queue hygiene | weekly Sunday 11:00 | removes terminal workflows older than 30 days from `active_workflows.json`; archives them |
-| A8 | feedback/evaluation refresh | daily 06:30 | consumes canonical + turn telemetry after A2-full, emits review-only candidates and one shared baseline cohort when new candidates appear |
+| A8 | feedback/evaluation refresh | daily 06:30 | consumes canonical + turn telemetry after A2-full, emits review-only candidates and one shared baseline cohort when new candidates appear; logs an explicit stderr note when the latest run_checks proof is missing, rejected, or stale |
 | A9 | claim-drift check | hourly at :45 | monitors expiring claims, tampered workflow runs, and stale replays |
 | A10 | graph freshness | hourly at :15 | graph orphan/duplicate sweep + coverage drift; alerts when canonical records lack expected edges |
-| A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures |
+| A11 | workspace status brief | every 4h at :15 | single-command JSON operating brief; alerts on hard failures; cron launcher passes `--compact` so scheduler error stores stay small (full brief persisted under `tmp/`) |
 | A12 | retrieval index refresh | every 6h at :30 | refreshes exact + semantic indexes and invokes A5 after successful, degraded, or exceptional refresh attempts |
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
 | A14 | lane lease watchdog | hourly at :55 | alerts on missing, expiring, or expired active-lane leases; saves locally |
-| A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable selected Graphify artifacts |
+| A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable selected Graphify artifacts; pages once per stale episode (digest-keyed) then heartbeats on stderr until healed or the report changes; alert payload is compact counts+paths |
 | A16 | Graphify MCP contract | daily 07:25 | checks the fixed-facade configuration, seven advertised tools, closed raw schemas, and `graph_stats` |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
 | A18 | Graphify code refresh | daily 02:10 (paused) | scheduled runs require explicit one-shot authorization; `--promote-once` builds an isolated candidate and atomically selects it only after all gates pass |

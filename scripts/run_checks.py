@@ -31,6 +31,11 @@ from scripts.runtime_metadata import detect_active_model
 from scripts.workspace_fingerprint import correctness_snapshot
 from scripts.script_doc_validator import validate_script_docs
 
+# Pytest budget inside run_tests(). Kept below cron_test_gate TIMEOUT_SECONDS
+# so fingerprinting and telemetry always have headroom, and a hang fails fast
+# with partial evidence instead of cascading into the unittest fallback.
+PYTEST_TIMEOUT_SECONDS = 240
+
 
 def build_test_suite() -> unittest.TestSuite:
     """Discover tests independently of the caller's current working directory."""
@@ -112,7 +117,7 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
                 cwd=str(PROJECT_ROOT),
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=PYTEST_TIMEOUT_SECONDS,
             )
             elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
             output = completed.stdout + completed.stderr
@@ -127,7 +132,33 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
                 outcomes["test_count"],
                 outcomes["test_failure_count"],
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except subprocess.TimeoutExpired as exc:
+            # Fail fast with partial evidence. Do NOT fall through to the
+            # unittest rerun: it would execute the suite a second time with no
+            # timeout and guarantee an outer-gate timeout with no diagnosis.
+            elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
+            partial = (exc.stdout or "") + (exc.stderr or "")
+            log_path = _write_timeout_log(partial)
+            print(f"pytest timeout after {PYTEST_TIMEOUT_SECONDS}s; partial log: {log_path}")
+            if partial.strip():
+                print(partial[-4000:])
+            outcomes = _pytest_outcome_counts(partial)
+            failures = [f"pytest_timeout_after_{PYTEST_TIMEOUT_SECONDS}s"]
+            failures.extend(_pytest_failure_ids(partial))
+            if len(failures) == 1:
+                # Mid-run timeouts rarely reach the short-summary section;
+                # fall back to any FAILED lines seen so far.
+                failures.extend(
+                    re.findall(r"^FAILED\s+(\S+)", partial, re.MULTILINE)[:20]
+                )
+            return (
+                False,
+                failures,
+                elapsed_ms,
+                outcomes["test_count"],
+                outcomes["test_failure_count"] + 1,
+            )
+        except FileNotFoundError:
             pass
 
     # Fallback: unittest discovery.
@@ -146,6 +177,18 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
         result.testsRun,
         len(result.failures) + len(result.errors),
     )
+
+
+def _write_timeout_log(output: str) -> str:
+    """Persist partial pytest output from a timed-out run for later diagnosis."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = PROJECT_ROOT / "tmp" / f"pytest-timeout-{stamp}.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(output[-200000:], encoding="utf-8")
+        return str(path)
+    except OSError:
+        return "<log unwritable>"
 
 
 def _safe_correctness_snapshot(project_root: Path) -> dict[str, Any]:

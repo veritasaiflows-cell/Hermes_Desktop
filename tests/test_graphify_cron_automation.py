@@ -21,16 +21,21 @@ def completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subpro
 
 
 class GraphifyArtifactMonitorTests(unittest.TestCase):
+    def _state_path(self, directory: str) -> Path:
+        return Path(directory) / "monitor-state.json"
+
     def test_fresh_artifact_is_silent_on_stdout(self) -> None:
         from scripts import cron_graphify_artifact_monitor
 
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = cron_graphify_artifact_monitor.main(
-                Path("."),
-                check=lambda _root: {"schema": "graphify-freshness.v1", "status": "fresh", "issues": []},
-            )
+        with TemporaryDirectory() as directory:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = cron_graphify_artifact_monitor.main(
+                    Path("."),
+                    check=lambda _root: {"schema": "graphify-freshness.v1", "status": "fresh", "issues": []},
+                    state_path=self._state_path(directory),
+                )
 
         self.assertEqual(result, 0)
         self.assertEqual(stdout.getvalue(), "")
@@ -44,13 +49,104 @@ class GraphifyArtifactMonitorTests(unittest.TestCase):
             "status": "stale",
             "issues": [{"code": "source_changed", "path": "scripts/example.py"}],
         }
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            result = cron_graphify_artifact_monitor.main(Path("."), check=lambda _root: report)
+        with TemporaryDirectory() as directory:
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: report, state_path=self._state_path(directory)
+                )
 
         self.assertEqual(result, 1)
         self.assertIn("GRAPHIFY ARTIFACT STALE", stdout.getvalue())
         self.assertIn("source_changed", stdout.getvalue())
+
+    def test_repeated_stale_episode_heartbeats_quietly(self) -> None:
+        from scripts import cron_graphify_artifact_monitor
+
+        report = {
+            "schema": "graphify-freshness.v1",
+            "status": "stale",
+            "baseline_path": "gen-1/baseline.json",
+            "issues": [{"code": "source_changed", "path": "scripts/example.py"}],
+        }
+        with TemporaryDirectory() as directory:
+            state = self._state_path(directory)
+            first_out = io.StringIO()
+            with redirect_stdout(first_out):
+                first = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: report, state_path=state
+                )
+            second_out = io.StringIO()
+            second_err = io.StringIO()
+            with redirect_stdout(second_out), redirect_stderr(second_err):
+                second = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: report, state_path=state
+                )
+
+        self.assertEqual(first, 1)
+        self.assertIn("GRAPHIFY ARTIFACT STALE", first_out.getvalue())
+        self.assertEqual(second, 0)
+        self.assertEqual(second_out.getvalue(), "")
+        self.assertIn("STILL STALE", second_err.getvalue())
+
+    def test_changed_stale_report_pages_again(self) -> None:
+        from scripts import cron_graphify_artifact_monitor
+
+        old = {
+            "schema": "graphify-freshness.v1",
+            "status": "stale",
+            "issues": [{"code": "source_changed", "path": "scripts/a.py"}],
+        }
+        new = {
+            "schema": "graphify-freshness.v1",
+            "status": "stale",
+            "issues": [{"code": "source_changed", "path": "scripts/b.py"}],
+        }
+        with TemporaryDirectory() as directory:
+            state = self._state_path(directory)
+            with redirect_stdout(io.StringIO()):
+                first = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: old, state_path=state
+                )
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                second = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: new, state_path=state
+                )
+
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 1)
+        self.assertIn("scripts/b.py", stdout.getvalue())
+
+    def test_fresh_clears_episode_so_next_stale_pages(self) -> None:
+        from scripts import cron_graphify_artifact_monitor
+
+        stale = {
+            "schema": "graphify-freshness.v1",
+            "status": "stale",
+            "issues": [{"code": "source_changed", "path": "scripts/a.py"}],
+        }
+        fresh = {"schema": "graphify-freshness.v1", "status": "fresh", "issues": []}
+        with TemporaryDirectory() as directory:
+            state = self._state_path(directory)
+            with redirect_stdout(io.StringIO()):
+                cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: stale, state_path=state
+                )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                cleared = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: fresh, state_path=state
+                )
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                repaged = cron_graphify_artifact_monitor.main(
+                    Path("."), check=lambda _root: stale, state_path=state
+                )
+
+        self.assertEqual(cleared, 0)
+        self.assertFalse(state.exists())
+        self.assertEqual(repaged, 1)
+        self.assertIn("GRAPHIFY ARTIFACT STALE", stdout.getvalue())
 
     def test_checker_exception_fails_closed(self) -> None:
         from scripts import cron_graphify_artifact_monitor

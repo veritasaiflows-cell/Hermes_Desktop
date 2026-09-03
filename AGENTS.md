@@ -67,7 +67,7 @@ For research work, separate verified facts, reasoned interpretation, open questi
 At the beginning of a session:
 
 1. Load identity and operating instructions.
-2. Run `python scripts/workspace_status.py` as the deterministic startup gate.
+2. Run `python scripts/workspace_status.py --fast` as the deterministic startup gate (full brief without flags for closeout and heartbeat).
 3. Record the git baseline and preserve unrelated existing changes.
 4. Review recent relevant memory.
 5. Inspect failed or stale organization, wiki, routing, SQL-adjacent, graph, vector, exact-index, and automation gates.

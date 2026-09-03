@@ -19,6 +19,87 @@ from scripts import cron_telemetry_harvest, feedback_evaluation_loop
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _seed_run_metrics(
+    path: Path,
+    *,
+    completed_at: str,
+    verification_result: str = "pass",
+    acceptance_status: str = "accepted",
+) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE run_metrics (
+                run_id TEXT PRIMARY KEY,
+                request_type TEXT,
+                verification_result TEXT,
+                acceptance_status TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO run_metrics "
+            "(run_id, request_type, verification_result, acceptance_status,"
+            " started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "run-1",
+                "run_checks",
+                verification_result,
+                acceptance_status,
+                completed_at,
+                completed_at,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+class ProofNoteTests(unittest.TestCase):
+    def test_missing_database_reports_unavailable(self) -> None:
+        with TemporaryDirectory() as directory:
+            self.assertEqual(
+                cron_telemetry_harvest._proof_note(Path(directory)),
+                "proof_unavailable",
+            )
+
+    def test_fresh_accepted_proof_is_silent(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _seed_run_metrics(root / "canonical" / "efficiens.db", completed_at=now)
+            self.assertIsNone(cron_telemetry_harvest._proof_note(root))
+
+    def test_stale_and_rejected_proofs_are_flagged(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            _seed_run_metrics(
+                root / "canonical" / "efficiens.db",
+                completed_at="2020-01-01T00:00:00Z",
+            )
+            stale = cron_telemetry_harvest._proof_note(root)
+            assert stale is not None
+            self.assertTrue(stale.startswith("proof_stale"), stale)
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "canonical").mkdir()
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _seed_run_metrics(
+                root / "canonical" / "efficiens.db",
+                completed_at=now,
+                verification_result="fail",
+                acceptance_status="rejected",
+            )
+            rejected = cron_telemetry_harvest._proof_note(root)
+            assert rejected is not None
+            self.assertTrue(rejected.startswith("proof_not_accepted"), rejected)
+
+
 def _seed_turn_metrics(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:

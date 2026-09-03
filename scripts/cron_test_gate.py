@@ -17,9 +17,9 @@ Preflight: before spending ~90s on the full suite, check the lane register
 for active write lanes whose allowed_writes touch the correctness surface
 (scripts/, tests/, canonical/). A2-full fingerprints the source tree — any
 concurrent write guarantees a drift rejection after the run, wasting the
-test effort. When active lanes block, print a deferral marker and exit 2
-(signal for the scheduler to retry on the next tick rather than treating it
-as a correctness failure).
+test effort. When active lanes block, stay silent on stdout and note the
+deferral on stderr with exit 0: the resulting telemetry gap already surfaces
+as a correctness_stale warning in the status brief, so paging would be noise.
 """
 from __future__ import annotations
 
@@ -83,9 +83,12 @@ def main() -> int:
 
     blocking = _active_write_lanes_blocking()
     if blocking:
-        print(f"TEST GATE DEFERRED {now} reason=active_write_lanes")
-        print(json.dumps({"blocking_lanes": blocking}, indent=2))
-        return 2
+        print(
+            f"TEST GATE DEFERRED {now} reason=active_write_lanes "
+            f"lanes={len(blocking)}",
+            file=sys.stderr,
+        )
+        return 0
 
     try:
         completed = subprocess.run(

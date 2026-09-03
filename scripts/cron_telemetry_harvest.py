@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -22,11 +23,52 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 TIMEOUT_SECONDS = 360
+PROOF_MAX_AGE_SECONDS = 48 * 3600
+
+
+def _proof_note(project_root: Path) -> str | None:
+    """Check the latest A2-full run_checks proof; return a note if unusable.
+
+    Returns None when a fresh accepted proof exists, otherwise a short
+    machine-readable reason. A8 aggregates the proof either way -- the note
+    just makes staleness explicit instead of silent.
+    """
+    db_path = project_root / "canonical" / "efficiens.db"
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = connection.execute(
+                "SELECT completed_at, verification_result, acceptance_status "
+                "FROM run_metrics WHERE request_type = 'run_checks' "
+                "ORDER BY started_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            connection.close()
+    except (sqlite3.Error, OSError):
+        return "proof_unavailable"
+    if row is None:
+        return "no_run_checks_proof"
+    completed_at, verification_result, acceptance_status = row
+    try:
+        completed = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - completed).total_seconds()
+    except (ValueError, TypeError):
+        return "proof_timestamp_unparseable"
+    if acceptance_status != "accepted" or verification_result != "pass":
+        return f"proof_not_accepted status={acceptance_status} result={verification_result}"
+    if age_seconds > PROOF_MAX_AGE_SECONDS:
+        return f"proof_stale age_hours={age_seconds / 3600:.1f}"
+    return None
 
 
 def main() -> int:
     """Run the feedback/evaluation refresh; exit 1 on failure, 0 on ready or review-required."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    proof_note = _proof_note(PROJECT_ROOT)
+    if proof_note is not None:
+        # Log-only: A8 still aggregates, but a timed-out/deferred A2-full no
+        # longer flows through silently.
+        print(f"TELEMETRY PROOF NOTE {now} {proof_note}", file=sys.stderr)
     retention_command = [PYTHON, "scripts/telemetry_retention.py", "maintain"]
     if os.environ.get("HERMES_TELEMETRY_MONTHLY_ARCHIVES") == "1":
         retention_command.append("--archive-months")

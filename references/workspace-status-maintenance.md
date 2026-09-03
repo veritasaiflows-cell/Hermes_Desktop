@@ -6,6 +6,10 @@ and how it fits into the cron schedule.
 ## Single-command aggregator
 
 `scripts/workspace_status.py` is the one-line startup and closeout status command.
+`--fast` runs the startup tier only (`organization`, `routing` with cache
+reads, `wiki`, `lane_register`) plus git and cached correctness — about 0.8s
+vs 2.0s full. Use `--fast` at session startup; the full brief (no flags) is
+for closeout and the A11 heartbeat. The brief reports `mode: fast|full`.
 It runs these gates serially in declared order to avoid shared SQLite and
 artifact races, and returns a JSON brief:
 
@@ -23,7 +27,11 @@ artifact races, and returns a JSON brief:
 - `workspace_index` — `scripts/workspace_index.py status`
 - `archive_stale` — `scripts/cron_archive_stale_workflows.py --check-only`
 
-Organization drift and missing or stale retrieval indexes are hard failures.
+Organization drift and missing or corrupt retrieval indexes are hard failures.
+Stale vector/workspace indexes are warnings (`vector_memory_stale`,
+`workspace_index_stale`): the derived indexes have a direct-source fallback,
+like the graphify policy below. Gates skipped by `--fast` are ignored rather
+than failed; the A11 heartbeat still covers them.
 Graphify drift is a warning because the derived code graph has a direct-source
 fallback. Refresh it with `graphify update .`, then reconcile static gate edges
 with `python scripts/graphify_gate_edges.py` before recording the verified
@@ -35,7 +43,10 @@ Exit code is 0 when healthy, 1 when degraded. The JSON body contains
 The brief also includes `correctness`, sourced from the latest `run_checks`
 telemetry row. It reports the test outcome, completion timestamp, duration,
 test count, tested commit, and whether the recorded source fingerprint still
-matches current code. `run_checks` fingerprints sources before and after the
+matches current code. The source fingerprint is cached in
+`tmp/workspace-fingerprint-cache.json` keyed by per-file mtime/size and
+re-hashed only when sources change; branch/commit come from two git forks
+(`status --short --branch` + `rev-parse --short HEAD`). `run_checks` fingerprints sources before and after the
 test/smoke run and returns nonzero if they differ or cannot be read, independently
 of telemetry recording. It parses numeric outcomes and exact failure node IDs only
 from pytest's final summary sections, persisting a bounded ID list plus its hash.
