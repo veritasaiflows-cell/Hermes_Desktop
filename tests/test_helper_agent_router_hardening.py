@@ -60,8 +60,17 @@ class ExitContractTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             request_path = Path(directory) / "request.json"
             request_path.write_bytes(payload)
+            audit_log = Path(directory) / "audit.jsonl"
             return helper_agent_router.main(
-                ["admit", "--request", str(request_path), "--project-root", str(project_root)]
+                [
+                    "admit",
+                    "--request",
+                    str(request_path),
+                    "--project-root",
+                    str(project_root),
+                    "--audit-log",
+                    str(audit_log),
+                ]
             )
 
     def test_non_utf8_request_file_is_rejected_not_crash(self) -> None:
@@ -394,6 +403,8 @@ class CliProcessContractTests(unittest.TestCase):
                     str(request_path),
                     "--project-root",
                     str(PROJECT_ROOT),
+                    "--audit-log",
+                    str(Path(directory) / "audit.jsonl"),
                 ],
                 capture_output=True,
                 text=True,
@@ -415,6 +426,17 @@ class CliProcessContractTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["schema"], helper_agent_router.ADMISSION_SCHEMA)
         self.assertEqual(payload["status"], "rejected")
+
+    def test_process_contract_keeps_workspace_audit_unchanged(self) -> None:
+        """The subprocess fixture must not append test events to tracked state."""
+        audit_log = PROJECT_ROOT / "state" / "helper-agent-spawns.jsonl"
+        before = audit_log.read_bytes() if audit_log.exists() else None
+
+        completed = self._run_cli(_read_only_request(task_id="isolated-process-audit"))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        after = audit_log.read_bytes() if audit_log.exists() else None
+        self.assertEqual(after, before)
 
     def test_usage_error_emits_json_verdict(self) -> None:
         import contextlib
