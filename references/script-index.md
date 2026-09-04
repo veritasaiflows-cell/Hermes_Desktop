@@ -46,7 +46,7 @@ Owned by `references/automation-layer.md`.
 | `workflow_router.py` | Workflow ownership routing + control-plane validator | `selector` + `--all --answer --validate --write-index --write-capsules --index-path --no-cache --aliases --status` | `test_workflow_router.py` | `references/workflow-routing-control-plane.md` |
 | `workflow_runner.py` | Mandatory read-only control-plane preflight for workflow entrypoints | (library; imported by workflow CLIs) | — | `references/workflow-routing-control-plane.md` |
 | `concurrent_lane_manager.py` | Concurrent lane + write-lease manager | `plan/lease/start/complete/status` subcommands | `test_concurrent_lane_manager.py` | `references/concurrent-lane-control-plane.md` |
-| `helper_agent_router.py` | Deterministic admission gate for bounded helper-agent spawns (read-only labeling contract; write mode requires leased covering lane) | `admit` + `--request --project-root` | `test_helper_agent_router.py`, `test_helper_agent_router_hardening.py` | `references/operating-procedures.md` |
+| `helper_agent_router.py` | Deterministic admission gate for bounded helper-agent spawns (read-only labeling contract; write mode requires leased covering lane; review spawns require author/reviewer model diversity; 2-repair-cycle escalation stop) | `admit` + `--request --project-root` | `test_helper_agent_router.py`, `test_helper_agent_router_hardening.py` | `references/operating-procedures.md`, `references/multi-agent-fleet-governance.md` |
 | `implementation_job.py` | Long-work job/phase contract, executed acceptance receipts, and bounded pickup packets | `validate/status/pickup/phase-start/phase-accept/phase-block/close` | `test_implementation_job.py` | `references/implementation-contract.md` |
 
 ## Memory layers

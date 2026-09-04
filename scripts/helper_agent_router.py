@@ -136,8 +136,14 @@ REQUIRED_REQUEST_FIELDS = {
     "owner",
 }
 # lane_id is conditionally required for write mode, so it is not listed above.
+# reviews_lane/reviewer_model are conditionally required together for review-class
+# requests and are not admissible on any other task class.
+_CONDITIONAL_REVIEW_FIELDS = ("reviews_lane", "reviewer_model")
 _TASK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _MAX_DURATION_CAP_MINUTES = 480
+# A lane that has already consumed this many repair cycles must escalate to a
+# human instead of admitting further write spawns (bounded repair loop).
+REPAIR_CYCLE_ESCALATION_THRESHOLD = 2
 
 LANE_ACCEPTED_STATUSES = ("leased", "running")
 
@@ -357,6 +363,15 @@ def _check_lane(
         )
         return
 
+    retry_count = row["retry_count"]
+    if isinstance(retry_count, int) and retry_count >= REPAIR_CYCLE_ESCALATION_THRESHOLD:
+        _reject(
+            f"lane {lane_id!r} has consumed {retry_count} repair cycles; "
+            "escalate to the human owner instead of spawning another write helper",
+            reasons,
+        )
+        return
+
     try:
         lease_expires = _parse_utc(row["lease_expires_at"]) if row["lease_expires_at"] else None
     except (TypeError, ValueError) as exc:
@@ -428,6 +443,78 @@ def _check_lane(
             )
 
 
+def _check_review_attribution(
+    request: dict[str, Any], project_root: Path, reasons: list[str]
+) -> None:
+    """Enforce the review-class author/reviewer diversity contract.
+
+    A review spawn scoped to a lane (``reviews_lane``) must declare its
+    reviewer model and that model must differ from the lane's recorded author
+    (``expected_model``) so author and reviewer cannot be the same model on a
+    high-risk lane. Unattributed reviewed lanes fail closed rather than being
+    reviewed by an unknown relationship.
+    """
+    task_class = request.get("task_class")
+    reviews_lane = request.get("reviews_lane")
+    reviewer_model = request.get("reviewer_model")
+
+    if reviews_lane is None and reviewer_model is None:
+        # Unscoped reviews (no reviewed lane) carry no diversity requirement.
+        return
+    if task_class != "review":
+        _reject(
+            "reviews_lane/reviewer_model are only valid for review-class requests",
+            reasons,
+        )
+        return
+    if reviewer_model is None:
+        _reject("review-class requests scoped to a lane must declare reviewer_model", reasons)
+        return
+    if reviews_lane is None:
+        _reject("reviewer_model requires reviews_lane", reasons)
+        return
+    if not isinstance(reviews_lane, str) or not reviews_lane.strip():
+        _reject("reviews_lane must be a non-empty string", reasons)
+        return
+    if not isinstance(reviewer_model, str) or not reviewer_model.strip():
+        _reject("reviewer_model must be a non-empty string", reasons)
+        return
+
+    register_path = project_root / "state" / "concurrent-lane-register.sqlite"
+    if not register_path.is_file():
+        _reject("lane register is unavailable; cannot verify reviewed lane", reasons)
+        return
+    try:
+        connection = sqlite3.connect(str(register_path))
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("PRAGMA query_only = ON")
+            row = _load_lane(connection, reviews_lane)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        _reject(f"lane register is unreadable: {exc}", reasons)
+        return
+
+    if row is None:
+        _reject(f"unknown reviewed lane: {reviews_lane!r}", reasons)
+        return
+    author_model = row["expected_model"]
+    if not isinstance(author_model, str) or not author_model.strip():
+        _reject(
+            f"reviewed lane {reviews_lane!r} has no author model attribution; "
+            "record expected_model before spawning a review",
+            reasons,
+        )
+        return
+    if author_model.strip() == reviewer_model.strip():
+        _reject(
+            "author and reviewer must differ: reviewer_model matches the lane's "
+            f"author model {author_model!r}; route the review to a different model",
+            reasons,
+        )
+
+
 def admit_request(
     request: object, *, project_root: Path | None = None
 ) -> dict[str, Any]:
@@ -443,7 +530,13 @@ def admit_request(
             "lane_id": None,
             "reasons": ["request must be a JSON object"],
         }
-    unexpected = sorted(set(request) - REQUIRED_REQUEST_FIELDS - {"lane_id"})
+    is_review_class = request.get("task_class") == "review"
+    unexpected = sorted(
+        set(request)
+        - REQUIRED_REQUEST_FIELDS
+        - {"lane_id"}
+        - (set(_CONDITIONAL_REVIEW_FIELDS) if is_review_class else set())
+    )
     missing = sorted(REQUIRED_REQUEST_FIELDS - set(request))
     # lane_id is required only for write mode; read-only must not declare one.
     if request.get("mode") == "write" and "lane_id" not in request:
@@ -507,6 +600,10 @@ def admit_request(
     if mode == "write":
         _check_lane(request, Path(project_root or PROJECT_ROOT), normalized, reasons)
 
+    _check_review_attribution(
+        request, Path(project_root or PROJECT_ROOT), reasons
+    )
+
     return {
         "schema": ADMISSION_SCHEMA,
         "status": "admitted" if not reasons else "rejected",
@@ -538,6 +635,8 @@ def build_spawn_event(
         "reasons": result.get("reasons", []),
         "allowed_toolsets": request.get("allowed_toolsets"),
         "allowed_writes": request.get("allowed_writes"),
+        "reviews_lane": request.get("reviews_lane"),
+        "reviewer_model": request.get("reviewer_model"),
     }
 
 

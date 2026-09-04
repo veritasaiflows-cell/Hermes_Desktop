@@ -810,5 +810,206 @@ class SpawnAuditProtectionTests(unittest.TestCase):
         )
 
 
+class ReviewAttributionTests(unittest.TestCase):
+    """Review-class spawns scoped to a lane must prove author/reviewer diversity."""
+
+    def _review_request(self, **overrides: object) -> dict[str, object]:
+        request: dict[str, object] = {
+            "schema": helper_agent_router.REQUEST_SCHEMA,
+            "task_id": "review-attr-001",
+            "task_class": "review",
+            "phase": "pre-implementation",
+            "mode": "read-only",
+            "objective": "Independent review of the lane's integrated diff.",
+            "scope": "Read-only review of the integrated result.",
+            "allowed_toolsets": ["read_files", "search_files"],
+            "allowed_writes": [],
+            "max_duration_minutes": 30,
+            "owner": "agent-main",
+        }
+        request.update(overrides)
+        return request
+
+    def _attributed_lane(self, root: Path, model: str) -> None:
+        fixture = _LaneFixture(root)
+        fixture.lease()
+        connection = sqlite3.connect(str(fixture.manager.register_path))
+        try:
+            connection.execute(
+                "UPDATE lanes SET expected_model=? WHERE lane_id=?",
+                (model, "WF-1000::helper-gate-fixture"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def test_review_spawn_with_matching_reviewer_model_is_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._attributed_lane(root, "gpt-5.6-terra")
+            result = helper_agent_router.admit_request(
+                self._review_request(
+                    reviews_lane="WF-1000::helper-gate-fixture",
+                    reviewer_model="gpt-5.6-terra",
+                ),
+                project_root=root,
+            )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("author and reviewer must differ" in r for r in result["reasons"]),
+            result["reasons"],
+        )
+
+    def test_review_spawn_with_diverse_reviewer_model_is_admitted(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._attributed_lane(root, "gpt-5.6-terra")
+            result = helper_agent_router.admit_request(
+                self._review_request(
+                    reviews_lane="WF-1000::helper-gate-fixture",
+                    reviewer_model="gpt-5.6-sol",
+                ),
+                project_root=root,
+            )
+
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_review_spawn_scoped_to_lane_without_reviewer_model_is_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._attributed_lane(root, "gpt-5.6-terra")
+            result = helper_agent_router.admit_request(
+                self._review_request(reviews_lane="WF-1000::helper-gate-fixture"),
+                project_root=root,
+            )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("reviewer_model" in r for r in result["reasons"]), result["reasons"]
+        )
+
+    def test_reviewer_model_without_reviews_lane_is_rejected(self) -> None:
+        result = helper_agent_router.admit_request(
+            self._review_request(reviewer_model="gpt-5.6-sol")
+        )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("reviewer_model requires reviews_lane" in r for r in result["reasons"]),
+            result["reasons"],
+        )
+
+    def test_review_of_lane_without_author_attribution_is_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = _LaneFixture(root)
+            fixture.lease()
+            result = helper_agent_router.admit_request(
+                self._review_request(
+                    reviews_lane="WF-1000::helper-gate-fixture",
+                    reviewer_model="gpt-5.6-sol",
+                ),
+                project_root=root,
+            )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("no author model attribution" in r for r in result["reasons"]),
+            result["reasons"],
+        )
+
+    def test_review_of_unknown_lane_is_rejected_not_crash(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._attributed_lane(root, "gpt-5.6-terra")
+            result = helper_agent_router.admit_request(
+                self._review_request(
+                    reviews_lane="WF-1000::does-not-exist",
+                    reviewer_model="gpt-5.6-sol",
+                ),
+                project_root=root,
+            )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("unknown reviewed lane" in r for r in result["reasons"]),
+            result["reasons"],
+        )
+
+    def test_reviews_lane_on_non_review_class_is_rejected(self) -> None:
+        result = helper_agent_router.admit_request(
+            _write_request(
+                reviews_lane="WF-1000::helper-gate-fixture",
+                reviewer_model="gpt-5.6-sol",
+            )
+        )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("only valid for review-class requests" in r for r in result["reasons"]),
+            result["reasons"],
+        )
+
+    def test_spawn_event_records_review_attribution(self) -> None:
+        request = self._review_request(
+            reviews_lane="WF-1000::helper-gate-fixture",
+            reviewer_model="gpt-5.6-sol",
+        )
+        event = helper_agent_router.build_spawn_event(
+            request,
+            {
+                "status": "admitted",
+                "task_id": request["task_id"],
+                "mode": "read-only",
+                "lane_id": None,
+                "reasons": [],
+            },
+        )
+
+        self.assertEqual(event["reviews_lane"], "WF-1000::helper-gate-fixture")
+        self.assertEqual(event["reviewer_model"], "gpt-5.6-sol")
+
+
+class RepairCycleEscalationTests(unittest.TestCase):
+    """Two or more repair cycles on a lane stop further write spawns."""
+
+    def _lane_with_retries(self, root: Path, retry_count: int) -> None:
+        fixture = _LaneFixture(root)
+        fixture.lease()
+        connection = sqlite3.connect(str(fixture.manager.register_path))
+        try:
+            connection.execute(
+                "UPDATE lanes SET retry_count=? WHERE lane_id=?",
+                (retry_count, "WF-1000::helper-gate-fixture"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def test_write_spawn_on_lane_with_two_repair_cycles_is_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._lane_with_retries(root, 2)
+            result = helper_agent_router.admit_request(
+                _write_mode_request(), project_root=root
+            )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(
+            any("escalate" in r for r in result["reasons"]), result["reasons"]
+        )
+
+    def test_write_spawn_on_lane_with_one_retry_is_admitted(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._lane_with_retries(root, 1)
+            result = helper_agent_router.admit_request(
+                _write_mode_request(), project_root=root
+            )
+
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+
 if __name__ == "__main__":
     unittest.main()

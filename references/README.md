@@ -13,6 +13,7 @@ Authoritative detailed instructions that the lean bootstrap (`AGENTS.md`) points
 - `concurrent-lane-control-plane.md` — collision-safe lane leasing and completion proof protocol.
 - `script-index.md` — authoritative routing surface for the `scripts/` layer (purpose, entrypoints, test anchors, owning references).
 - `implementer-canary-runbook.md` — bounded, evidence-only canary qualification for a tool-using Implementer Bot (RED baseline, diff/scope/frozen-hash/signature oracle).
+- `multi-agent-fleet-governance.md` — fleet role matrix, per-role admission contracts, and the one-at-a-time qualification order for promoting new bots.
 - `wiki/` (new): authoritative bootstrap evidence for startup and operational evidence routing.
 
 ## Rules

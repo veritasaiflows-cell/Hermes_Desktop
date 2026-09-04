@@ -13,6 +13,19 @@ answer read-only questions. Governs `scripts/implementer_canary_harness.py`.
   baseline before the candidate ever runs, then independently re-derives the verdict from
   git state (diff + frozen hashes + signature + RED→GREEN transition) after the
   candidate finishes. The candidate's own summary is logged but never trusted.
+- **Terminal-toolset split is intentional (2026-09-04):** the canary sandbox and the live
+  helper lanes are two different trust domains with one rule each.
+  - *Canary qualification only:* the disposable sandbox may grant `file,terminal` because
+    the harness — not the gate — is the enforcement surface there: the sandbox is a
+    throwaway copy, its acceptance is re-derived from repository state by the trusted
+    harness, and nothing the candidate does inside the sandbox can reach the real
+    workspace. A candidate that misuses the terminal only falsifies its own verdict.
+  - *Live helper spawns never:* `scripts/helper_agent_router.py` rejects `terminal` and
+    `execute_code` in every mode because a live shell is not lane-bounded — admission
+    cannot constrain what a shell touches, so no admitted helper may ever carry one
+    (`scripts/helper_agent_router.py:WRITE_MODE_TOOLSETS`). A canary pass therefore does
+    **not** entitle an Implementer Bot to a terminal on live lanes; its live write scope
+    is always the lane-bounded `write_file`/`patch` toolsets over a leased surface.
 - **Index-tamper resistance (2026-09-03):** the scope oracle re-derives every
   baseline-tracked file from the baseline commit object (`git rev-parse
   <commit>:<path>` blob id vs `git hash-object` of the working file), so

@@ -208,6 +208,13 @@ python scripts/helper_agent_router.py admit --request <helper-request.json>
 Build a `helper-agent-request.v1` (task_id, task_class, phase, mode,
 objective, scope, allowed_toolsets, allowed_writes, max_duration_minutes,
 owner, and lane_id for write mode), run the gate, and spawn only on exit 0.
+For `review`-class requests scoped to a lane, `reviews_lane` and
+`reviewer_model` are additionally required together (and rejected on any other
+task class): the reviewer model must differ from the reviewed lane's recorded
+author model, and a reviewed lane without author attribution fails closed.
+Write spawns against a lane already carrying two or more recorded repair
+cycles are rejected — escalate to the human owner instead. Role authority
+matrix and qualification order: `references/multi-agent-fleet-governance.md`.
 The gate rejects: undeclared task classes; `read-only` requests that declare
 write surfaces, a lane, or any toolset outside the read-only allowlist
 (`read_file(s)`, `search_files`, `web_search`, `web_extract`); `write`
