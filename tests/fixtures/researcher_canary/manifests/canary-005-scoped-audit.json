@@ -2,7 +2,7 @@
   "schema": "researcher-canary-case.v1",
   "case_id": "canary-005-scoped-audit",
   "task_class": "scoped_audit",
-  "profile": "researchercanary",
+  "profile": "researcher",
   "model": "gpt-5.6-luna",
   "provider": "openai-codex",
   "pack_root": "packs/canary-005-scoped-audit",

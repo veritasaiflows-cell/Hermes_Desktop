@@ -5,25 +5,27 @@
 > closed with 4 proof artifacts; profile promoted `researchercanary` →
 > `researcher` (Luna route unchanged, no fallback). See
 > `references/model-routing-evidence.md` → "Researcher Bot qualification".
-> Full tool-proxy read-only boundary (plan Task 4) deferred: qualification
-> used tool-free frozen source packs, which is the stronger boundary.
+> **Boundary extension 2026-09-02:** prompt-only runs now select zero callable
+> tool definitions, and the `researcher-source` fixed-pack MCP proxy plus
+> `scripts/researcher_task_router.py` enforce admitted, declared read-only
+> research. See `references/researcher-routing.md`.
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Qualify the isolated Luna Researcher through fixed, read-only canaries whose model output is deterministically captured and verified without granting the bot any write authority.
 
-**Architecture:** Separate the untrusted model from the trusted evaluation runner. `researchercanary` returns one JSON object on stdout; a local Python harness, not the bot, owns all JSON artifacts, source snapshots, hashes, validation, telemetry linkage, and promotion records. Cases use versioned source packs plus deterministic oracles, so acceptance depends on structured facts and citations rather than prose similarity.
+**Architecture:** Separate the untrusted model from the trusted evaluation runner. The then-named `researchercanary` profile (now `researcher`) returns one JSON object on stdout; a local Python harness, not the bot, owns all JSON artifacts, source snapshots, hashes, validation, telemetry linkage, and promotion records. Cases use versioned source packs plus deterministic oracles, so acceptance depends on structured facts and citations rather than prose similarity.
 
 **Tech Stack:** Python 3.11 stdlib (`argparse`, `json`, `hashlib`, `subprocess`, `pathlib`), `unittest`, Hermes CLI profile invocation, existing `scripts/model_routing_telemetry.py`.
 
 ---
 
-## Current evidence and boundary
+## Current evidence and boundary (historical planning state)
 
 - Canary 001 already produced strict JSON on stdout (`tmp/canary-001-raw-output.txt`) and the verifier/integrator persisted the reviewed result separately in `derived/model-routing/canaries/canary-001-result.json`.
 - No generic canary benchmark/harness exists yet; the planned `scripts/model_routing_benchmark.py` and associated test fixtures do not exist.
-- `researchercanary` has no configured fallback chain, which is appropriate for unambiguous model attribution.
-- The current profile is **not technically read-only**: its live tool list enables terminal, file, web, browser, code execution, memory, delegation, cron, and computer-use. `SOUL.md` is a behavioral instruction, not an execution sandbox. Promotion must not rely on it alone.
+- At planning time, `researchercanary` had no configured fallback chain, which was appropriate for unambiguous model attribution.
+- At planning time, the profile was **not technically read-only**: its live tool list enabled terminal, file, web, browser, code execution, memory, delegation, cron, and computer-use. `SOUL.md` alone was not an execution sandbox; the post-execution boundary extension above supersedes this condition.
 
 ## Non-negotiable trust boundary
 

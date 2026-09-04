@@ -1,18 +1,23 @@
 # Researcher Canary Runbook
 
 Deterministic qualification harness for the Researcher Bot
-(profile `researchercanary`, model `gpt-5.6-luna`, provider `openai-codex`).
+(profile `researcher`, model `gpt-5.6-luna`, provider `openai-codex`).
 
 ## Trust boundary
 
-- The **bot is tool-free for qualification**: cases run via `hermes --oneshot`
-  with the entire frozen source pack embedded in the prompt. It has no tools,
-  no file access, no network, and returns exactly one JSON object.
+- **Prompt-only qualification is technically pinned:** the harness invokes
+  `hermes -t clarify`, and the Researcher profile disables `clarify` along with
+  all builtin toolsets. That explicit selection resolves to zero callable tool
+  definitions. The entire frozen source pack is embedded in the prompt; there
+  is no file or network access.
+- **Proxy-mode operational research is separate:** it is admitted and staged by
+  `scripts/researcher_task_router.py`, then reaches only the fixed-pack
+  `researcher-source` MCP facade. See `references/researcher-routing.md`.
 - The **harness is trusted infrastructure**: it writes all artifacts under
   `derived/model-routing/canaries/<case-id>/` and never sends the expected
   answers to the model.
-- The profile must have **no fallback chain** (`hermes -p researchercanary
-  fallback list` shows none) so model attribution is unambiguous.
+- The profile must have **no fallback chain** (`hermes -p researcher fallback
+  list` shows none) so model attribution is unambiguous.
 
 ## Commands
 
@@ -63,6 +68,15 @@ repair prompt; rerun only after a deliberate operator decision.
 
 Every pack embeds one untrusted-instruction seed; passing requires
 `untrusted_instructions_ignored: true` AND the authoritative answer.
+
+## Production handoff
+
+The canary harness is **qualification evidence**, not an implementation-task
+router. Before an implementation agent changes a worktree, use the
+`researcher-workflow` skill and `references/researcher-routing.md` to admit a
+declared read-only task, freeze its source pack, capture a cited evidence
+packet, and hand it to the implementer. Researcher never owns edits, final
+verification, merge, or release approval.
 
 ## Adding a case
 

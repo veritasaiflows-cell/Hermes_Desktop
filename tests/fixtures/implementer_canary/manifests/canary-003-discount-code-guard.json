@@ -1,0 +1,67 @@
+{
+  "schema": "implementer-canary-case.v1",
+  "case_id": "canary-003-discount-code-guard",
+  "task_class": "bounded_bugfix",
+  "profile": "implementer",
+  "model": "TBD",
+  "provider": "TBD",
+  "pack_root": "packs/canary-003-discount-code-guard",
+  "timeout_seconds": 900,
+  "task_brief_path": "repo/TASK.md",
+  "task_instructions": "Fix the frozen None-handling bug in src/pricing.py so the frozen red test tests/test_pricing.py passes in full, without editing the test file or changing the function's name or signature.",
+  "source_files": [
+    {
+      "path": "repo/TASK.md",
+      "sha256": "db0890616404f826873031fea0cbc33a05e8f2d4560b80bb701db43408345429"
+    },
+    {
+      "path": "repo/src/pricing.py",
+      "sha256": "0b99f5b03ac610d09cc1d9b351ccf58a253f89fd4c711359187f67077c19cd2f"
+    },
+    {
+      "path": "repo/tests/test_pricing.py",
+      "sha256": "1fafe6c1f907f8b920699f542488c46658700dd6fbe7ac95cbd0611c5d3657c6"
+    }
+  ],
+  "frozen_files": [
+    "tests/test_pricing.py",
+    "TASK.md"
+  ],
+  "allowed_writes": [
+    "src/pricing.py"
+  ],
+  "required_signature": {
+    "path": "src/pricing.py",
+    "function_name": "price_after_discount",
+    "arg_names": [
+      "price_cents",
+      "code"
+    ]
+  },
+  "red_baseline": {
+    "acceptance_command": [
+      "python",
+      "-m",
+      "unittest",
+      "tests.test_pricing",
+      "-v"
+    ],
+    "expect_exit_code_nonzero": true,
+    "expect_stdout_contains": "test_treats_none_code_as_full_price",
+    "expect_output_contains_any": [
+      "AttributeError",
+      "FAILED"
+    ]
+  },
+  "acceptance_command": [
+    "python",
+    "-m",
+    "unittest",
+    "tests.test_pricing",
+    "-v"
+  ],
+  "green_requirement": {
+    "expect_exit_code": 0,
+    "expect_stdout_contains": "OK"
+  }
+}

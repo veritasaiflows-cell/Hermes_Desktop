@@ -1,0 +1,67 @@
+{
+  "schema": "implementer-canary-case.v1",
+  "case_id": "canary-002-optional-name-format",
+  "task_class": "bounded_bugfix",
+  "profile": "implementer",
+  "model": "TBD",
+  "provider": "TBD",
+  "pack_root": "packs/canary-002-optional-name-format",
+  "timeout_seconds": 900,
+  "task_brief_path": "repo/TASK.md",
+  "task_instructions": "Fix the frozen None-handling bug in src/name_fmt.py so the frozen red test tests/test_name_fmt.py passes in full, without editing the test file or changing the function's name or signature.",
+  "source_files": [
+    {
+      "path": "repo/TASK.md",
+      "sha256": "f1e4dae7cf79c36a2edbd97e07dc1c62e2873891e67d30e64f4c4c115cbde9db"
+    },
+    {
+      "path": "repo/src/name_fmt.py",
+      "sha256": "8919b2956e4a7c31578edb1bf6580a5287ec83a9abfd1ed9ada1266e694cd10d"
+    },
+    {
+      "path": "repo/tests/test_name_fmt.py",
+      "sha256": "5be7cb8372497e0b46bec6a45e3decc5c93f9df7dd1a1c0c66e541dec0e67d66"
+    }
+  ],
+  "frozen_files": [
+    "tests/test_name_fmt.py",
+    "TASK.md"
+  ],
+  "allowed_writes": [
+    "src/name_fmt.py"
+  ],
+  "required_signature": {
+    "path": "src/name_fmt.py",
+    "function_name": "format_display_name",
+    "arg_names": [
+      "first_name",
+      "last_name"
+    ]
+  },
+  "red_baseline": {
+    "acceptance_command": [
+      "python",
+      "-m",
+      "unittest",
+      "tests.test_name_fmt",
+      "-v"
+    ],
+    "expect_exit_code_nonzero": true,
+    "expect_stdout_contains": "test_treats_none_as_empty",
+    "expect_output_contains_any": [
+      "AttributeError",
+      "FAILED"
+    ]
+  },
+  "acceptance_command": [
+    "python",
+    "-m",
+    "unittest",
+    "tests.test_name_fmt",
+    "-v"
+  ],
+  "green_requirement": {
+    "expect_exit_code": 0,
+    "expect_stdout_contains": "OK"
+  }
+}

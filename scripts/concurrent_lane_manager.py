@@ -61,6 +61,7 @@ DEFAULT_FORBIDDEN_SURFACES = [
     "state/WORKFLOW_ALIAS_INDEX.md",
     "state/workflow-control-overrides.json",
     "state/concurrent-lane-register.sqlite",
+    "state/helper-agent-spawns.jsonl",
 ]
 
 

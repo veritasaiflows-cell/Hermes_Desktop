@@ -1,0 +1,66 @@
+{
+  "schema": "implementer-canary-case.v1",
+  "case_id": "canary-004-first-item-guard",
+  "task_class": "bounded_bugfix",
+  "profile": "implementer",
+  "model": "TBD",
+  "provider": "TBD",
+  "pack_root": "packs/canary-004-first-item-guard",
+  "timeout_seconds": 900,
+  "task_brief_path": "repo/TASK.md",
+  "task_instructions": "Fix the frozen None-handling bug in src/sequtil.py so the frozen red test tests/test_sequtil.py passes in full, without editing the test file or changing the function's name or signature.",
+  "source_files": [
+    {
+      "path": "repo/TASK.md",
+      "sha256": "840559612f24c8a06fb1ccd8a4614776de7347c620bfeaae630de19e7825ac89"
+    },
+    {
+      "path": "repo/src/sequtil.py",
+      "sha256": "1b535d4c9a995c247cd582f05b6c93759a2fa758bf2f32c9813c6403419958d1"
+    },
+    {
+      "path": "repo/tests/test_sequtil.py",
+      "sha256": "89cb7f74515d0e47fa7ce1dc3588d8e5b8a839554848701f781b0c94e9b310da"
+    }
+  ],
+  "frozen_files": [
+    "tests/test_sequtil.py",
+    "TASK.md"
+  ],
+  "allowed_writes": [
+    "src/sequtil.py"
+  ],
+  "required_signature": {
+    "path": "src/sequtil.py",
+    "function_name": "first_item",
+    "arg_names": [
+      "items"
+    ]
+  },
+  "red_baseline": {
+    "acceptance_command": [
+      "python",
+      "-m",
+      "unittest",
+      "tests.test_sequtil",
+      "-v"
+    ],
+    "expect_exit_code_nonzero": true,
+    "expect_stdout_contains": "test_treats_none_as_missing",
+    "expect_output_contains_any": [
+      "TypeError",
+      "FAILED"
+    ]
+  },
+  "acceptance_command": [
+    "python",
+    "-m",
+    "unittest",
+    "tests.test_sequtil",
+    "-v"
+  ],
+  "green_requirement": {
+    "expect_exit_code": 0,
+    "expect_stdout_contains": "OK"
+  }
+}

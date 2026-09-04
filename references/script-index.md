@@ -31,6 +31,13 @@ Owned by `references/automation-layer.md`.
 | `cron_canonical_integrity.py` | A13 — verify canonical SQLite integrity (read-only) | `test_freshness_cron.py` |
 | `cron_registration_validator.py` | Verify every cron wrapper resolves to a repo script | `test_cron_registration_validator.py` |
 
+## Agent qualification (canary) harnesses
+
+| Script | Purpose | Arguments | Test anchor | Owning reference |
+|---|---|---|---|---|
+| `researcher_canary_harness.py` | Deterministic, tool-free canary qualification for a read-only Researcher Bot (model attribution, no fallback, exact JSON oracle) | `validate-fixtures/run/verify` + `--manifest --run-dir --timeout` | `test_researcher_canary_harness.py` | `references/researcher-canary-runbook.md` |
+| `implementer_canary_harness.py` | Deterministic, evidence-only canary qualification for a bounded, tool-using Implementer Bot (diff/scope/frozen-hash/signature + RED→GREEN oracle) | `validate-fixtures/run/verify` + `--manifest --run-dir --timeout` | `test_implementer_canary_harness.py` | `references/implementer-canary-runbook.md` |
+
 ## Workflow entrypoints
 
 | Script | Purpose | Arguments | Test anchor | Owning reference |
@@ -39,6 +46,7 @@ Owned by `references/automation-layer.md`.
 | `workflow_router.py` | Workflow ownership routing + control-plane validator | `selector` + `--all --answer --validate --write-index --write-capsules --index-path --no-cache --aliases --status` | `test_workflow_router.py` | `references/workflow-routing-control-plane.md` |
 | `workflow_runner.py` | Mandatory read-only control-plane preflight for workflow entrypoints | (library; imported by workflow CLIs) | — | `references/workflow-routing-control-plane.md` |
 | `concurrent_lane_manager.py` | Concurrent lane + write-lease manager | `plan/lease/start/complete/status` subcommands | `test_concurrent_lane_manager.py` | `references/concurrent-lane-control-plane.md` |
+| `helper_agent_router.py` | Deterministic admission gate for bounded helper-agent spawns (read-only labeling contract; write mode requires leased covering lane) | `admit` + `--request --project-root` | `test_helper_agent_router.py`, `test_helper_agent_router_hardening.py` | `references/operating-procedures.md` |
 | `implementation_job.py` | Long-work job/phase contract, executed acceptance receipts, and bounded pickup packets | `validate/status/pickup/phase-start/phase-accept/phase-block/close` | `test_implementation_job.py` | `references/implementation-contract.md` |
 
 ## Memory layers

@@ -148,10 +148,15 @@ it.
 
 ## Researcher Bot qualification (Luna) — 2026-09-02
 
-The isolated Researcher Bot (profile `researchercanary`, `openai-codex/gpt-5.6-luna`)
-was qualified through a deterministic, tool-free canary harness:
+The isolated Researcher Bot (profile `researcher`, `openai-codex/gpt-5.6-luna`)
+was qualified through a deterministic frozen-source canary harness:
 `scripts/researcher_canary_harness.py` + frozen fixtures under
 `tests/fixtures/researcher_canary/` (procedure: `references/researcher-canary-runbook.md`).
+
+At qualification time, the evidence established structured output, source
+citation, clean-worktree detection, attribution, and refusal behavior. It did
+**not** establish a hard live-profile permission boundary; that boundary is
+recorded separately when configured and verified.
 
 Evidence batch — five case classes, all deterministic-oracle passes:
 
@@ -174,9 +179,36 @@ still returned the authoritative answer (`untrusted_instructions_ignored: true`,
 0 files modified, `fallback_executed: false`, no fallback chain configured on
 the profile). Run artifacts: `derived/model-routing/canaries/canary-00{2..5}-*/`.
 
-Harness verification: 27 unit tests (`python -m unittest
+Harness verification: 28 unit tests (`python -m unittest
 tests.test_researcher_canary_harness`) plus `validate-fixtures`, all green
 before any model call was spent.
+
+## Researcher boundary hardening — 2026-09-02
+
+The live `researcher` profile was hardened after the qualification evidence:
+
+- `agent.disabled_toolsets` now disables 40 builtin/composite toolsets, including
+  terminal, file, code execution, browser, web, skills, memory, delegation,
+  cronjob, computer use, project, desktop UI, and Kanban. `hermes -p researcher
+  tools list` showed every builtin toolset disabled.
+- The sole enabled capability is the stdio MCP server `researcher-source`,
+  configured against `scripts/researcher_source_mcp.py` and
+  `tmp/researcher-active`. `hermes -p researcher mcp test researcher-source`
+  connected and discovered exactly four tools: `task_contract`, `list_sources`,
+  `read_source`, and `search_sources`.
+- The proxy loads a single staged hash-verified snapshot at process startup;
+  path traversal, unknown arguments, source tampering, oversized reads, and
+  absent packs fail closed. Unit tests cover those paths.
+- A live `-t clarify` prompt-only call completed with Luna without tools, and a
+  live `-t researcher-source` call returned the staged task contract. A request
+  to run `git status` was refused as outside the staged-pack boundary.
+- The profile was rechecked as `openai-codex/gpt-5.6-luna`, gateway stopped, and
+  with no fallback providers. Procedure: `researcher-workflow` and
+  `references/researcher-routing.md`.
+
+This is a profile/tool boundary, not an operating-system sandbox. A profile
+administrator can still change its configuration; Researcher itself cannot use
+the disabled toolsets or mutate the staged pack.
 
 ## Open questions for the operator
 

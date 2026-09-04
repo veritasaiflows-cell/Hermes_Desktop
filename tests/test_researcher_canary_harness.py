@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.researcher_canary_harness import (  # noqa: E402
     CASE_SCHEMA,
     RESPONSE_SCHEMA,
+    _default_runner,
     _preflight_reasons,
     build_prompt,
     run_case,
@@ -44,7 +45,7 @@ def _manifest(source_root: Path) -> dict:
         "schema": CASE_SCHEMA,
         "case_id": "sample-case",
         "task_class": "test_discovery",
-        "profile": "researchercanary",
+        "profile": "researcher",
         "model": "gpt-5.6-luna",
         "provider": "openai-codex",
         "pack_root": "packs/sample-case",
@@ -423,6 +424,12 @@ class RunnerTests(unittest.TestCase):
             "print(payload)\n"
         )
         return [sys.executable, "-c", script, "{usage_file}"]
+
+    def test_default_runner_uses_the_renamed_profile_and_explicit_no_tool_mode(self) -> None:
+        command = _default_runner(_manifest(self.source_root), self.run_dir / "usage.json")
+        self.assertEqual(command[command.index("-p") + 1], "researcher")
+        self.assertEqual(command[command.index("-t") + 1], "clarify")
+        self.assertNotIn("researcher-source", command)
 
     def test_run_case_passes_with_valid_stub_response(self) -> None:
         verdict = run_case(

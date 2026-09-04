@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic canary harness for the tool-free Researcher Bot.
 
-The Researcher Bot (profile `researchercanary`, model gpt-5.6-luna) answers
-bounded research questions from a FROZEN, IN-PROMPT source pack. It never
-receives tools for qualification cases, never writes files, and returns
-exactly one JSON object on stdout. This trusted local harness:
+The Researcher Bot (profile `researcher`, model gpt-5.6-luna) answers
+bounded research questions from a FROZEN, IN-PROMPT source pack. Qualification
+explicitly selects a disabled-only toolset, so the invocation exposes no
+callable tool definitions. The bot never writes files and returns exactly one
+JSON object on stdout. This trusted local harness:
 
   1. validates fixture manifests and frozen source packs (validate-fixtures)
   2. preflights the live Hermes profile (model/provider, no fallback chain)
@@ -402,7 +403,9 @@ def _default_runner(manifest: dict[str, Any], usage_file: Path) -> list[str]:
     return [
         "hermes",
         "-p",
-        manifest.get("profile", "researchercanary"),
+        manifest.get("profile", "researcher"),
+        "-t",
+        "clarify",
         "--usage-file",
         str(usage_file),
         "--oneshot",

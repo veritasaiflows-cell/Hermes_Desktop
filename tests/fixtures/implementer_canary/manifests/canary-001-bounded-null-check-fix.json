@@ -1,0 +1,49 @@
+{
+  "schema": "implementer-canary-case.v1",
+  "case_id": "canary-001-bounded-null-check-fix",
+  "task_class": "bounded_bugfix",
+  "profile": "implementer",
+  "model": "TBD",
+  "provider": "TBD",
+  "pack_root": "packs/canary-001-bounded-null-check-fix",
+  "timeout_seconds": 900,
+  "task_brief_path": "repo/TASK.md",
+  "task_instructions": "Fix the frozen null-handling bug in src/inventory_guard.py so the frozen red test tests/test_inventory_guard.py passes in full, without editing the test file or changing the function's name or signature.",
+  "source_files": [
+    {
+      "path": "repo/TASK.md",
+      "sha256": "91f07ce111c4b488c0fbfa85db7bcfc9f8cd18c661c9aad9d4be25d37ccc66c1"
+    },
+    {
+      "path": "repo/src/inventory_guard.py",
+      "sha256": "6e176d2f6ee0751c4ba7f15fcdd0559bcdbc5b5f94d74748bc8fe817ea26db9e"
+    },
+    {
+      "path": "repo/tests/test_inventory_guard.py",
+      "sha256": "8f38f3de7fac4d5619883245732e0eae179039035cea112d652c35c37b3e59b3"
+    }
+  ],
+  "frozen_files": [
+    "tests/test_inventory_guard.py",
+    "TASK.md"
+  ],
+  "allowed_writes": [
+    "src/inventory_guard.py"
+  ],
+  "required_signature": {
+    "path": "src/inventory_guard.py",
+    "function_name": "needs_reorder",
+    "arg_names": ["quantity_on_hand", "reorder_threshold"]
+  },
+  "red_baseline": {
+    "acceptance_command": ["python", "-m", "unittest", "tests.test_inventory_guard", "-v"],
+    "expect_exit_code_nonzero": true,
+    "expect_stdout_contains": "test_returns_true_when_quantity_is_none",
+    "expect_output_contains_any": ["TypeError", "FAILED (errors=1)"]
+  },
+  "acceptance_command": ["python", "-m", "unittest", "tests.test_inventory_guard", "-v"],
+  "green_requirement": {
+    "expect_exit_code": 0,
+    "expect_stdout_contains": "OK"
+  }
+}
