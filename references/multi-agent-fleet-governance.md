@@ -13,7 +13,7 @@ authority beyond those controls.
 | Role | Status | Evidence |
 |---|---|---|
 | Researcher | **qualified** (read-only, 5 case classes) | `references/model-routing-evidence.md` → Researcher Bot qualification; lane `researcher-class-promotion-2026-09-01` |
-| Implementer | **blocked** — v3 oracle hardened, no accepted independent review yet | `derived/model-routing/canaries/implementer-2026-09-03/`; round-1/round-2 verdicts `passed:false` |
+| Implementer | **blocked** — round-3 review rejected the v3 oracle (forged-PASS vectors: snapshot-in-reach, pyc-mirror poisoning, substring walk exclusions; plus validate-fixtures traceback and orphan-bytecode false rejection) | `derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round3.json`, `lane-proof.json` (v4) |
 | Integrator | **not built** — no admission contract, merge proof, or qualification case | gap recorded below |
 | QA | **not built** — no deterministic verdict oracle | gap recorded below |
 | Challenger | **not built** — risk-trigger contract undefined | gap recorded below |

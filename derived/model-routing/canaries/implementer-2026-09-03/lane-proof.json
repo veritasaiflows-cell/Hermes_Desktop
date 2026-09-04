@@ -1,0 +1,23 @@
+{
+  "schema": "implementer-lane-proof.v4",
+  "recorded_at": "2026-09-04T05:40:00Z",
+  "supersedes": "implementer-lane-proof.v3 (2026-09-03T05:46:54Z)",
+  "round3_verdict": {
+    "file": "derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round3.json",
+    "passed": false,
+    "reviewed_by": "independent reviewer subagent (admitted read-only spawn implementer-oracle-review-round3, model glm-5.3)",
+    "gate_result": "python scripts/implementer_canary_harness.py review --verdict <round3> => status=rejected, exit=2 (fail-closed contract held)",
+    "security_concerns": 3,
+    "logic_errors": 2,
+    "key_findings": [
+      "Trusted baseline snapshot lives inside candidate write reach (run_dir sibling); forged PASS live-verified by snapshot overwrite.",
+      "PYTHONPYCACHEPREFIX mirror (.pycache-harness) is candidate-writable, survives runs, never purged; forged PASS via PEP 552 unchecked-hash pyc live-verified.",
+      "Scope-walk exclusions are substring-based ('.git' anywhere in parts; '__pycache__' substring): src/.git/ and src/__pycache__evil/ are invisible to the oracle (walk blindness live-verified).",
+      "validate-fixtures CLI tracebacks on type-malformed manifests (no JSON fail-closed backstop).",
+      "Orphan bytecode (.pyc without source) falsely rejects an honest candidate (contradicts bytecode-exclusion intent)."
+    ]
+  },
+  "status": "blocked",
+  "blocker": "Round-3 independent review rejected the v3 oracle. The implementer qualification loop remains open: fix the five findings (snapshot integrity, bytecode mirror trust, structural walk exclusions, validate-fixtures fail-closed, orphan-bytecode handling), re-run the deterministic attack replay, then re-submit for round-4 review. Implementer Bot stays sandbox-only; no live candidate run is authorized.",
+  "next_action": "Implement the round-3 suggestions in priority order: (1) content-address the trusted snapshot (hash of tree recorded at prepare time, re-verified before use), (2) per-run temp PYTHONPYCACHEPREFIX outside run_dir, (3) structural walk exclusions (top-level .git only; '__pycache__' as exact directory component), (4) _cli_validate JSON backstop + type checks, (5) orphan-bytecode purge before walk. Then round-4 review with a different reviewer model per the diversity gate."
+}
