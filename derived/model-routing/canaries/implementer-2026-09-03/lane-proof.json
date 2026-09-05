@@ -1,7 +1,7 @@
 {
-  "schema": "implementer-lane-proof.v4",
-  "recorded_at": "2026-09-04T05:40:00Z",
-  "supersedes": "implementer-lane-proof.v3 (2026-09-03T05:46:54Z)",
+  "schema": "implementer-lane-proof.v5",
+    "recorded_at": "2026-09-05T01:39:55.873518+00:00",
+    "supersedes": "implementer-lane-proof.v4 (2026-09-04T05:40:00Z); round-3 evidence retained below",
   "round3_verdict": {
     "file": "derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round3.json",
     "passed": false,
@@ -17,7 +17,21 @@
       "Orphan bytecode (.pyc without source) falsely rejects an honest candidate (contradicts bytecode-exclusion intent)."
     ]
   },
+  "round4_verdict": {
+    "file": "derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round4.json",
+    "passed": false,
+    "author_model": "moonshotai/kimi-k3",
+    "reviewer_model": "gpt-6-astra",
+    "reviewer_provider": "openai-codex",
+    "delegation_id": "deleg_5fd8ab41",
+    "review_evidence_type": "independent static review; two parent-executed disposable probes recorded separately",
+    "gate_status": "rejected",
+    "gate_exit_code": 2,
+    "gate_evidence": "derived/model-routing/canaries/implementer-2026-09-03/review-gate-round4.json",
+    "verification": "derived/model-routing/canaries/implementer-2026-09-03/round4-verification.json",
+    "probes": "derived/model-routing/canaries/implementer-2026-09-03/round4-probes.json"
+  },
   "status": "blocked",
-  "blocker": "Round-3 independent review rejected the v3 oracle. The implementer qualification loop remains open: fix the five findings (snapshot integrity, bytecode mirror trust, structural walk exclusions, validate-fixtures fail-closed, orphan-bytecode handling), re-run the deterministic attack replay, then re-submit for round-4 review. Implementer Bot stays sandbox-only; no live candidate run is authorized.",
-  "next_action": "Implement the round-3 suggestions in priority order: (1) content-address the trusted snapshot (hash of tree recorded at prepare time, re-verified before use), (2) per-run temp PYTHONPYCACHEPREFIX outside run_dir, (3) structural walk exclusions (top-level .git only; '__pycache__' as exact directory component), (4) _cli_validate JSON backstop + type checks, (5) orphan-bytecode purge before walk. Then round-4 review with a different reviewer model per the diversity gate."
+  "blocker": "Round-4 independent review rejected the current oracle. Parent probes confirmed false PASS through a top-level .git payload and early exit before tests. Same-user terminal execution is not OS-confined; post-execution integrity, manifest and full signature checks also remain open. No real candidate run or live promotion is authorized.",
+  "next_action": "Escalate the confinement and independent-acceptance architecture decision instead of claiming another local directory patch resolves the trust boundary. Keep Implementer blocked; require bounded root-cause implementation, attack regression replay, and an accepted independent review before any real candidate run."
 }

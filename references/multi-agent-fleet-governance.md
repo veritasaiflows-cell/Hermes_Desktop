@@ -13,7 +13,7 @@ authority beyond those controls.
 | Role | Status | Evidence |
 |---|---|---|
 | Researcher | **qualified** (read-only, 5 case classes) | `references/model-routing-evidence.md` → Researcher Bot qualification; lane `researcher-class-promotion-2026-09-01` |
-| Implementer | **blocked** — round-3 review rejected the v3 oracle (forged-PASS vectors: snapshot-in-reach, pyc-mirror poisoning, substring walk exclusions; plus validate-fixtures traceback and orphan-bytecode false rejection) | `derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round3.json`, `lane-proof.json` (v4) |
+| Implementer | **blocked** — round-4 independent review rejected the current oracle; parent probes confirmed false PASS from a hidden `.git` payload and early process exit. No real candidate run or live promotion. | `derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round4.json`, `round4-probes.json`, `lane-proof.json` (v5) |
 | Integrator | **not built** — no admission contract, merge proof, or qualification case | gap recorded below |
 | QA | **not built** — no deterministic verdict oracle | gap recorded below |
 | Challenger | **not built** — risk-trigger contract undefined | gap recorded below |
@@ -48,9 +48,11 @@ Promote one role at a time; each promotion requires its own deterministic
 oracle plus an accepted independent review verdict. Order is chosen by risk and
 by dependency:
 
-1. **Implementer** — finish the in-flight loop: round-3 independent review of
-   the hardened v3 oracle; only an accepted verdict unblocks the first live
-   candidate run. Until then Implementer stays sandbox-only.
+1. **Implementer** — round-4 review is rejected. Before another candidate run,
+   resolve OS confinement and independent acceptance integrity, then manifest
+   and signature enforcement; require deterministic attack replay and an
+   accepted independent review. A disposable directory is not a sandbox.
+   Do not promote or run the real candidate on the current host runner.
 2. **QA (next)** — read-only verdict role with a deterministic oracle: given a
    frozen diff + acceptance-command output, produce a `qa-verdict.v1`
    (pass/fail + defects with `path:line` citations), verified by an exact
@@ -82,8 +84,12 @@ by dependency:
 - No QA verdict oracle or fixture pack exists yet.
 - Challenger risk-trigger set is undefined (which disagreement classes fire a
   challenger review).
-- Implementer round-3 review outcome is pending; no accepted verdict exists as
-  of this writing.
+- Implementer round-4 review is rejected (review validator exit 2): no OS
+  confinement, forgeable GREEN output, unchecked execution-time mutations,
+  executable top-level `.git` payloads, inconsistent manifest validation, and
+  incomplete signature checks. The parent reproduced the GREEN and `.git`
+  bypasses in disposable fixtures. The runbook now removes the false
+  confinement claim; implementation remains blocked pending root-cause repair.
 
 ## Change history
 

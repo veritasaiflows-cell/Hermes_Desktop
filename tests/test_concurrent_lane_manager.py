@@ -208,6 +208,41 @@ class ConcurrentLaneManagerTests(unittest.TestCase):
             self.assertTrue(
                 any(item["code"] == "expired_lease" for item in validation["hard_failures"])
             )
+    def test_plan_records_expected_author_model_for_independent_review(self) -> None:
+        with TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            manager = self._make_manager(root)
+            planned = manager.plan_lane(
+                parent_job_id="job-model-attribution",
+                workflow_id="WF-1000",
+                workstream="model-attribution",
+                owner="agent-a",
+                lane_id="WF-1000::model-attribution",
+                lane_mode="write",
+                allowed_writes=["derived/model-proof.txt"],
+                expected_model="moonshotai/kimi-k3",
+            )
+            self.assertEqual(planned["expected_model"], "moonshotai/kimi-k3")
+
+    def test_record_expected_model_attributes_an_existing_running_lane(self) -> None:
+        with TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            manager = self._make_manager(root)
+            manager.plan_lane(
+                parent_job_id="job-model-update",
+                workflow_id="WF-1000",
+                workstream="model-update",
+                owner="agent-a",
+                lane_id="WF-1000::model-update",
+                lane_mode="write",
+                allowed_writes=["derived/model-update.txt"],
+            )
+            manager.lease_lane("WF-1000::model-update", owner="agent-a", duration_minutes=30)
+            manager.start_lane("WF-1000::model-update", actor="agent-a")
+            updated = manager.record_expected_model(
+                "WF-1000::model-update", "moonshotai/kimi-k3", actor="agent-a"
+            )
+            self.assertEqual(updated["expected_model"], "moonshotai/kimi-k3")
 
 
 if __name__ == "__main__":

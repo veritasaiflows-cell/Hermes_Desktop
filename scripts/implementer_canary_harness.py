@@ -32,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,8 @@ def _sha256_bytes(data: bytes) -> str:
 def _resolve_pack_root(manifest: dict[str, Any], fixtures_root: Path) -> Path:
     """Resolve the frozen pack directory declared by ``manifest``."""
     pack_root = manifest.get("pack_root", "")
+    if not isinstance(pack_root, str):
+        raise TypeError(f"pack_root must be a string, got {type(pack_root).__name__}")
     return (fixtures_root / pack_root).resolve() if pack_root else fixtures_root
 
 
@@ -87,6 +90,9 @@ def _verify_frozen_sources(
 ) -> None:
     """Append a reason for every frozen source file that fails its hash check."""
     for entry in manifest.get("source_files", []):
+        if not isinstance(entry, dict):
+            reasons.append("source_files entries must be objects with path/sha256")
+            continue
         path = entry.get("path")
         digest = entry.get("sha256")
         if not isinstance(path, str) or not isinstance(digest, str):
@@ -148,8 +154,11 @@ def _run_acceptance(
 
     Hardened against candidate-side environment tampering:
 
-    - ``PYTHONPYCACHEPREFIX`` redirects all bytecode writes outside the
-      sandbox, so no ``__pycache__`` artifacts pollute the scope oracle.
+    - ``PYTHONPYCACHEPREFIX`` points at a fresh harness-created temp
+      directory per acceptance run (never under ``run_dir`` and never
+      inside the candidate's write reach), so a candidate-planted
+      ``.pyc`` in a persistent mirror cannot be loaded (PEP 552
+      unchecked-hash or otherwise).
     - The interpreter is pinned to ``sys.executable`` when the command names
       a bare ``python``/``python3``, so a planted executable in the sandbox
       cannot shadow the real interpreter.
@@ -163,25 +172,26 @@ def _run_acceptance(
     """
     hardened = _pin_interpreter(command)
     _purge_bytecode(cwd)
-    env = {
-        "PATH": os.environ.get("PATH", ""),
-        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONPYCACHEPREFIX": str(cwd.parent / ".pycache-harness"),
-        "PYTHONUTF8": "1",
-    }
-    try:
-        completed = subprocess.run(
-            hardened,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            env=env,
-        )
-        return completed.returncode, completed.stdout, completed.stderr, False
-    except subprocess.TimeoutExpired:
-        return None, "", "acceptance command timeout", True
+    with tempfile.TemporaryDirectory(prefix="implementer-pycache-") as mirror:
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPYCACHEPREFIX": mirror,
+            "PYTHONUTF8": "1",
+        }
+        try:
+            completed = subprocess.run(
+                hardened,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                env=env,
+            )
+            return completed.returncode, completed.stdout, completed.stderr, False
+        except subprocess.TimeoutExpired:
+            return None, "", "acceptance command timeout", True
 
 
 def verify_red_baseline(
@@ -257,12 +267,20 @@ def validate_fixtures(fixtures_root: Path) -> dict[str, Any]:
         seen_case_ids.add(case_id)
 
         reasons: list[str] = []
-        pack_root = _resolve_pack_root(manifest, fixtures_root)
-        repo_root = _resolve_repo_root(manifest, pack_root)
+        try:
+            pack_root = _resolve_pack_root(manifest, fixtures_root)
+            repo_root = _resolve_repo_root(manifest, pack_root)
+        except (TypeError, ValueError) as exc:
+            errors.append(f"{manifest_path.name}: {exc}")
+            continue
         _verify_frozen_sources(manifest, pack_root, reasons)
 
-        allowed_writes = set(manifest.get("allowed_writes", []))
-        frozen_files = set(manifest.get("frozen_files", []))
+        allowed_writes = {
+            _normalize_rel(p) for p in manifest.get("allowed_writes", [])
+        }
+        frozen_files = {
+            _normalize_rel(p) for p in manifest.get("frozen_files", [])
+        }
         overlap = allowed_writes & frozen_files
         if overlap:
             reasons.append(f"allowed_writes overlaps frozen_files: {sorted(overlap)}")
@@ -284,10 +302,7 @@ def validate_fixtures(fixtures_root: Path) -> dict[str, Any]:
         for frozen in sorted(frozen_files):
             has_hash = any(
                 isinstance(entry, dict)
-                and (
-                    entry.get("path") == f"repo/{frozen}"
-                    or entry.get("path") == frozen
-                )
+                and _normalize_rel(entry.get("path", "")) == frozen
                 for entry in manifest.get("source_files", [])
             )
             if not has_hash:
@@ -398,6 +413,12 @@ def _validate_manifest_structure(manifest: dict[str, Any], pack_root: Path) -> l
     return reasons
 
 
+def _normalize_rel(path: str) -> str:
+    """Normalize a manifest path spelling: strip a leading ``repo/`` so
+    ``repo/tests/x.py`` and ``tests/x.py`` are the same file."""
+    return path.split("/", 1)[1] if path.startswith("repo/") else path
+
+
 def verify_result(
     manifest: dict[str, Any],
     repo_dir: Path,
@@ -415,11 +436,52 @@ def verify_result(
     hardened environment.
     """
     reasons: list[str] = []
-    allowed_writes = set(manifest.get("allowed_writes", []))
-    frozen_files = set(manifest.get("frozen_files", []))
+    allowed_writes = {
+        _normalize_rel(p) for p in manifest.get("allowed_writes", [])
+    }
+    frozen_files = {
+        _normalize_rel(p) for p in manifest.get("frozen_files", [])
+    }
 
-    snapshot = _snapshot_files(baseline_commit)
+    # Trusted snapshot: the token is ``<dir>#<digest>``; re-walk and re-verify
+    # the content digest before use so a forged snapshot (overwritten files or
+    # moved directory) fails closed instead of silently endorsing the diff.
+    snapshot_dir, sep, expected_digest = baseline_commit.rpartition("#")
+    if not sep or not snapshot_dir or not expected_digest:
+        return {
+            "schema": HARNESS_SCHEMA,
+            "status": "fail",
+            "case_id": manifest.get("case_id"),
+            "reasons": ["malformed baseline token; cannot trust snapshot"],
+        }
+    snapshot = _snapshot_files(snapshot_dir)
+    actual_digest = _snapshot_digest(snapshot)
+    if actual_digest != expected_digest:
+        return {
+            "schema": HARNESS_SCHEMA,
+            "status": "fail",
+            "case_id": manifest.get("case_id"),
+            "reasons": [
+                "trusted snapshot integrity check failed: content digest mismatch "
+                "(snapshot tampered or moved after prepare time)"
+            ],
+        }
     current = _sandbox_files(repo_dir)
+
+    # Orphan bytecode handling: any .pyc without its source file is either
+    # planted bytecode (never executed — acceptance always purges) or honest
+    # debris from a candidate that built then removed a helper module. It is
+    # oracle-neutral noise, so purge it from the comparison walk rather than
+    # reject the candidate on it.
+    current = {
+        path: digest
+        for path, digest in current.items()
+        if not (
+            _is_bytecode(path)
+            and _bytecode_source(path) not in current
+            and _bytecode_source(path) not in snapshot
+        )
+    }
 
     changed = sorted(
         path
@@ -434,24 +496,8 @@ def verify_result(
     # has already verified. Bytecode present at verify time is either
     # candidate-generated (running the acceptance command themselves) or
     # planted — but either way it cannot influence the acceptance verdict,
-    # so it never blocks an honest candidate. The one hard rule that
-    # remains: bytecode with NO source file is reported (an orphan .pyc in
-    # the tree is at minimum hygiene debt in the candidate's fix).
-    orphan_bytecode = sorted(
-        path
-        for path in current
-        if (path.endswith(".pyc") or "__pycache__" in path)
-        and _bytecode_source(path) not in current
-        and _bytecode_source(path) not in snapshot
-    )
-    if orphan_bytecode:
-        reasons.append(f"orphan bytecode without source file: {orphan_bytecode}")
-
-    changed_nonsource = [
-        path
-        for path in changed
-        if not (path.endswith(".pyc") or "__pycache__" in path)
-    ]
+    # so it never blocks an honest candidate.
+    changed_nonsource = [path for path in changed if not _is_bytecode(path)]
     out_of_scope = [path for path in changed_nonsource if path not in allowed_writes]
     if out_of_scope:
         reasons.append(f"write outside allowed_writes: {out_of_scope}")
@@ -459,14 +505,15 @@ def verify_result(
     if deleted:
         reasons.append(f"baseline files deleted: {deleted}")
 
-    if not [path for path in changed if path in allowed_writes]:
+    changed_allowed = [path for path in changed if path in allowed_writes]
+    if not changed_allowed:
         reasons.append("no changes were made to any allowed_writes file")
 
     # Frozen-file integrity: compare current bytes to the manifest hash for
     # any declared source file that is also declared frozen.
     for entry in manifest.get("source_files", []):
         path = entry["path"]
-        bare = path.split("/", 1)[1] if path.startswith("repo/") else path
+        bare = _normalize_rel(path)
         if bare not in frozen_files:
             continue
         candidate = repo_dir / bare
@@ -489,9 +536,6 @@ def verify_result(
             reasons.append(
                 f"required function signature changed: expected {required_sig['arg_names']}, got {params}"
             )
-
-    if not changed:
-        reasons.append("no changes were made to any allowed_writes file")
 
     acceptance_command = manifest.get("acceptance_command")
     green = manifest.get("green_requirement", {})
@@ -543,17 +587,23 @@ def _red_baseline_in_copy(
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
+def _snapshot_digest(files: dict[str, str]) -> str:
+    """Content-address a snapshot walk: hash of sorted ``path sha256`` lines."""
+    lines = "".join(f"{path} {digest}\n" for path, digest in sorted(files.items()))
+    return _sha256_bytes(lines.encode("utf-8"))
+
+
 def _prepare_sandbox(pack_root: Path, sandbox_dir: Path) -> str:
     """Copy the frozen pack into a disposable git-initialized sandbox; return baseline token.
 
     The candidate receives the sandbox (including its ``.git`` — the Bot's
     own workflow may use git), but the oracle never trusts it. A second,
-    harness-owned copy is written to ``sandbox_dir.parent / 'baseline'``:
-    the trusted snapshot the verdict is derived from. The returned token
-    names the snapshot directory; ``verify_result`` re-reads it directly and
-    never executes git inside the sandbox, so candidate-side replace refs,
-    clean filters, ``info/exclude``, or index tricks cannot influence the
-    comparison.
+    harness-owned copy is written to a fresh temp directory OUTSIDE
+    ``run_dir`` (never inside the candidate's write reach), and its content
+    digest is recorded at prepare time. The returned baseline token is
+    ``<snapshot_dir>#<sha256-of-walk>``; ``verify_result`` re-walks the
+    snapshot and re-verifies the digest before use, so any tampering with
+    the snapshot fails closed.
     """
     if sandbox_dir.exists():
         shutil.rmtree(sandbox_dir)
@@ -563,16 +613,15 @@ def _prepare_sandbox(pack_root: Path, sandbox_dir: Path) -> str:
     # acceptance run anyway).
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(pack_root, sandbox_dir, ignore=ignore)
-    snapshot_dir = sandbox_dir.parent / "baseline"
-    if snapshot_dir.exists():
-        shutil.rmtree(snapshot_dir)
+    snapshot_dir = Path(tempfile.mkdtemp(prefix="implementer-baseline-")) / "repo"
     shutil.copytree(pack_root, snapshot_dir, ignore=ignore)
+    digest = _snapshot_digest(_snapshot_files(snapshot_dir))
     _git(["init", "-q"], sandbox_dir)
     _git(["config", "user.email", "canary@local"], sandbox_dir)
     _git(["config", "user.name", "canary"], sandbox_dir)
     _git(["add", "-A"], sandbox_dir)
     _git(["commit", "-q", "-m", "baseline"], sandbox_dir)
-    return str(snapshot_dir)
+    return f"{snapshot_dir}#{digest}"
 
 
 def _bytecode_source(path: str) -> str:
@@ -603,19 +652,31 @@ def _snapshot_files(snapshot_dir: str | Path) -> dict[str, str]:
 def _sandbox_files(sandbox_dir: Path) -> dict[str, str]:
     """Return ``{relative_path: sha256}`` for every candidate-visible file.
 
-    ``.git`` is excluded: the candidate may legitimately use git internally,
-    and its contents are never compared. Everything else on disk is listed
-    by the filesystem walk, so deleted, renamed, hidden, or excluded files
-    cannot escape notice.
+    Only the sandbox's own top-level ``.git`` is excluded (the candidate may
+    legitimately use git internally). Substring exclusions are an oracle
+    blind spot: ``src/.git/`` remains just another directory (so hidden
+    payloads stay visible), and bytecode classification is structural — a
+    ``__pycache__`` directory under ANY parent is bytecode, but
+    ``src/__pycache__evil/helper.py`` is a normal source file that must be
+    walked.
     """
     files: dict[str, str] = {}
     for path in sorted(sandbox_dir.rglob("*")):
-        if ".git" in path.parts:
+        relative_path = path.relative_to(sandbox_dir)
+        if relative_path.parts and relative_path.parts[0] == ".git":
             continue
         if path.is_file():
-            relative = path.relative_to(sandbox_dir).as_posix()
-            files[relative] = _sha256_bytes(path.read_bytes())
+            files[relative_path.as_posix()] = _sha256_bytes(path.read_bytes())
     return files
+
+
+def _is_bytecode(path: str) -> bool:
+    """True only when ``path`` is bytecode: a ``.pyc`` anywhere, or any file
+    under a directory literally named ``__pycache__`` (structural component,
+    not a substring)."""
+    if path.endswith(".pyc"):
+        return True
+    return "__pycache__" in Path(path).parts
 
 
 def _default_runner(manifest: dict[str, Any], repo_dir: Path, usage_file: Path) -> list[str]:
@@ -800,7 +861,16 @@ def verify_review_verdict(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _cli_validate(args: argparse.Namespace) -> int:
     fixtures_root = Path(args.fixtures)
-    report = validate_fixtures(fixtures_root)
+    try:
+        report = validate_fixtures(fixtures_root)
+    except Exception as exc:  # noqa: BLE001 — CLI must never print a traceback
+        report = {
+            "schema": "implementer-canary-fixtures.v1",
+            "ok": False,
+            "errors": [f"internal error: {type(exc).__name__}: {exc}"],
+            "cases": [],
+            "case_count": 0,
+        }
     print(json.dumps(report, indent=2))
     return 0 if report["ok"] else 1
 

@@ -807,5 +807,121 @@ class ScopeOracleHardeningTests(unittest.TestCase):
             self.assertTrue(payload["reasons"])
 
 
+class RoundFourOracleRegressionTests(unittest.TestCase):
+    """Round-3 review findings must remain closed by deterministic tests."""
+
+    def _sandbox_case(self, root: Path) -> tuple[dict, Path, str]:
+        pack_root = _write_pack(root)
+        manifest = _manifest(pack_root)
+        sandbox = root / "run" / "sandbox"
+        baseline = _prepare_sandbox(pack_root / "repo", sandbox)
+        return manifest, sandbox, baseline
+
+    def test_snapshot_tampering_fails_before_oracle_uses_it(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest, sandbox, baseline = self._sandbox_case(Path(tmp))
+            snapshot_path = Path(baseline.rpartition("#")[0])
+            (snapshot_path / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            (sandbox / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            verdict = verify_result(manifest, sandbox, baseline)
+            self.assertEqual(verdict["status"], "fail", verdict)
+            self.assertTrue(
+                any("snapshot integrity" in reason for reason in verdict["reasons"]),
+                verdict["reasons"],
+            )
+
+    def test_acceptance_bytecode_mirror_is_not_left_under_candidate_run_dir(self) -> None:
+        from scripts.implementer_canary_harness import _run_acceptance
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "run" / "sandbox"
+            repo.mkdir(parents=True)
+            result = _run_acceptance([sys.executable, "-c", "print('OK')"], repo, 30)
+            self.assertEqual(result[0], 0, result)
+            self.assertFalse((root / "run" / ".pycache-harness").exists())
+
+    def test_nested_dot_git_file_is_an_out_of_scope_write(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest, sandbox, baseline = self._sandbox_case(Path(tmp))
+            (sandbox / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            hidden = sandbox / "src" / ".git"
+            hidden.mkdir()
+            (hidden / "payload.py").write_text("EVIL = True\n", encoding="utf-8")
+            verdict = verify_result(manifest, sandbox, baseline)
+            self.assertEqual(verdict["status"], "fail", verdict)
+            self.assertTrue(
+                any("src/.git/payload.py" in reason for reason in verdict["reasons"]),
+                verdict["reasons"],
+            )
+
+    def test_pycache_substring_directory_is_an_out_of_scope_write(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest, sandbox, baseline = self._sandbox_case(Path(tmp))
+            (sandbox / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            hidden = sandbox / "src" / "__pycache__evil"
+            hidden.mkdir()
+            (hidden / "payload.py").write_text("EVIL = True\n", encoding="utf-8")
+            verdict = verify_result(manifest, sandbox, baseline)
+            self.assertEqual(verdict["status"], "fail", verdict)
+            self.assertTrue(
+                any("src/__pycache__evil/payload.py" in reason for reason in verdict["reasons"]),
+                verdict["reasons"],
+            )
+
+    def test_validate_cli_emits_json_for_type_malformed_manifest(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        from scripts import implementer_canary_harness
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifests = root / "manifests"
+            manifests.mkdir()
+            malformed = {
+                "schema": CASE_SCHEMA,
+                "case_id": "malformed",
+                "pack_root": 123,
+                "source_files": ["not-an-object"],
+            }
+            (manifests / "malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = implementer_canary_harness.main(
+                    ["validate-fixtures", "--fixtures", str(root)]
+                )
+            report = json.loads(output.getvalue())
+            self.assertEqual(exit_code, 1)
+            self.assertFalse(report["ok"])
+            self.assertTrue(report["errors"] or report["cases"])
+
+    def test_orphan_bytecode_does_not_reject_an_honest_fix(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest, sandbox, baseline = self._sandbox_case(Path(tmp))
+            (sandbox / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            pycache = sandbox / "src" / "__pycache__"
+            pycache.mkdir()
+            (pycache / "removed_helper.cpython-311.pyc").write_bytes(b"\0" * 32)
+            verdict = verify_result(manifest, sandbox, baseline)
+            self.assertEqual(verdict["status"], "pass", verdict["reasons"])
+
+    def test_repo_prefixed_frozen_file_cannot_be_silently_skipped(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest, sandbox, baseline = self._sandbox_case(Path(tmp))
+            manifest["allowed_writes"].append("tests/test_calc.py")
+            manifest["frozen_files"] = ["repo/tests/test_calc.py", "TASK.md"]
+            (sandbox / "src" / "calc.py").write_text(FIXED_MODULE, encoding="utf-8")
+            (sandbox / "tests" / "test_calc.py").write_text(
+                "import unittest\n\nclass Trivial(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            verdict = verify_result(manifest, sandbox, baseline)
+            self.assertEqual(verdict["status"], "fail", verdict)
+            self.assertTrue(
+                any("frozen file was modified: tests/test_calc.py" in reason for reason in verdict["reasons"]),
+                verdict["reasons"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

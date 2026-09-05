@@ -6,39 +6,30 @@ answer read-only questions. Governs `scripts/implementer_canary_harness.py`.
 
 ## Trust boundary
 
-- The **candidate Bot is untrusted**: it runs with file/terminal tools scoped to a disposable,
-  git-initialized copy of a frozen fixture pack (never the pack itself). Its summary text is
-  logged but is never the basis for acceptance.
-- The **harness is trusted infrastructure**: it proves the frozen pack is a genuine RED
-  baseline before the candidate ever runs, then independently re-derives the verdict from
-  git state (diff + frozen hashes + signature + RED→GREEN transition) after the
-  candidate finishes. The candidate's own summary is logged but never trusted.
-- **Terminal-toolset split is intentional (2026-09-04):** the canary sandbox and the live
-  helper lanes are two different trust domains with one rule each.
-  - *Canary qualification only:* the disposable sandbox may grant `file,terminal` because
-    the harness — not the gate — is the enforcement surface there: the sandbox is a
-    throwaway copy, its acceptance is re-derived from repository state by the trusted
-    harness, and nothing the candidate does inside the sandbox can reach the real
-    workspace. A candidate that misuses the terminal only falsifies its own verdict.
-  - *Live helper spawns never:* `scripts/helper_agent_router.py` rejects `terminal` and
-    `execute_code` in every mode because a live shell is not lane-bounded — admission
-    cannot constrain what a shell touches, so no admitted helper may ever carry one
-    (`scripts/helper_agent_router.py:WRITE_MODE_TOOLSETS`). A canary pass therefore does
-    **not** entitle an Implementer Bot to a terminal on live lanes; its live write scope
-    is always the lane-bounded `write_file`/`patch` toolsets over a leased surface.
-- **Index-tamper resistance (2026-09-03):** the scope oracle re-derives every
-  baseline-tracked file from the baseline commit object (`git rev-parse
-  <commit>:<path>` blob id vs `git hash-object` of the working file), so
-  `git update-index --assume-unchanged` / `--skip-worktree` cannot hide a
-  modified file, and files outside `source_files`/`frozen_files` (e.g.
-  `src/__init__.py`) are still integrity-checked. Bytecode (`__pycache__`,
-  `.pyc`) never enters the sandbox baseline and is excluded from the
-  changed-file scan, so an honest candidate that runs the acceptance command
-  is not falsely rejected. RED-baseline checks run against a disposable copy
-  so the frozen packs stay byte-frozen. `run`/`verify` fail closed with JSON
-  verdicts on malformed manifests (never a traceback), and `source_files`
-  entries are containment-checked against the pack root before any content
-  is read into a prompt.
+- The **candidate Bot is untrusted**. A disposable working directory and prompt
+  restrictions do not provide OS confinement. The current runner grants a
+  same-user process `file,terminal`; it can reach outside that directory.
+  Do not run a real candidate with this harness until confinement and oracle
+  soundness have an accepted independent review. No live-route promotion is authorized.
+- The **harness is intended to be trusted infrastructure**, but its acceptance
+  result is not yet trustworthy for qualification. It checks a RED baseline,
+  snapshot-based file scope, frozen hashes, function signatures, and the
+  acceptance subprocess's exit/output. Candidate summaries are not used.
+- **Live helper spawns:** `scripts/helper_agent_router.py` rejects `terminal`
+  and `execute_code` in every mode. A future canary pass does not waive that
+  rule; live helper writes still require a scoped lease and lane-bounded
+  `write_file`/`patch` toolsets.
+- **Round-4 hardening reviewed and rejected (2026-09-04):** the current implementation
+  compares files to a content-digested snapshot rather than trusting candidate
+  Git state. It uses a fresh temporary bytecode mirror, structural exclusions,
+  a JSON backstop for `validate-fixtures`, and normalized frozen paths. A temp
+  path outside the run directory is not an access-control boundary.
+- **Confirmed remaining blockers:** disposable parent-run probes in
+  `derived/model-routing/canaries/implementer-2026-09-03/round4-probes.json`
+  received false PASS verdicts for an out-of-scope `.git/fix.py` payload and
+  for a buggy in-scope module that prints `OK` and exits before tests run.
+  Regression tests passing and valid RED fixture packs do not close these
+  holes. See the fleet governance and review artifacts for qualification state.
 
 ## Fixture layout
 
@@ -82,7 +73,7 @@ python scripts/implementer_canary_harness.py run \
 python scripts/implementer_canary_harness.py verify \
   --manifest <manifest.json> \
   --repo-dir <sandbox_dir> \
-  --baseline-commit <commit>
+  --baseline-commit "<snapshot-directory>#<snapshot-tree-sha256>"
 
 # 4. Validate an independent reviewer verdict (fail-closed, exit 2 on reject)
 python scripts/implementer_canary_harness.py review \

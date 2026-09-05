@@ -38,6 +38,7 @@ if str(PROJECT_ROOT) not in sys.path:
 DEFAULT_REGISTER_PATH = PROJECT_ROOT / "state" / "concurrent-lane-register.sqlite"
 
 VALID_STATUSES = ("planned", "leased", "running", "blocked", "cancelled", "complete")
+TERMINAL_STATUSES = frozenset({"cancelled", "complete"})
 WRITE_MODES = ("write", "read-only")
 ACTIVE_WRITE_STATUSES = ("planned", "leased", "running")
 STATUS_TRANSITIONS = {
@@ -494,6 +495,7 @@ class ConcurrentLaneManager:
         objective: str | None = None,
         job_owner: str | None = None,
         job_retry: int = 0,
+        expected_model: str | None = None,
         run_target: str | None = None,
     ) -> dict[str, Any]:
         """Register a planned lane (and its parent job) in the durable register."""
@@ -501,6 +503,10 @@ class ConcurrentLaneManager:
             raise LaneManagerError(f"Invalid lane mode: {lane_mode!r}")
         if not owner.strip():
             raise LaneManagerError("owner is required")
+        if expected_model is not None and (
+            not isinstance(expected_model, str) or not expected_model.strip()
+        ):
+            raise LaneManagerError("expected_model must be a non-empty string when provided")
 
         self._assert_workflow_known(workflow_id)
 
@@ -580,8 +586,8 @@ class ConcurrentLaneManager:
                 "lane_id, job_id, workflow_id, workstream, owner, lane_mode, status, "
                 "created_at, updated_at, revision, attempt_id, attempt, retry_count, "
                 "allowed_writes_json, forbidden_writes_json, proof_artifacts_json, stop_lines_json, "
-                "acceptance_command, session_id, runner_backend" ") "
-                "VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sqlite')",
+                "acceptance_command, session_id, runner_backend, expected_model" ") "
+                "VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sqlite', ?)",
                 (
                     requested_id,
                     parent_job_id,
@@ -601,6 +607,7 @@ class ConcurrentLaneManager:
                     _as_bool_json(_normalize_json_list(stop_lines or [])),
                     acceptance_command,
                     session_id,
+                    expected_model.strip() if expected_model is not None else None,
                 ),
             )
 
@@ -618,12 +625,56 @@ class ConcurrentLaneManager:
                     "allowed_writes": normalized_allowed,
                     "forbidden_writes": normalized_forbidden,
                     "job_id": parent_job_id,
+                    "expected_model": expected_model.strip() if expected_model is not None else None,
                     "target": run_target,
                     "allowed_modes": WRITE_MODES,
                 },
             )
             row = self._fetch_lane(connection, requested_id)
             return self._decode_fields(row)
+
+    def record_expected_model(
+        self,
+        lane_id: str,
+        expected_model: str,
+        *,
+        actor: str = "main-session",
+    ) -> dict[str, Any]:
+        """Record the author model required by the reviewer-diversity gate.
+
+        Attribution is deliberately a lane-manager event rather than a direct
+        SQLite update so review admission has durable, auditable provenance.
+        A terminal lane cannot be relabeled after its proof is closed.
+        """
+        if not isinstance(expected_model, str) or not expected_model.strip():
+            raise LaneManagerError("expected_model must be a non-empty string")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._fetch_lane(connection, lane_id)
+            if row is None:
+                raise LaneManagerError(f"Unknown lane: {lane_id!r}")
+            if row["status"] in TERMINAL_STATUSES:
+                raise LaneManagerError(
+                    f"Cannot record author model for terminal lane: {lane_id!r}"
+                )
+            revision = self._bump_revision(connection)
+            model = expected_model.strip()
+            connection.execute(
+                "UPDATE lanes SET expected_model = ?, updated_at = ?, revision = ? "
+                "WHERE lane_id = ?",
+                (model, _utc_now(), revision, lane_id),
+            )
+            self._append_event(
+                connection,
+                lane_id=lane_id,
+                attempt_id=row["attempt_id"],
+                event_type="lane.author_model_attributed",
+                actor=actor,
+                revision=revision,
+                details={"expected_model": model},
+            )
+            updated = self._fetch_lane(connection, lane_id)
+            return self._decode_fields(updated)
 
     def lease_lane(
         self,
@@ -1101,6 +1152,7 @@ def _parse_args() -> argparse.Namespace:
     plan_parser.add_argument("--acceptance-command", default=None)
     plan_parser.add_argument("--retry", type=int, default=0)
     plan_parser.add_argument("--session-id", default=None)
+    plan_parser.add_argument("--expected-model", default=None)
 
     lease_parser = subparsers.add_parser("lease", help="Grant or refresh a lease")
     lease_parser.add_argument("lane_id")
@@ -1111,6 +1163,12 @@ def _parse_args() -> argparse.Namespace:
 
     start_parser = subparsers.add_parser("start", help="Start a leased lane")
     start_parser.add_argument("lane_id")
+
+    author_model_parser = subparsers.add_parser(
+        "set-author-model", help="Record the lane author's model for review diversity"
+    )
+    author_model_parser.add_argument("lane_id")
+    author_model_parser.add_argument("--expected-model", required=True)
 
     status_parser = subparsers.add_parser("status", help="Show current lanes")
     status_parser.add_argument("--lane-id", default=None)
@@ -1182,6 +1240,7 @@ def main() -> int:
                 objective=arguments.objective,
                 job_owner=arguments.job_owner,
                 job_retry=arguments.retry,
+                expected_model=arguments.expected_model,
             )
             print(json.dumps(_normalize_output(result), indent=2, sort_keys=True))
             return 0
@@ -1200,6 +1259,13 @@ def main() -> int:
 
         if arguments.command == "start":
             result = manager.start_lane(arguments.lane_id, actor=arguments.actor)
+            print(json.dumps(_normalize_output(result), indent=2, sort_keys=True))
+            return 0
+
+        if arguments.command == "set-author-model":
+            result = manager.record_expected_model(
+                arguments.lane_id, arguments.expected_model, actor=arguments.actor
+            )
             print(json.dumps(_normalize_output(result), indent=2, sort_keys=True))
             return 0
 
