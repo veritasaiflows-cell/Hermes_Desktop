@@ -3,7 +3,7 @@
 - page_type: navigation_map
 - owner: AGENTS.md
 - status: current
-- generated_time: 2026-08-30T03:59:45Z
+- generated_time: 2026-09-20T19:45:50Z
 - source_artifacts:
   - AGENTS.md
   - GOVERNANCE.md

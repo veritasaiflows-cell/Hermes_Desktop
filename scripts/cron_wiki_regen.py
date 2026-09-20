@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Daily wiki freshness regen (A1).
 
-Regenerates the wiki bootstrap manifest and validates the result. Prints a
-single short line on success or a diagnostic block on failure. Exits 0 on
-fresh publish, non-zero on any failure.
+Re-attests pages that are stale only because time passed (sources re-verified
+unchanged), then regenerates the wiki bootstrap manifest and validates the
+result. Prints a single short line on success or a diagnostic block on
+failure. Exits 0 on fresh publish, non-zero on any failure.
+
+Re-attestation closes the time-only staleness deadlock: `publish` refuses
+candidate pages whose `generated_time` aged past the freshness window, and
+only `wiki_bootstrap.py reattest` can refresh that marker -- for pages whose
+sole outstanding issue is `stale_freshness` and whose declared sources still
+hash to their published manifest values. Pages with any real issue are
+refused, and the refusal is reported, never bypassed.
 
 Intended use: `no_agent` cron, daily schedule. Silent when green -- the
 A2 watchdog will catch any failure. When non-zero, the cron delivers the
@@ -22,16 +30,38 @@ PYTHON = sys.executable
 TIMEOUT_SECONDS = 120
 
 
-def main() -> int:
-    """Publish and validate the wiki; exit 0 on fresh, non-zero on failure."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    completed = subprocess.run(
-        [PYTHON, "scripts/wiki_bootstrap.py", "publish"],
+def _run_bootstrap(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run a wiki_bootstrap.py action from the project root."""
+    return subprocess.run(
+        [PYTHON, "scripts/wiki_bootstrap.py", *args],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
         timeout=TIMEOUT_SECONDS,
     )
+
+
+def _reattest() -> subprocess.CompletedProcess[str]:
+    """Refresh generated_time on time-only-stale pages whose sources re-verify.
+
+    Refusal (exit 2) is not a failure of this wrapper: it means real issues
+    block re-attestation, and the subsequent publish step will report them.
+    """
+    return _run_bootstrap("reattest")
+
+
+def main() -> int:
+    """Re-attest then publish and validate; exit 0 on fresh, non-zero otherwise."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        _reattest()
+    except subprocess.TimeoutExpired:
+        print(f"WIKI REGEN FAIL {now}")
+        print(f"reattest timed out after {TIMEOUT_SECONDS}s")
+        return 1
+
+    completed = _run_bootstrap("publish")
     if completed.returncode != 0:
         print(f"WIKI REGEN FAIL {now}")
         print("--- stdout ---")

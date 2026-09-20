@@ -3,7 +3,7 @@
 - page_type: gap_register
 - owner: references/operating-procedures.md
 - status: current
-- generated_time: 2026-09-01T02:51:06Z
+- generated_time: 2026-09-20T19:45:50Z
 - source_artifacts:
   - references/operating-procedures.md
   - references/concurrent-lane-control-plane.md

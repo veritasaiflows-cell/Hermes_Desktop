@@ -274,27 +274,112 @@ class HealthCheckLogicTests(unittest.TestCase):
 
 
 class WikiRegenLogicTests(unittest.TestCase):
+    """Pin the A1 wrapper contract: reattest runs before publish, always.
+
+    Order matters: the reattest step is what clears time-only staleness, so a
+    fake subprocess must answer for both calls in sequence.
+    """
+
+    def test_reattest_runs_before_publish_in_order(self):
+        reattest_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"schema": "wiki-reattest-report.v1", "status": "reattested"}),
+        )
+        publish_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"status": "fresh", "changed_sources": []}),
+        )
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=[reattest_result, publish_result],
+        ) as run_mock:
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(run_mock.call_count, 2)
+        first_command = run_mock.call_args_list[0].args[0]
+        second_command = run_mock.call_args_list[1].args[0]
+        self.assertEqual(first_command[-1], "reattest")
+        self.assertEqual(second_command[-1], "publish")
+
+    def test_reattest_refusal_still_attempts_publish(self):
+        # Exit 2 = refused (real issues). The wrapper must not abort: publish
+        # is the step that reports the blocking issues with diagnostics.
+        reattest_result = subprocess_result(
+            returncode=2,
+            stdout=json.dumps({"schema": "wiki-reattest-report.v1", "status": "refused"}),
+        )
+        publish_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"status": "fresh", "changed_sources": []}),
+        )
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=[reattest_result, publish_result],
+        ) as run_mock:
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(run_mock.call_count, 2)
+
+    def test_reattest_timeout_fails_closed_without_publish(self):
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=cron_wiki_regen.subprocess.TimeoutExpired(
+                cmd=["wiki_bootstrap.py", "reattest"],
+                timeout=cron_wiki_regen.TIMEOUT_SECONDS,
+            ),
+        ) as run_mock:
+            rc = cron_wiki_regen.main()
+        self.assertEqual(rc, 1)
+        self.assertEqual(run_mock.call_count, 1)
+
     def test_fresh_publish_returns_zero(self):
+        reattest_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"schema": "wiki-reattest-report.v1", "status": "noop"}),
+        )
         fake_result = subprocess_result(
             returncode=0,
             stdout=json.dumps({"status": "fresh", "changed_sources": []}),
         )
-        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=[reattest_result, fake_result],
+        ):
             rc = cron_wiki_regen.main()
         self.assertEqual(rc, 0)
 
     def test_degraded_publish_returns_one(self):
+        reattest_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"schema": "wiki-reattest-report.v1", "status": "noop"}),
+        )
         fake_result = subprocess_result(
             returncode=0,
             stdout=json.dumps({"status": "stale", "issues": [{"type": "x"}]}),
         )
-        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=[reattest_result, fake_result],
+        ):
             rc = cron_wiki_regen.main()
         self.assertEqual(rc, 1)
 
     def test_subprocess_failure_returns_one(self):
+        reattest_result = subprocess_result(
+            returncode=0,
+            stdout=json.dumps({"schema": "wiki-reattest-report.v1", "status": "noop"}),
+        )
         fake_result = subprocess_result(returncode=1, stdout="", stderr="boom")
-        with patch.object(cron_wiki_regen.subprocess, "run", return_value=fake_result):
+        with patch.object(
+            cron_wiki_regen.subprocess,
+            "run",
+            side_effect=[reattest_result, fake_result],
+        ):
             rc = cron_wiki_regen.main()
         self.assertEqual(rc, 1)
 

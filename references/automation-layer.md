@@ -8,7 +8,7 @@ Graphify candidate before atomically selecting an immutable generation.
 
 ## Authoritative code (version-controlled)
 
-- `scripts/cron_wiki_regen.py` — A1 logic (publish + report; silent on fresh, alerts on degraded/fail)
+- `scripts/cron_wiki_regen.py` — A1 logic (reattest + publish + report; silent on fresh, alerts on degraded/fail)
 - `scripts/cron_health_check.py` — A2 logic (fast operational gate: routing freshness + wiki validate + alias sweep + cron registration + recall-index liveness)
 - `scripts/cron_test_gate.py` — A2-full logic (full `run_checks.py --skip-smoke --record-telemetry` correctness gate)
 - `scripts/cron_routing_cache_sweep.py` — A3 logic (evicts expired routing cache rows and rows with mismatched source signatures)

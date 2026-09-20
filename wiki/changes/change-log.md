@@ -3,7 +3,7 @@
 - page_type: change_log
 - owner: scripts/wiki_bootstrap.py
 - status: current
-- generated_time: 2026-09-01T02:51:06Z
+- generated_time: 2026-09-20T19:45:50Z
 - source_artifacts:
   - scripts/wiki_bootstrap.py
   - AGENTS.md
@@ -37,3 +37,4 @@
 - 2026-08-23: Graphify refreshed and rebaselined (1341 nodes, 2972 edges, 79 communities); graphify_freshness.py reports fresh with no issues.
 - 2026-08-23: This page and wiki/gaps/open-gaps.md were manually refreshed under lane wiki-freshness-review-2026-08-23 because publish refuses stale candidates before regenerating them; the deadlock is recorded as an open gap.
 - 2026-08-30: Wiki publish deadlock closed in code. scripts/wiki_bootstrap.py gained a `reattest` action that refreshes generated_time ONLY for pages whose sole issue is stale_freshness and whose declared source artifacts still hash to their published manifest values; pages with real source drift, missing markers, forbidden authority language, or unproven `pending` hashes are refused with reasons. Re-attestation asserts "sources re-verified unchanged", never "content regenerated". Five regression tests added in tests/test_wiki_bootstrap.py, including refusal on genuine source drift and CRLF preservation. This replaces the 2026-08-23 manual refresh workaround; the open gap is resolved.
+- 2026-09-20: A1 wiki regen wrapper (scripts/cron_wiki_regen.py) now chains the reattest action before publish. All six required pages aged past the weekly freshness window from 2026-09-01 onward and publish refused stale candidates, so A1 failed on 6 consecutive daily runs; nothing in the daily path invoked reattest. The wrapper now runs `wiki_bootstrap.py reattest` first (refreshing generated_time for time-only-stale pages whose sources re-verify) and then publishes; refusal of a genuinely drifted page still flows into publish, which reports it and exits non-zero. Contract tests updated in tests/test_cron_wrappers.py (reattest-before-publish order, refusal passthrough, reattest timeout fails closed). Closed under lane wiki-reattest-a1-2026-09-20.
