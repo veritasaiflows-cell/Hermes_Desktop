@@ -1,0 +1,13 @@
+{
+  "schema": "note-drift-acknowledged/v1",
+  "purpose": "Facts whose continuity note states the same thing in different words. The drift check is lexical and cannot judge semantic equivalence; each entry here is a human assertion that the named note passage covers the state record's claim. Keys are workflow:field:sha256(normalized fact)[:16] -- rewording the state record invalidates its acknowledgment and the check fires again.",
+  "review": "Re-read each covered_by passage when its workflow's note is rewritten. An acknowledgment suppresses a failure; it is not a permanent exemption for the field.",
+  "acknowledged": {
+    "WF-1004:blockers:482389b2b8736984": {
+      "fact": "No paying client engagement exists; demand is unvalidated.",
+      "covered_by": "continuity/WF-1004-Agent-Trust-Audit.md -> '## Known limitations' -> 'No revenue has been earned. Demand is unvalidated. No buyer conversation has taken place; pricing is an untested hypothesis and no price appears in any artifact.'",
+      "reason": "Same claim, stronger wording in the note: 'no buyer conversation has taken place' entails 'no paying client engagement exists', and 'demand is unvalidated' is verbatim.",
+      "acknowledged_on": "2026-09-20"
+    }
+  }
+}

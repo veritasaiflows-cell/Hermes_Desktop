@@ -34,6 +34,7 @@ EXPECTED_JOBS = [
     ("a16_graphify_mcp_contract.py", PROJECT_ROOT / "scripts" / "cron_graphify_mcp_contract.py"),
     ("a17_graphify_version_advisory.py", PROJECT_ROOT / "scripts" / "cron_graphify_version_advisory.py"),
     ("a18_graphify_code_refresh.py", PROJECT_ROOT / "scripts" / "cron_graphify_code_refresh.py"),
+    ("a19_note_state_drift.py", PROJECT_ROOT / "scripts" / "check_note_state_drift.py"),
 ]
 
 DIRECT_REPO_JOBS: list[tuple[str, Path]] = []

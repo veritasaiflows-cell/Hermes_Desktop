@@ -37,6 +37,7 @@ Graphify candidate before atomically selecting an immutable generation.
 - `tests/test_cron_registration_validator.py` — pins the A9 wrapper + registration contract
 - `tests/test_workspace_status.py` — pins A11 healthy/degraded/warning contracts
 - `tests/test_graphify_cron_automation.py` — pins A15-A18 silence, drift, isolation, rollback, and contract behavior
+- `tests/test_note_state_drift.py` — pins A19 detection, derived-field exclusion, and acknowledgment expiry
 
 ## Cron launchers (in ~/AppData/Local/hermes/scripts/, required location for cron)
 
@@ -59,6 +60,7 @@ Graphify candidate before atomically selecting an immutable generation.
 - `a16_graphify_mcp_contract.py` -> execs `scripts/cron_graphify_mcp_contract.py`
 - `a17_graphify_version_advisory.py` -> execs `scripts/cron_graphify_version_advisory.py`
 - `a18_graphify_code_refresh.py` -> execs `scripts/cron_graphify_code_refresh.py`
+- `a19_note_state_drift.py` -> execs `scripts/check_note_state_drift.py`
 
 These are thin launchers so the real logic stays in the repo. Launchers fall
 back to a repo root discovered from the launcher path if the hardcoded `TARGET`
@@ -87,6 +89,7 @@ is missing.
 | A16 | Graphify MCP contract | daily 07:25 | checks the fixed-facade configuration, seven advertised tools, closed raw schemas, and `graph_stats` |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
 | A18 | Graphify code refresh | daily 02:10 (paused) | scheduled runs require explicit one-shot authorization; `--promote-once` builds an isolated candidate and atomically selects it only after all gates pass |
+| A19 | Note/state drift | daily 08:40 | every authored blocker, stop line, and `effective_status` in `state/workflows/WF-*.json` must appear in that workflow's continuity note |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
 except A8 intentionally emits a compact candidate ID when human review is

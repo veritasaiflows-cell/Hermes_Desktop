@@ -30,6 +30,7 @@ Owned by `references/automation-layer.md`.
 | `cron_retrieval_refresh.py` | A12 — refresh exact + semantic indexes from approved manifest | `test_cron_retrieval_refresh.py` |
 | `cron_canonical_integrity.py` | A13 — verify canonical SQLite integrity (read-only) | `test_freshness_cron.py` |
 | `cron_registration_validator.py` | Verify every cron wrapper resolves to a repo script | `test_cron_registration_validator.py` |
+| `check_note_state_drift.py` | A19 — authored blockers/stop-lines/status in state records must appear in the continuity note (`--state-dir --ack-file --json`) | `test_note_state_drift.py` |
 
 ## Agent qualification (canary) harnesses
 

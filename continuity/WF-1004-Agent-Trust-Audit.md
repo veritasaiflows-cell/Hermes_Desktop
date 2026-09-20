@@ -50,6 +50,9 @@ Reproduce: `python scripts/gate_counterfactual.py`
   claim is that they were bad decisions on the available evidence.
 - The corpus is a single domain (US dropshipping) at a single point in time
   (2026-08-29). Generalization to other domains is untested.
+- No measured comparison of gated versus ungated agent behavior exists beyond
+  the WF-1000 corpus. The counterfactual covers one workflow's 30 leads; no
+  second corpus, domain, or client stack has been measured.
 
 ## Out of scope
 - External messaging, outreach, publication, or advertising.
