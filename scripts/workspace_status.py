@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +62,7 @@ DEFAULT_GATES: list[tuple[str, list[str], int]] = [
         60,
     ),
     ("claim_drift", ["scripts/cron_claim_drift_check.py"], 60),
+    ("note_drift", ["scripts/check_note_state_drift.py"], 60),
     ("graph_integrity", ["scripts/graph_memory.py", "validate"], 120),
     ("graph_freshness", ["scripts/cron_graph_freshness.py"], 120),
     ("graphify_freshness", ["scripts/graphify_freshness.py"], 120),
@@ -80,7 +82,30 @@ GATES: list[tuple[str, list[str], int]] = (
 # workspace_index, archive_stale) stay in the full brief and the A11 cron
 # heartbeat. The fast routing gate allows cache reads (no --no-cache) since
 # A5 refreshes the index hourly.
-FAST_GATE_LABELS = ("organization", "routing", "wiki", "lane_register")
+FAST_GATE_LABELS = ("organization", "routing", "wiki", "lane_register", "note_drift")
+
+# Gates proven read-only by a file-tree diff (path, size, mtime) across the
+# workspace plus Hermes cron/telemetry dirs, two runs each (2026-09-26).
+# Excluded writers: lane_register (opens the register read-write: WAL + schema
+# DDL), vector_memory and workspace_index (touch SQLite -shm files). Any gate
+# not listed here — including test/env-injected labels — runs serially.
+PARALLEL_SAFE_GATES = frozenset(
+    {
+        "organization",
+        "routing",
+        "wiki",
+        "alias",
+        "cron_registration",
+        "feedback_evaluation",
+        "claim_drift",
+        "note_drift",
+        "graph_integrity",
+        "graph_freshness",
+        "graphify_freshness",
+        "archive_stale",
+    }
+)
+MAX_PARALLEL_GATES = 6
 
 
 def fast_gates() -> list[tuple[str, list[str], int]]:
@@ -157,16 +182,42 @@ def _run_gates(
     *,
     project_root: Path = PROJECT_ROOT,
 ) -> dict[str, dict]:
-    """Run gates serially to avoid shared SQLite and artifact races."""
-    results: dict[str, dict] = {}
-    for label, args, timeout in gates:
-        results[label] = _run(
-            label,
-            args,
-            timeout,
-            project_root=project_root,
-        )
-    return results
+    """Run gates, overlapping only the ones proven read-only.
+
+    Gates listed in ``PARALLEL_SAFE_GATES`` run concurrently in a thread pool.
+    Every other gate (writers and unknown/injected labels) runs strictly one at
+    a time in a single chain alongside that pool, so no two writers ever overlap
+    — the original shared-SQLite/artifact race guard. ``WORKSPACE_STATUS_SERIAL=1``
+    restores fully serial execution. Results are always returned in declared order.
+    """
+    if os.environ.get("WORKSPACE_STATUS_SERIAL") == "1" or len(gates) < 2:
+        return {
+            label: _run(label, args, timeout, project_root=project_root)
+            for label, args, timeout in gates
+        }
+
+    safe = [gate for gate in gates if gate[0] in PARALLEL_SAFE_GATES]
+    serial = [gate for gate in gates if gate[0] not in PARALLEL_SAFE_GATES]
+    collected: dict[str, dict] = {}
+
+    def _serial_chain() -> dict[str, dict]:
+        return {
+            label: _run(label, args, timeout, project_root=project_root)
+            for label, args, timeout in serial
+        }
+
+    workers = min(MAX_PARALLEL_GATES, len(safe) + (1 if serial else 0)) or 1
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gate") as pool:
+        chain = pool.submit(_serial_chain) if serial else None
+        futures = {
+            pool.submit(_run, label, args, timeout, project_root=project_root): label
+            for label, args, timeout in safe
+        }
+        for future, label in futures.items():
+            collected[label] = future.result()
+        if chain is not None:
+            collected.update(chain.result())
+    return {label: collected[label] for label, _args, _timeout in gates}
 
 
 def _git_head() -> dict:
@@ -464,6 +515,13 @@ def _health_decision(gates: dict[str, dict]) -> tuple[str, list[str], list[str]]
     claim_gate = gates.get("claim_drift")
     if claim_gate is not None and claim_gate.get("exit", 1) != 0:
         warnings.append("claim_drift")
+
+    # A19: authored workflow facts and the generated fleet roster must agree
+    # with their continuity notes. Drift misleads readers but does not corrupt
+    # state, so it warns rather than failing the gate hard.
+    note_drift_gate = gates.get("note_drift")
+    if note_drift_gate is not None and note_drift_gate.get("exit", 1) != 0:
+        warnings.append("note_drift")
 
     lane_gate = gates.get("lane_register", {})
     if lane_gate:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic canary harness for the tool-free Researcher Bot.
 
-The Researcher Bot (profile `researcher`, model gpt-5.6-luna) answers
+The Researcher Bot (profile `researcher`; model pinned per manifest) answers
 bounded research questions from a FROZEN, IN-PROMPT source pack. Qualification
 explicitly selects a disabled-only toolset, so the invocation exposes no
 callable tool definitions. The bot never writes files and returns exactly one

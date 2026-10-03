@@ -147,6 +147,20 @@ REPAIR_CYCLE_ESCALATION_THRESHOLD = 2
 
 LANE_ACCEPTED_STATUSES = ("leased", "running")
 
+# Fleet role registry (WF-1200). When the registry exists and sets
+# ``enforce_roles``, every request must declare ``role`` and ``model`` and the
+# model must equal the role's single approved binding. A missing registry keeps
+# the legacy role-less contract; an unreadable one fails closed.
+ROLE_REGISTRY_RELATIVE = Path("state") / "fleet-role-registry.json"
+ROLE_REGISTRY_SCHEMA = "fleet-role-registry.v1"
+LANE_EXCEPTION_SCHEMA = "helper-lane-exception.v1"
+_ROLE_FIELDS = ("role", "model")
+# Role statuses that admit spawns without a per-lane operator exception.
+ROLE_SPAWNABLE_STATUSES = frozenset({"qualified", "admissible"})
+# Role statuses that admit read-only spawns but need a qualification or an
+# operator-recorded lane exception before any write spawn.
+ROLE_READ_ONLY_STATUSES = frozenset({"qualification_required"})
+
 
 class HelperAgentRouterError(ValueError):
     """Raised when a spawn request crosses the helper-agent boundary."""
@@ -515,6 +529,146 @@ def _check_review_attribution(
         )
 
 
+def _load_role_registry(project_root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (registry, error). (None, None) means no registry is installed."""
+    path = project_root / ROLE_REGISTRY_RELATIVE
+    if not path.exists():
+        return None, None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"fleet role registry is unreadable: {exc}"
+    if not isinstance(payload, dict) or payload.get("schema") != ROLE_REGISTRY_SCHEMA:
+        return None, "fleet role registry has an unsupported schema"
+    if not isinstance(payload.get("roles"), dict):
+        return None, "fleet role registry is missing its roles map"
+    exceptions = payload.get("lane_exceptions", [])
+    if not isinstance(exceptions, list):
+        return None, "fleet role registry lane_exceptions must be a list"
+    return payload, None
+
+
+def _read_lane_row(project_root: Path, lane_id: str) -> sqlite3.Row | None:
+    register_path = project_root / "state" / "concurrent-lane-register.sqlite"
+    if not register_path.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(str(register_path))
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("PRAGMA query_only = ON")
+            return _load_lane(connection, lane_id)
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return None
+
+
+def _has_lane_exception(
+    registry: dict[str, Any], role: str, lane_id: object, task_id: object
+) -> bool:
+    """Return whether one operator exception covers this exact first-attempt task."""
+    for entry in registry.get("lane_exceptions", []):
+        if (
+            isinstance(entry, dict)
+            and entry.get("schema") == LANE_EXCEPTION_SCHEMA
+            and entry.get("kind") == "one_time_lane_write"
+            and entry.get("role") == role
+            and entry.get("lane_id") == lane_id
+            and entry.get("task_id") == task_id
+            and entry.get("mode") == "write"
+            and entry.get("first_attempt_only") is True
+            and entry.get("approved_by") == "operator"
+        ):
+            return True
+    return False
+
+
+def _check_role_binding(
+    request: dict[str, Any],
+    registry: dict[str, Any] | None,
+    registry_error: str | None,
+    project_root: Path,
+    reasons: list[str],
+) -> None:
+    """Enforce the WF-1200 role -> model binding and escalation ladder."""
+    if registry_error is not None:
+        _reject(registry_error, reasons)
+        return
+    role = request.get("role")
+    model = request.get("model")
+    if registry is None:
+        if role is not None or model is not None:
+            _reject("role/model declared but no fleet role registry is installed", reasons)
+        return
+    if not registry.get("enforce_roles"):
+        if role is None and model is None:
+            return
+    if role is None or model is None:
+        _reject("fleet role registry is enforced: request must declare role and model", reasons)
+        return
+    roles = registry["roles"]
+    if not isinstance(role, str) or role not in roles:
+        _reject(f"role {role!r} is not in the fleet role registry", reasons)
+        return
+    spec = roles[role]
+    if not isinstance(spec, dict):
+        _reject(f"role {role!r} registry entry is malformed", reasons)
+        return
+    bound = f"{spec.get('provider')}/{spec.get('model')}"
+    if not isinstance(model, str) or model.strip() not in {bound, str(spec.get("model"))}:
+        _reject(
+            f"model {model!r} is not the approved binding for role {role!r} ({bound})",
+            reasons,
+        )
+    status = spec.get("status")
+    mode = request.get("mode")
+    lane_id = request.get("lane_id")
+    if status in ROLE_READ_ONLY_STATUSES:
+        if mode == "write" and not _has_lane_exception(
+            registry, role, lane_id, request.get("task_id")
+        ):
+            _reject(
+                f"role {role!r} is {status}: write spawns need qualification or an "
+                f"operator-recorded one-time lane exception for task "
+                f"{request.get('task_id')!r} in lane {lane_id!r}",
+                reasons,
+            )
+    elif status not in ROLE_SPAWNABLE_STATUSES:
+        _reject(f"role {role!r} is not spawnable (status={status!r})", reasons)
+        return
+    if mode not in spec.get("modes", []):
+        _reject(f"role {role!r} may not spawn in mode {mode!r}", reasons)
+    task_class = request.get("task_class")
+    if task_class not in spec.get("task_classes", []):
+        _reject(f"role {role!r} may not take task_class {task_class!r}", reasons)
+    if role == "qa" or task_class == "review":
+        reviewer_model = request.get("reviewer_model")
+        if reviewer_model is not None and reviewer_model not in {bound, spec.get("model")}:
+            _reject("reviewer_model must equal the spawned role's model binding", reasons)
+
+    # Escalation ladder: bound which role may work a lane by its repair cycle.
+    if mode == "write" and isinstance(lane_id, str):
+        row = _read_lane_row(project_root, lane_id)
+        retry_count = row["retry_count"] if row is not None else None
+        if not isinstance(retry_count, int):
+            return  # lane errors are reported by _check_lane
+        max_retry = spec.get("max_lane_retry_count")
+        min_retry = spec.get("min_lane_retry_count")
+        if isinstance(max_retry, int) and retry_count > max_retry:
+            _reject(
+                f"lane {lane_id!r} failed acceptance (repair cycle {retry_count}); "
+                f"role {role!r} is limited to cycle <= {max_retry}: escalate to senior_engineer",
+                reasons,
+            )
+        if isinstance(min_retry, int) and retry_count < min_retry:
+            _reject(
+                f"role {role!r} is escalation-only: lane {lane_id!r} is at repair cycle "
+                f"{retry_count}, needs >= {min_retry} (implementer attempts first)",
+                reasons,
+            )
+
+
 def admit_request(
     request: object, *, project_root: Path | None = None
 ) -> dict[str, Any]:
@@ -535,6 +689,7 @@ def admit_request(
         set(request)
         - REQUIRED_REQUEST_FIELDS
         - {"lane_id"}
+        - set(_ROLE_FIELDS)
         - (set(_CONDITIONAL_REVIEW_FIELDS) if is_review_class else set())
     )
     missing = sorted(REQUIRED_REQUEST_FIELDS - set(request))
@@ -604,6 +759,9 @@ def admit_request(
         request, Path(project_root or PROJECT_ROOT), reasons
     )
 
+    registry, registry_error = _load_role_registry(root)
+    _check_role_binding(request, registry, registry_error, root, reasons)
+
     return {
         "schema": ADMISSION_SCHEMA,
         "status": "admitted" if not reasons else "rejected",
@@ -637,6 +795,8 @@ def build_spawn_event(
         "allowed_writes": request.get("allowed_writes"),
         "reviews_lane": request.get("reviews_lane"),
         "reviewer_model": request.get("reviewer_model"),
+        "role": request.get("role"),
+        "model": request.get("model"),
     }
 
 

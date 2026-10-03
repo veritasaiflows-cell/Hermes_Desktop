@@ -1,0 +1,110 @@
+{
+  "authoritative_next_action": "Do not reuse the consumed Implementer exceptions or ingest real client data. Resume only through Senior Engineer repair-cycle-1 lanes, and keep phases 3-5 closed until WF-1005 confirms a real prospect needs a module.",
+  "authority_boundary": "review_only",
+  "authority_class": "review_ready",
+  "blocker_count": 4,
+  "blockers": [
+    "All four phase-1 Implementer attempts timed out without required tests or accepted lane proofs.",
+    "Dependency WF-1200 is not active for downstream execution (status='route_only').",
+    "Dependency WF-1200 reports blockers: The four WF-1100 one-time Implementer lane exceptions are consumed and their attempts are blocked.",
+    "Dependency WF-1200 has active stop-lines."
+  ],
+  "commands": {
+    "dry_run": null,
+    "write": null
+  },
+  "continuity_note": "continuity\\WF-1100-SMB-Services-Platform.md",
+  "control_override": null,
+  "current_state": "Phase-1 specs are accepted. Four one-time Implementer attempts timed out after 900 seconds; three incomplete source files remain quarantined, no required test target exists, and no lane was accepted. The repair route is now the Senior Engineer (openai-codex/gpt-6.1-sol) at repair cycle 1; no repair lane has been opened yet.",
+  "default_resume_command": "python scripts/workflow_router.py WF-1100 --answer next --validate",
+  "dependency_blockers": [
+    "Dependency WF-1200 is not active for downstream execution (status='route_only').",
+    "Dependency WF-1200 reports blockers: The four WF-1100 one-time Implementer lane exceptions are consumed and their attempts are blocked.",
+    "Dependency WF-1200 has active stop-lines."
+  ],
+  "depends_on": [
+    "WF-1200"
+  ],
+  "display_name": "SMB Services Platform",
+  "effective_status": "route_only",
+  "freshness_sla": "weekly",
+  "generated_at": "2026-10-03T23:10:13Z",
+  "graph_dependency_blockers": [],
+  "helper_safe": false,
+  "human_approval_owner": "operator",
+  "implementation_script": null,
+  "lifecycle": "route_only",
+  "next_action": "Governor opens repair-cycle-1 lanes for the four phase-1 lanes, dispatches the Senior Engineer against the accepted architect spec, runs each acceptance command, and sends passing diffs to independent QA.",
+  "owner_action_required": false,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1100.json",
+  "priority": "high",
+  "proof_artifact": "continuity\\WF-1100-SMB-Services-Platform.md",
+  "readiness": "route_only",
+  "recall_context": {
+    "available": true,
+    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
+    "result_count": 3,
+    "results": [
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L148-L157",
+        "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6192153395783002,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\README.md:L33-L50",
+        "excerpt": "python scripts/run_checks.py\npython scripts/workflow_router.py WF-1000 --answer summary --validate --write-index\n```",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6188398569008963,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\README.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L164-L177",
+        "excerpt": "## 7) Verification\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6105834921628651,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
+      }
+    ]
+  },
+  "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v1",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1100-SMB-Services-Platform.md"
+  ],
+  "stop_lines": [
+    "No real client data or client credentials before a client data-handling policy is approved",
+    "No write, send, or payment action against any external client system without operator and client approval",
+    "Client data never leaves its own client directory or crosses into another client's store"
+  ],
+  "tier": "P1",
+  "validator_commands": [
+    "python -m unittest discover -s tests -v",
+    "python scripts/workflow_router.py WF-1100 --answer summary --validate"
+  ],
+  "workflow_id": "WF-1100"
+}

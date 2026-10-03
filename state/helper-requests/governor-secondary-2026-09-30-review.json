@@ -1,0 +1,17 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "governor-secondary-2026-09-30-review",
+  "task_class": "review",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "qa",
+  "model": "openai-codex/gpt-5.6-sol",
+  "reviews_lane": "governor-secondary-2026-09-30",
+  "reviewer_model": "openai-codex/gpt-5.6-sol",
+  "objective": "Independently review the operator-approved Governor secondary configuration and verify that Opus stays primary and no helper authority or binding is broadened.",
+  "scope": "Read only state/fleet-role-registry.json, references/multi-agent-fleet-governance.md, continuity/WF-1200-Agent-Fleet-Roles.md, scripts/helper_agent_router.py, tests/test_helper_agent_router.py, and derived/lane-proofs/governor-secondary-2026-09-30/. Treat the before snapshot and verification outputs as evidence. Do not read credentials, other profile files, or client data. Return a verdict and defects with exact path:line references; do not write files or close the lane.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 4,
+  "owner": "agent-main"
+}

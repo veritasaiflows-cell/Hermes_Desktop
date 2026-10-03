@@ -1,0 +1,17 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "fleet-rebinding-2026-10-03-review",
+  "task_class": "review",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "qa",
+  "model": "openai-codex/gpt-5.6-sol",
+  "reviews_lane": "fleet-rebinding-2026-10-03",
+  "reviewer_model": "openai-codex/gpt-5.6-sol",
+  "objective": "Independently review the operator-approved fleet rebinding: Senior Engineer -> openai-codex/gpt-6.1-sol, Governor parent-only fallback -> openai-codex/gpt-6-astra. Verify no other binding, status, exception, or authority was broadened and that notes/state/registry agree.",
+  "scope": "Read only: state/fleet-role-registry.json, derived/lane-proofs/fleet-rebinding-2026-10-03/fleet-role-registry.before.json (pre-change copy), continuity/WF-1200-Agent-Fleet-Roles.md, continuity/WF-1100-SMB-Services-Platform.md, references/multi-agent-fleet-governance.md, state/active_workflows.json, state/workflows/WF-1100.json, state/workflows/WF-1200.json, tests/test_helper_agent_router.py (class FleetRoleBindingTests), derived/lane-proofs/fleet-rebinding-2026-10-03/. Do not read credentials, other profile files, or client data. Return PASS or FAIL plus defects with exact path:line; do not write files or close the lane.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 6,
+  "owner": "agent-main"
+}

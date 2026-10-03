@@ -1,0 +1,172 @@
+{
+  "schema": "fleet-role-registry.v1",
+  "workflow_id": "WF-1200",
+  "updated_at": "2026-10-03",
+  "approved_by": "operator",
+  "enforce_roles": true,
+  "roles": {
+    "governor": {
+      "profile": "default",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "fallback_providers": [
+        {
+          "provider": "openai-codex",
+          "model": "gpt-6-astra",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-rebinding"
+        }
+      ],
+      "status": "parent_only",
+      "purpose": "Primary session: governance, approvals, final acceptance, dispatch. Never spawned as a helper.",
+      "modes": [],
+      "task_classes": []
+    },
+    "architect": {
+      "profile": "architect",
+      "provider": "openai-codex",
+      "model": "gpt-6-astra",
+      "fallback_providers": [
+        {
+          "provider": "anthropic",
+          "model": "claude-opus-5-5",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+        }
+      ],
+      "status": "admissible",
+      "purpose": "Architecture, lane decomposition, per-lane specs. Read-only; the governor records specs.",
+      "modes": ["read-only"],
+      "task_classes": ["analysis", "documentation", "research"]
+    },
+    "implementer": {
+      "profile": "implementer",
+      "provider": "ollama-cloud",
+      "model": "deepseek-v4.1-flash",
+      "fallback_providers": [
+        {
+          "provider": "ollama-cloud",
+          "model": "glm-5.3-flash",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+        }
+      ],
+      "status": "qualification_required",
+      "purpose": "Bulk code in leased lanes, first attempt only (repair cycle 0).",
+      "modes": ["read-only", "write"],
+      "task_classes": ["implementation", "test_authoring", "documentation"],
+      "max_lane_retry_count": 0
+    },
+    "senior_engineer": {
+      "profile": "seniorengineer",
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-03-fleet-rebinding",
+      "fallback_providers": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+        }
+      ],
+      "status": "admissible",
+      "purpose": "Debugging and escalated jobs after an implementer failure (lane repair cycle >= 1).",
+      "modes": ["read-only", "write"],
+      "task_classes": ["implementation", "test_authoring", "documentation", "analysis"],
+      "min_lane_retry_count": 1
+    },
+    "qa": {
+      "profile": "qa",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-03-qa-sonnet-rebinding",
+      "fallback_providers": [
+        {
+          "provider": "openai-codex",
+          "model": "gpt-6.1-sol",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+        }
+      ],
+      "status": "admissible",
+      "purpose": "Independent review of lane diffs; reviewer model must differ from the lane author.",
+      "modes": ["read-only"],
+      "task_classes": ["review"]
+    },
+    "researcher": {
+      "profile": "researcher",
+      "provider": "openai-codex",
+      "model": "gpt-6-luna",
+      "fallback_providers": [
+        {
+          "provider": "ollama-cloud",
+          "model": "deepseek-v4.1-flash",
+          "approved_by": "operator",
+          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+        }
+      ],
+      "status": "qualified",
+      "requalification": {
+        "outcome": "qualified 2026-10-03: canary 002, 004, 005 passed first attempt; 003 refused on attempt 1 (no JSON) and passed on operator-approved rerun. Qualification is on 4 of 4 cases but with one first-attempt miss on 003.",
+        "reason": "Primary changed from openai-codex/gpt-5.6-luna to openai-codex/gpt-6-luna; the prior qualification belongs to the old model.",
+        "previous_model": "gpt-5.6-luna",
+        "target_status": "qualified",
+        "evidence_dir": "derived/model-routing/canaries/gpt-6-luna-2026-10-03/",
+        "approved_by": "operator",
+        "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+      },
+      "purpose": "Frozen-pack evidence research.",
+      "modes": ["read-only"],
+      "task_classes": ["research", "analysis"]
+    }
+  },
+  "lane_exceptions": [
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "wf1100-p1-client-registry",
+      "task_id": "wf1100-p1-client-registry-implement",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-09-26"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "wf1100-p1-business-schema",
+      "task_id": "wf1100-p1-business-schema-implement",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-09-26"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "wf1100-p1-csv-import",
+      "task_id": "wf1100-p1-csv-import-implement",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-09-26"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "wf1100-p1-demo-datasets",
+      "task_id": "wf1100-p1-demo-datasets-implement",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-09-26"
+    }
+  ]
+}

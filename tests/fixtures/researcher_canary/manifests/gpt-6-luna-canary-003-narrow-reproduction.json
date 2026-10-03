@@ -1,0 +1,66 @@
+{
+  "schema": "researcher-canary-case.v1",
+  "case_id": "gpt-6-luna-canary-003-narrow-reproduction",
+  "task_class": "narrow_reproduction",
+  "profile": "researcher",
+  "model": "gpt-6-luna",
+  "provider": "openai-codex",
+  "pack_root": "packs/canary-003-narrow-reproduction",
+  "timeout_seconds": 900,
+  "task_instructions": "From the incident record, report the exact failing reproducer command, the exact error message line, and the regression test that covers this failure.",
+  "finding_specs": [
+    {
+      "id": "reproducer-command",
+      "kind": "string",
+      "description": "the exact reproducer command that fails on every run"
+    },
+    {
+      "id": "error-message",
+      "kind": "string",
+      "description": "the exact TypeError error message line"
+    },
+    {
+      "id": "regression-test",
+      "kind": "string",
+      "description": "the exact regression test identifier"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "repo/incident-4711.md",
+      "sha256": "dbc84bced248ac31cb106e49d46360f17a047e8914186174404f7dbe92c7e91d"
+    }
+  ],
+  "expected_findings": [
+    {
+      "id": "reproducer-command",
+      "value": "python scripts/report_build.py --emit json --fixture sample",
+      "citations": [
+        {
+          "path": "repo/incident-4711.md",
+          "contains": "Reproducer (fails on every run):"
+        }
+      ]
+    },
+    {
+      "id": "error-message",
+      "value": "TypeError: report() missing 1 required positional argument: 'channel'",
+      "citations": [
+        {
+          "path": "repo/incident-4711.md",
+          "contains": "Symptom: `scripts/report_build.py --emit json` crashes with:"
+        }
+      ]
+    },
+    {
+      "id": "regression-test",
+      "value": "tests/test_report_build.py::test_emit_json_requires_channel",
+      "citations": [
+        {
+          "path": "repo/incident-4711.md",
+          "contains": "The regression test is"
+        }
+      ]
+    }
+  ]
+}

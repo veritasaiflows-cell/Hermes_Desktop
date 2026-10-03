@@ -38,6 +38,11 @@ def _read_only_request(**overrides: object) -> dict[str, object]:
     return request
 
 
+# The live workspace enforces the WF-1200 fleet role registry, so requests
+# admitted against PROJECT_ROOT must declare a registry-bound role/model.
+_LIVE_ROLE = {"role": "researcher", "model": "openai-codex/gpt-6-luna"}
+
+
 def _write_mode_request(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "mode": "write",
@@ -169,7 +174,7 @@ class ToolsetFamilyTests(unittest.TestCase):
 
     def test_read_only_allowlisted_toolsets_still_admit(self) -> None:
         result = helper_agent_router.admit_request(
-            _read_only_request(allowed_toolsets=["read_files", "web_search"])
+            _read_only_request(allowed_toolsets=["read_files", "web_search"], **_LIVE_ROLE)
         )
 
         self.assertEqual(result["status"], "admitted", result["reasons"])
@@ -412,7 +417,7 @@ class CliProcessContractTests(unittest.TestCase):
             )
 
     def test_admit_process_exits_zero_with_admission_json(self) -> None:
-        completed = self._run_cli(_read_only_request())
+        completed = self._run_cli(_read_only_request(**_LIVE_ROLE))
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
@@ -432,7 +437,7 @@ class CliProcessContractTests(unittest.TestCase):
         audit_log = PROJECT_ROOT / "state" / "helper-agent-spawns.jsonl"
         before = audit_log.read_bytes() if audit_log.exists() else None
 
-        completed = self._run_cli(_read_only_request(task_id="isolated-process-audit"))
+        completed = self._run_cli(_read_only_request(task_id="isolated-process-audit", **_LIVE_ROLE))
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         after = audit_log.read_bytes() if audit_log.exists() else None

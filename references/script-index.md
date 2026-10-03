@@ -30,7 +30,8 @@ Owned by `references/automation-layer.md`.
 | `cron_retrieval_refresh.py` | A12 — refresh exact + semantic indexes from approved manifest | `test_cron_retrieval_refresh.py` |
 | `cron_canonical_integrity.py` | A13 — verify canonical SQLite integrity (read-only) | `test_freshness_cron.py` |
 | `cron_registration_validator.py` | Verify every cron wrapper resolves to a repo script | `test_cron_registration_validator.py` |
-| `check_note_state_drift.py` | A19 — authored blockers/stop-lines/status in state records must appear in the continuity note (`--state-dir --ack-file --json`) | `test_note_state_drift.py` |
+| `check_note_state_drift.py` | A19 — authored blockers/stop-lines/status in state records must appear in the continuity note, and the WF-1200 generated role roster must match the registry (`--state-dir --ack-file --json`); also a fast-tier startup gate (`note_drift`, warning-class) | `test_note_state_drift.py` |
+| `fleet_roster_block.py` | Generates the WF-1200 note's role-roster block from `state/fleet-role-registry.json`; `--check` / `--write` (only the BEGIN/END-marked region is rewritten) | `test_fleet_roster_block.py` |
 
 ## Agent qualification (canary) harnesses
 

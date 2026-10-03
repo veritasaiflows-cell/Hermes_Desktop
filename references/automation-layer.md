@@ -89,7 +89,7 @@ is missing.
 | A16 | Graphify MCP contract | daily 07:25 | checks the fixed-facade configuration, seven advertised tools, closed raw schemas, and `graph_stats` |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
 | A18 | Graphify code refresh | daily 02:10 (paused) | scheduled runs require explicit one-shot authorization; `--promote-once` builds an isolated candidate and atomically selects it only after all gates pass |
-| A19 | Note/state drift | daily 08:40 | every authored blocker, stop line, and `effective_status` in `state/workflows/WF-*.json` must appear in that workflow's continuity note |
+| A19 | Note/state drift | daily 08:40 | every authored blocker, stop line, and `effective_status` in `state/workflows/WF-*.json` must appear in that workflow's continuity note, and the generated role roster in the WF-1200 note must equal what `state/fleet-role-registry.json` renders (`scripts/fleet_roster_block.py`). Also runs in the fast startup gate (`workspace_status.py --fast`, label `note_drift`) as a warning-class check; the heartbeat remains the scheduled owner. Regenerate the roster with `python scripts/fleet_roster_block.py --write` after any registry change |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
 except A8 intentionally emits a compact candidate ID when human review is

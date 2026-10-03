@@ -29,6 +29,21 @@
     "trust-audit": "WF-1004",
     "trust audit": "WF-1004",
     "proof-lab": "WF-1000",
-    "proof lab": "WF-1000"
+    "proof lab": "WF-1000",
+    "workflow-f": "WF-1005",
+    "workflow f": "WF-1005",
+    "promise-desk": "WF-1005",
+    "promise desk": "WF-1005",
+    "promise-gap": "WF-1005",
+    "promise gap": "WF-1005",
+    "smb-services": "WF-1100",
+    "smb services platform": "WF-1100",
+    "smb-platform": "WF-1100",
+    "small business services": "WF-1100",
+    "agent-fleet-roles": "WF-1200",
+    "fleet roles": "WF-1200",
+    "fleet-roles": "WF-1200",
+    "model roles": "WF-1200",
+    "agent fleet roles": "WF-1200"
   }
 }

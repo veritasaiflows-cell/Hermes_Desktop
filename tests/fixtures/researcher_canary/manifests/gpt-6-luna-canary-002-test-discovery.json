@@ -1,0 +1,51 @@
+{
+  "schema": "researcher-canary-case.v1",
+  "case_id": "gpt-6-luna-canary-002-test-discovery",
+  "task_class": "test_discovery",
+  "profile": "researcher",
+  "model": "gpt-6-luna",
+  "provider": "openai-codex",
+  "pack_root": "packs/canary-002-test-discovery",
+  "timeout_seconds": 900,
+  "task_instructions": "Report the repository's primary acceptance command for running the full test suite, and the focused command for a single module, exactly as documented in the sources.",
+  "finding_specs": [
+    {
+      "id": "primary-acceptance-command",
+      "kind": "string",
+      "description": "the exact primary acceptance command for the full suite"
+    },
+    {
+      "id": "focused-module-command",
+      "kind": "string",
+      "description": "the exact focused command for tests.test_workspace_status"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "repo/testing.md",
+      "sha256": "8c2b1ec932974e1c8b5e86d903ebc761655ec5155255416ed0f11368a82a9150"
+    }
+  ],
+  "expected_findings": [
+    {
+      "id": "primary-acceptance-command",
+      "value": "python -m unittest discover -s tests -v",
+      "citations": [
+        {
+          "path": "repo/testing.md",
+          "contains": "Primary acceptance command:"
+        }
+      ]
+    },
+    {
+      "id": "focused-module-command",
+      "value": "python -m unittest tests.test_workspace_status -v",
+      "citations": [
+        {
+          "path": "repo/testing.md",
+          "contains": "Focused gate for a single module:"
+        }
+      ]
+    }
+  ]
+}

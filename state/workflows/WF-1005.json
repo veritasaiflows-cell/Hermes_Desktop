@@ -1,0 +1,103 @@
+{
+  "authoritative_next_action": "Do not collect data on or contact any named business until the operator selects targets and approves. Do not build an implementation script until one buyer conversation has occurred.",
+  "authority_boundary": "review_only",
+  "authority_class": "review_ready",
+  "blocker_count": 2,
+  "blockers": [
+    "No paying client engagement exists; demand is unvalidated.",
+    "No operator-selected target business has been approved for examination."
+  ],
+  "commands": {
+    "dry_run": null,
+    "write": null
+  },
+  "continuity_note": "continuity\\WF-1005-Promise-Desk.md",
+  "control_override": null,
+  "current_state": "Promise desk for local small businesses. Extracts a business's own public promises (response-time, hours, pricing, licensing), binds each to dated evidence, and measures the gap between promise and published infrastructure. No client AI required. No implementation script yet; control surface only.",
+  "default_resume_command": "python scripts/workflow_router.py WF-1005 --answer next --validate",
+  "dependency_blockers": [],
+  "depends_on": [],
+  "display_name": "Workflow F - Promise Desk",
+  "effective_status": "route_only",
+  "freshness_sla": "weekly",
+  "generated_at": "2026-10-03T23:10:13Z",
+  "graph_dependency_blockers": [],
+  "helper_safe": false,
+  "human_approval_owner": "operator",
+  "implementation_script": null,
+  "lifecycle": "route_only",
+  "next_action": "Operator-led conversations with 1-3 Wave-1 trade contractors using the promise-gap framing. First public-page measurement pass only after operator confirms which businesses may be examined.",
+  "owner_action_required": true,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1005.json",
+  "priority": "high",
+  "proof_artifact": "continuity\\WF-1005-Promise-Desk.md",
+  "readiness": "route_only",
+  "recall_context": {
+    "available": true,
+    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
+    "result_count": 3,
+    "results": [
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md:L119-L153",
+        "excerpt": "## 5) Controls and policy\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6183848837875213,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\workflow-product-research.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md:L149-L175",
+        "excerpt": "### Standing local checkpoint authority\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.611165180931282,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md:L14-L79",
+        "excerpt": "## Standard operating loop\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6027984926681907,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md"
+      }
+    ]
+  },
+  "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v1",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1005-Promise-Desk.md"
+  ],
+  "stop_lines": [
+    "No external messages, outreach, or publication without operator approval",
+    "No monitoring of or test contact with a named business without operator authorization and a recorded consent decision",
+    "No implication that a fix exists or is included; deliverable is a measured gap report only",
+    "Avoided cost and lost-revenue figures are labeled estimates, never measured or earned revenue"
+  ],
+  "tier": "P1",
+  "validator_commands": [
+    "python -m unittest discover -s tests -v",
+    "python scripts/workflow_router.py WF-1005 --answer summary --validate"
+  ],
+  "workflow_id": "WF-1005"
+}

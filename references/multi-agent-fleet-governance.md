@@ -12,12 +12,35 @@ authority beyond those controls.
 
 | Role | Status | Evidence |
 |---|---|---|
-| Researcher | **qualified** (read-only, 5 case classes) | `references/model-routing-evidence.md` → Researcher Bot qualification; lane `researcher-class-promotion-2026-09-01` |
+| Researcher | **qualified** on `gpt-6-luna` as of 2026-10-03 (canary 4/4; case 003 refused on attempt 1 and passed on the operator-approved rerun, so it is not a clean sweep) | `references/model-routing-evidence.md` → Researcher Bot qualification; lane `researcher-class-promotion-2026-09-01` |
 | Implementer | **blocked** — round-4 independent review rejected the current oracle; parent probes confirmed false PASS from a hidden `.git` payload and early process exit. No real candidate run or live promotion. | `derived/model-routing/canaries/implementer-2026-09-03/review-verdict-round4.json`, `round4-probes.json`, `lane-proof.json` (v5) |
 | Integrator | **not built** — no admission contract, merge proof, or qualification case | gap recorded below |
 | QA | **not built** — no deterministic verdict oracle | gap recorded below |
 | Challenger | **not built** — risk-trigger contract undefined | gap recorded below |
 | Documentarian | **covered by existing class** — `documentation` task class in `ALLOWED_TASK_CLASSES` with lane-bounded writes | `scripts/helper_agent_router.py` |
+
+### Model bindings (WF-1200, operator-approved 2026-09-26)
+
+Source of truth: `state/fleet-role-registry.json` (gate-enforced; one approved
+`provider/model` per helper role; a request with any other model is rejected).
+The Governor remains `parent_only`: its primary binding and operator-approved
+secondary routes are recorded under `roles.governor`, with secondaries in
+`fallback_providers`. These entries are parent-session metadata, not additional
+helper bindings. The `default` profile's Hermes `fallback_providers` controls
+runtime failover; no Governor may be spawned as a helper.
+
+| Role / profile | Binding | Registry status | Ladder |
+|---|---|---|---|
+| Governor / `default` | `anthropic/claude-opus-5-5` (fallback `openai-codex/gpt-6-astra`, parent-only) | parent_only (never spawned) | approves, dispatches, accepts |
+| Architect / `architect` | `openai-codex/gpt-6-astra` (fallback `anthropic/claude-opus-5-5`) | admissible, read-only | specs + lane decomposition |
+| Implementer / `implementer` | `ollama-cloud/deepseek-v4.1-flash` (fallback `ollama-cloud/glm-5.3-flash`) | qualification_required (write needs canary pass or an exact one-time lane exception) | repair cycle 0 only |
+| Senior Engineer / `seniorengineer` | `openai-codex/gpt-6.1-sol` (fallback `anthropic/claude-sonnet-5-5`) | admissible, escalation-only | repair cycle ≥ 1 (after implementer failure) |
+| QA / `qa` | `anthropic/claude-sonnet-5-5` (fallback `openai-codex/gpt-6.1-sol`) | admissible, read-only review | must differ from lane author |
+| Researcher / `researcher` | `openai-codex/gpt-6-luna` (fallback `ollama-cloud/deepseek-v4.1-flash`) | qualified on 2026-10-03 (canary 4/4; case 003 refused on attempt 1, passed on rerun) | unchanged |
+
+Escalation: implementer attempt fails acceptance → `retry` the lane (cycle 1)
+→ only `senior_engineer` is admitted → a second failure (cycle 2) blocks every
+role and routes to the human owner. Runbook: `continuity/WF-1200-Agent-Fleet-Roles.md`.
 
 ## Role authority matrix (workspace-enforced)
 
@@ -41,6 +64,23 @@ Gate-enforced invariants (all fail closed in `admit_request`):
 3. **No shell on live lanes:** `terminal`/`execute_code` are rejected in every
    mode; a canary sandbox terminal is a different trust domain (see
    `references/implementer-canary-runbook.md`, terminal-toolset split).
+4. **One-time exception shape:** an unqualified Implementer write requires a
+   `helper-lane-exception.v1` entry with kind `one_time_lane_write`, exact role,
+   lane, task, write mode, `first_attempt_only=true`, and operator approval.
+   Lane retry limits and terminal status prevent promotion into reusable authority.
+
+## Fleet fallbacks (operator-approved 2026-10-03)
+
+Every role now carries one registry-recorded fallback (`fallback_providers`), mirrored into that
+profile's Hermes config. The registry owns the facts; the WF-1200 roster block is generated from it.
+The admission gate binds a request to the role's primary only, so a fallback is a runtime route and
+is never separately admissible. No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran. Under automatic failover the model that runs differs from the
+registry primary: the reviewer-differs-from-author rule must be checked against the model that
+actually ran. Researcher requalification: primary changed `gpt-5.6-luna` to `gpt-6-luna`; evidence in
+`derived/model-routing/canaries/gpt-6-luna-2026-10-03/`. Researcher fallback
+`ollama-cloud/deepseek-v4.1-flash` initially failed live (no `OLLAMA_API_KEY` in that profile); on
+2026-10-03 the operator approved copying the implementer profile's existing key into the researcher
+profile's `.env`, and a live probe from `researcher` then answered. Rotate that key in each profile's `.env`. Canary runs need an empty fallback chain: clear it, run, restore.
 
 ## Qualification order (next bots)
 
@@ -92,6 +132,28 @@ by dependency:
   confinement claim; implementation remains blocked pending root-cause repair.
 
 ## Change history
+
+- 2026-10-03 — Operator rebound Senior Engineer to `openai-codex/gpt-6.1-sol`
+  (OpenRouter Muse Spark 1.3 dropped; it was blocked by a provider age gate) and
+  replaced the Governor's parent-only fallback with `openai-codex/gpt-6-astra`.
+  Opus 5.5 stays primary; repair-cycle limits, consumed Implementer exceptions,
+  and the gate's reviewer-differs-from-author rule are unchanged. Owner:
+  `state/fleet-role-registry.json`; approval ref
+  `operator-chat-2026-10-03-fleet-rebinding`.
+
+- 2026-09-30 — Operator approved GPT-6.1-Sol as the secondary Governor route
+  (superseded 2026-10-03 by GPT-6-Astra).
+  Opus 5.5 stays primary; parent-only authority and helper bindings are unchanged.
+  Approval and fallback metadata are owned by `state/fleet-role-registry.json`.
+
+- 2026-09-26 — Built role profiles (`default`, `architect`, `implementer`,
+  `seniorengineer`, `qa`; existing `researcher`) and added task-and-lane-bound
+  `helper-lane-exception.v1` enforcement for the four WF-1100 phase-1 tasks.
+
+- 2026-09-26 — WF-1200: role → model registry (`state/fleet-role-registry.json`)
+  enforced by `_check_role_binding` in `scripts/helper_agent_router.py`;
+  added Architect (GPT-6-Astra) and escalation-only Senior Engineer
+  (Muse Spark 1.3); Opus 5.5 named governor. Implementer write stays gated.
 
 - 2026-09-04 — Established from the fleet review; author/reviewer diversity
   gate and 2-repair-cycle escalation stop implemented in

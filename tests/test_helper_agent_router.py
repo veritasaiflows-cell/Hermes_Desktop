@@ -85,7 +85,9 @@ class HelperAgentRouterTests(unittest.TestCase):
     # --- schema shape ---
 
     def test_declared_read_only_request_is_admitted(self) -> None:
-        result = helper_agent_router.admit_request(_write_request())
+        # Isolated root: no fleet role registry, so the legacy role-less contract applies.
+        with TemporaryDirectory() as tmp:
+            result = helper_agent_router.admit_request(_write_request(), project_root=Path(tmp))
 
         self.assertEqual(result["status"], "admitted")
         self.assertEqual(result["reasons"], [])
@@ -1009,6 +1011,247 @@ class RepairCycleEscalationTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "admitted", result["reasons"])
+
+
+def _install_registry(root: Path, **role_overrides: dict[str, object]) -> dict[str, object]:
+    live = json.loads(
+        (PROJECT_ROOT / "state" / "fleet-role-registry.json").read_text(encoding="utf-8")
+    )
+    for role, override in role_overrides.items():
+        live["roles"][role].update(override)
+    (root / "state").mkdir(parents=True, exist_ok=True)
+    (root / "state" / "fleet-role-registry.json").write_text(json.dumps(live), encoding="utf-8")
+    return live
+
+
+def _set_retry(root: Path, count: int) -> None:
+    connection = sqlite3.connect(str(root / "state" / "concurrent-lane-register.sqlite"))
+    try:
+        connection.execute(
+            "UPDATE lanes SET retry_count = ? WHERE lane_id = ?",
+            (count, "WF-1000::helper-gate-fixture"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+class FleetRoleBindingTests(unittest.TestCase):
+    """WF-1200: role -> model binding and implementer -> senior_engineer ladder."""
+
+    def _root(self) -> Path:
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name)
+
+    def _write_root(self, retry: int = 0, **overrides: dict[str, object]) -> Path:
+        root = self._root()
+        fixture = _LaneFixture(root)
+        fixture.lease()
+        _install_registry(root, **overrides)
+        if retry:
+            _set_retry(root, retry)
+        return root
+
+    def test_live_registry_binds_operator_approved_models(self) -> None:
+        live = json.loads(
+            (PROJECT_ROOT / "state" / "fleet-role-registry.json").read_text(encoding="utf-8")
+        )
+        bindings = {r: f"{s['provider']}/{s['model']}" for r, s in live["roles"].items()}
+        self.assertEqual(bindings["governor"], "anthropic/claude-opus-5-5")
+        # 2026-10-03 operator rebinding: Astra is the Governor's parent-only
+        # fallback; GPT-6.1-Sol is the escalation-only Senior Engineer.
+        fallbacks = live["roles"]["governor"]["fallback_providers"]
+        self.assertEqual(
+            [f"{f['provider']}/{f['model']}" for f in fallbacks],
+            ["openai-codex/gpt-6-astra"],
+        )
+        self.assertEqual(live["roles"]["governor"]["status"], "parent_only")
+        # 2026-10-03 operator fleet-fallback change: every role carries one
+        # operator-approved fallback; only the researcher primary changed.
+        expected_fallbacks = {
+            "architect": "anthropic/claude-opus-5-5",
+            "implementer": "ollama-cloud/glm-5.3-flash",
+            "senior_engineer": "anthropic/claude-sonnet-5-5",
+            "qa": "openai-codex/gpt-6.1-sol",
+            "researcher": "ollama-cloud/deepseek-v4.1-flash",
+        }
+        for role, expected in expected_fallbacks.items():
+            chain = live["roles"][role].get("fallback_providers", [])
+            self.assertEqual([f"{f['provider']}/{f['model']}" for f in chain], [expected], role)
+            for item in chain:
+                self.assertEqual(item.get("approved_by"), "operator", role)
+                self.assertTrue(item.get("approval_ref"), role)
+                # a fallback must never be the role's own primary
+                self.assertNotEqual(f"{item['provider']}/{item['model']}", bindings[role], role)
+        self.assertEqual(bindings["researcher"], "openai-codex/gpt-6-luna")
+        self.assertIn(live["roles"]["researcher"]["status"], {"qualified", "qualification_required"})
+        if live["roles"]["researcher"]["status"] == "qualification_required":
+            self.assertEqual(live["roles"]["researcher"]["requalification"]["previous_model"], "gpt-5.6-luna")
+        self.assertNotIn("muse", json.dumps(live).lower())
+        self.assertEqual(bindings["architect"], "openai-codex/gpt-6-astra")
+        self.assertEqual(bindings["senior_engineer"], "openai-codex/gpt-6.1-sol")
+        self.assertEqual(bindings["implementer"], "ollama-cloud/deepseek-v4.1-flash")
+        self.assertEqual(live["roles"]["implementer"]["status"], "qualification_required")
+        self.assertEqual(live["roles"]["governor"]["profile"], "default")
+        self.assertEqual(live["roles"]["architect"]["profile"], "architect")
+        self.assertEqual(live["roles"]["implementer"]["profile"], "implementer")
+        self.assertEqual(live["roles"]["senior_engineer"]["profile"], "seniorengineer")
+        self.assertEqual(live["roles"]["qa"]["profile"], "qa")
+        self.assertEqual(live["roles"]["researcher"]["profile"], "researcher")
+        self.assertEqual(live["roles"]["senior_engineer"]["min_lane_retry_count"], 1)
+        # Escalation must be able to absorb every task class the implementer can fail.
+        self.assertTrue(
+            set(live["roles"]["implementer"]["task_classes"])
+            <= set(live["roles"]["senior_engineer"]["task_classes"])
+        )
+
+    def test_live_workspace_requires_role_declaration(self) -> None:
+        result = helper_agent_router.admit_request(_write_request())
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("must declare role and model" in r for r in result["reasons"]))
+
+    def test_architect_with_bound_model_is_admitted(self) -> None:
+        root = self._root()
+        _install_registry(root)
+        result = helper_agent_router.admit_request(
+            _write_request(task_class="analysis", role="architect", model="openai-codex/gpt-6-astra"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_role_with_unbound_model_is_rejected(self) -> None:
+        root = self._root()
+        _install_registry(root)
+        result = helper_agent_router.admit_request(
+            _write_request(task_class="analysis", role="architect", model="ollama-cloud/deepseek-v4.1-flash"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("not the approved binding" in r for r in result["reasons"]))
+
+    def test_unknown_role_and_parent_only_governor_are_rejected(self) -> None:
+        root = self._root()
+        _install_registry(root)
+        for role, model in (("intern", "x/y"), ("governor", "anthropic/claude-opus-5-5")):
+            result = helper_agent_router.admit_request(
+                _write_request(task_class="analysis", role=role, model=model), project_root=root
+            )
+            self.assertEqual(result["status"], "rejected", role)
+
+    def test_architect_cannot_write(self) -> None:
+        root = self._write_root()
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="architect", model="openai-codex/gpt-6-astra"), project_root=root
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("may not spawn in mode 'write'" in r for r in result["reasons"]))
+
+    def test_unqualified_implementer_write_is_rejected_without_exception(self) -> None:
+        root = self._write_root()
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("qualification_required" in r for r in result["reasons"]))
+
+    def test_implementer_write_admitted_with_operator_lane_exception(self) -> None:
+        root = self._write_root()
+        path = root / "state" / "fleet-role-registry.json"
+        registry = json.loads(path.read_text(encoding="utf-8"))
+        registry["lane_exceptions"] = [
+            {
+                "schema": "helper-lane-exception.v1",
+                "kind": "one_time_lane_write",
+                "role": "implementer",
+                "lane_id": "WF-1000::helper-gate-fixture",
+                "task_id": "helper-042",
+                "mode": "write",
+                "first_attempt_only": True,
+                "approved_by": "operator",
+            }
+        ]
+        path.write_text(json.dumps(registry), encoding="utf-8")
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_implementer_lane_exception_is_bound_to_one_task(self) -> None:
+        root = self._write_root()
+        path = root / "state" / "fleet-role-registry.json"
+        registry = json.loads(path.read_text(encoding="utf-8"))
+        registry["lane_exceptions"] = [
+            {
+                "schema": "helper-lane-exception.v1",
+                "kind": "one_time_lane_write",
+                "role": "implementer",
+                "lane_id": "WF-1000::helper-gate-fixture",
+                "task_id": "different-task",
+                "mode": "write",
+                "first_attempt_only": True,
+                "approved_by": "operator",
+            }
+        ]
+        path.write_text(json.dumps(registry), encoding="utf-8")
+
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            project_root=root,
+        )
+
+        self.assertEqual(result["status"], "rejected", result["reasons"])
+        self.assertTrue(any("one-time lane exception" in reason for reason in result["reasons"]))
+
+    def test_qualified_implementer_blocked_after_failed_attempt(self) -> None:
+        root = self._write_root(retry=1, implementer={"status": "qualified"})
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("escalate to senior_engineer" in r for r in result["reasons"]))
+
+    def test_senior_engineer_is_escalation_only(self) -> None:
+        root = self._write_root(retry=0)
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="senior_engineer", model="openai-codex/gpt-6.1-sol"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("escalation-only" in r for r in result["reasons"]))
+
+    def test_senior_engineer_admitted_after_implementer_failure(self) -> None:
+        root = self._write_root(retry=1)
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="senior_engineer", model="openai-codex/gpt-6.1-sol"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_repair_cycle_two_blocks_every_role(self) -> None:
+        root = self._write_root(retry=2)
+        result = helper_agent_router.admit_request(
+            _write_mode_request(role="senior_engineer", model="openai-codex/gpt-6.1-sol"),
+            project_root=root,
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("escalate to the human owner" in r for r in result["reasons"]))
+
+    def test_corrupt_registry_fails_closed(self) -> None:
+        root = self._root()
+        (root / "state").mkdir()
+        (root / "state" / "fleet-role-registry.json").write_text("{not json", encoding="utf-8")
+        result = helper_agent_router.admit_request(_write_request(), project_root=root)
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("unreadable" in r for r in result["reasons"]))
+
+    def test_spawn_event_records_role_and_model(self) -> None:
+        request = _write_request(role="qa", model="openai-codex/gpt-5.6-sol")
+        event = helper_agent_router.build_spawn_event(request, {"status": "admitted"})
+        self.assertEqual((event["role"], event["model"]), ("qa", "openai-codex/gpt-5.6-sol"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "wf1100-p1-architect-specs",
+  "task_class": "analysis",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "architect",
+  "model": "openai-codex/gpt-6-astra",
+  "objective": "Produce implementation specs for the four WF-1100 phase-1 lanes.",
+  "scope": "Read .hermes/plans/2026-09-26-smb-services-platform.md, canonical/schema.sql, scripts/secrets_helper.py; return specs as text only.",
+  "allowed_toolsets": [
+    "read_file",
+    "search_files"
+  ],
+  "allowed_writes": [],
+  "max_duration_minutes": 30,
+  "owner": "agent-main"
+}

@@ -1,7 +1,8 @@
 # Researcher Canary Runbook
 
 Deterministic qualification harness for the Researcher Bot
-(profile `researcher`, model `gpt-5.6-luna`, provider `openai-codex`).
+(profile `researcher`; the model under test is pinned per manifest, currently `gpt-5.6-luna` for
+canary-00x and `gpt-6-luna` for gpt-6-luna-canary-00x; provider `openai-codex`).
 
 ## Trust boundary
 
@@ -17,7 +18,10 @@ Deterministic qualification harness for the Researcher Bot
   `derived/model-routing/canaries/<case-id>/` and never sends the expected
   answers to the model.
 - The profile must have **no fallback chain** (`hermes -p researcher fallback
-  list` shows none) so model attribution is unambiguous.
+  list` shows none) so model attribution is unambiguous. The researcher profile now carries an
+  operator-approved fallback, so clear it first (`hermes -p researcher config set fallback_providers
+  '[]'`), run, then restore the registry value. Never leave it cleared.
+- A model change needs NEW manifests (`<model>-canary-00x`, same frozen packs); never edit a frozen case.
 
 ## Commands
 

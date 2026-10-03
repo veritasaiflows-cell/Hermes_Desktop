@@ -2,7 +2,7 @@
   "schema": "active-workflows.v1",
   "routing_schema_version": "workflow-routing-index.v1",
   "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-08-16T04:10:00Z",
+  "generated_at": "2026-10-03T19:12:56Z",
   "workflows": [
     {
       "workflow_id": "WF-1000",
@@ -256,6 +256,165 @@
       "validator_commands": [
         "python -m unittest discover -s tests -v",
         "python scripts/workflow_router.py WF-1004 --answer summary --validate"
+      ]
+    },
+    {
+      "workflow_id": "WF-1005",
+      "display_name": "Workflow F - Promise Desk",
+      "aliases": [
+        "workflow-f",
+        "promise-desk",
+        "promise gap",
+        "promise-gap"
+      ],
+      "tier": "P1",
+      "priority": "high",
+      "lifecycle": "route_only",
+      "readiness": "route_only",
+      "effective_status": "route_only",
+      "state_description": "Promise desk for local small businesses. Extracts a business's own public promises (response-time, hours, pricing, licensing), binds each to dated evidence, and measures the gap between promise and published infrastructure. No client AI required. No implementation script yet; control surface only.",
+      "next_action": "Operator-led conversations with 1-3 Wave-1 trade contractors using the promise-gap framing. First public-page measurement pass only after operator confirms which businesses may be examined.",
+      "authoritative_next_action": "Do not collect data on or contact any named business until the operator selects targets and approves. Do not build an implementation script until one buyer conversation has occurred.",
+      "implementation_script": null,
+      "commands": {
+        "dry_run": null,
+        "write": null
+      },
+      "helper_safe": false,
+      "owner_action_required": true,
+      "authority_boundary": "review_only",
+      "authority_class": "review_ready",
+      "primary_owner_lane": "agent-main",
+      "secondary_consumers": [
+        "review",
+        "operations"
+      ],
+      "human_approval_owner": "operator",
+      "proof_artifact": "continuity/WF-1005-Promise-Desk.md",
+      "freshness_sla": "weekly",
+      "default_resume_command": "python scripts/workflow_router.py WF-1005 --answer next --validate",
+      "control_override": null,
+      "depends_on": [],
+      "blockers": [
+        "No paying client engagement exists; demand is unvalidated.",
+        "No operator-selected target business has been approved for examination."
+      ],
+      "stop_lines": [
+        "No external messages, outreach, or publication without operator approval",
+        "No monitoring of or test contact with a named business without operator authorization and a recorded consent decision",
+        "No implication that a fix exists or is included; deliverable is a measured gap report only",
+        "Avoided cost and lost-revenue figures are labeled estimates, never measured or earned revenue"
+      ],
+      "primary_route_artifact": "state/workflows/WF-1005.json",
+      "validator_commands": [
+        "python -m unittest discover -s tests -v",
+        "python scripts/workflow_router.py WF-1005 --answer summary --validate"
+      ]
+    },
+    {
+      "workflow_id": "WF-1100",
+      "display_name": "SMB Services Platform",
+      "aliases": [
+        "smb-services",
+        "smb services platform",
+        "smb-platform",
+        "small business services"
+      ],
+      "tier": "P1",
+      "priority": "high",
+      "lifecycle": "route_only",
+      "readiness": "route_only",
+      "effective_status": "route_only",
+      "state_description": "Phase-1 specs are accepted. Four one-time Implementer attempts timed out after 900 seconds; three incomplete source files remain quarantined, no required test target exists, and no lane was accepted. The repair route is now the Senior Engineer (openai-codex/gpt-6.1-sol) at repair cycle 1; no repair lane has been opened yet.",
+      "next_action": "Governor opens repair-cycle-1 lanes for the four phase-1 lanes, dispatches the Senior Engineer against the accepted architect spec, runs each acceptance command, and sends passing diffs to independent QA.",
+      "authoritative_next_action": "Do not reuse the consumed Implementer exceptions or ingest real client data. Resume only through Senior Engineer repair-cycle-1 lanes, and keep phases 3-5 closed until WF-1005 confirms a real prospect needs a module.",
+      "implementation_script": null,
+      "commands": {
+        "dry_run": null,
+        "write": null
+      },
+      "helper_safe": false,
+      "owner_action_required": false,
+      "authority_boundary": "review_only",
+      "authority_class": "review_ready",
+      "primary_owner_lane": "agent-main",
+      "secondary_consumers": [
+        "review",
+        "operations"
+      ],
+      "human_approval_owner": "operator",
+      "proof_artifact": "continuity/WF-1100-SMB-Services-Platform.md",
+      "freshness_sla": "weekly",
+      "default_resume_command": "python scripts/workflow_router.py WF-1100 --answer next --validate",
+      "control_override": null,
+      "depends_on": [
+        "WF-1200"
+      ],
+      "blockers": [
+        "All four phase-1 Implementer attempts timed out without required tests or accepted lane proofs."
+      ],
+      "stop_lines": [
+        "No real client data or client credentials before a client data-handling policy is approved",
+        "No write, send, or payment action against any external client system without operator and client approval",
+        "Client data never leaves its own client directory or crosses into another client's store"
+      ],
+      "primary_route_artifact": "state/workflows/WF-1100.json",
+      "validator_commands": [
+        "python -m unittest discover -s tests -v",
+        "python scripts/workflow_router.py WF-1100 --answer summary --validate"
+      ]
+    },
+    {
+      "workflow_id": "WF-1200",
+      "display_name": "Agent Fleet Roles",
+      "aliases": [
+        "agent-fleet-roles",
+        "fleet roles",
+        "fleet-roles",
+        "model roles"
+      ],
+      "tier": "P1",
+      "priority": "high",
+      "lifecycle": "route_only",
+      "readiness": "route_only",
+      "effective_status": "route_only",
+      "state_description": "All six role profiles and role/model gate bindings are configured; every helper role now has an operator-approved fallback (2026-10-03, registry and profile configs). Senior Engineer is openai-codex/gpt-6.1-sol; the Governor's parent-only fallback is openai-codex/gpt-6-astra. The Researcher primary is openai-codex/gpt-6-luna and is qualified (canary 4 of 4; case 003 passed on rerun after a first-attempt refusal). All ten primary/fallback routes answered a live probe. Automatic failover is untested. The four one-time Implementer exceptions were consumed and are not reusable.",
+      "next_action": "Governor opens WF-1100 phase-1 repair-cycle-1 lanes, dispatches the Senior Engineer through the admission gate, and sends each passing diff to independent QA (reviewer model must differ from the lane author).",
+      "authoritative_next_action": "Do not reuse consumed Implementer exceptions. Dispatch the Senior Engineer only at lane repair cycle >= 1 through the admission gate, and never let a helper review its own work.",
+      "implementation_script": null,
+      "commands": {
+        "dry_run": null,
+        "write": null
+      },
+      "helper_safe": false,
+      "owner_action_required": false,
+      "authority_boundary": "review_only",
+      "authority_class": "review_ready",
+      "primary_owner_lane": "agent-main",
+      "secondary_consumers": [
+        "review",
+        "operations"
+      ],
+      "human_approval_owner": "operator",
+      "proof_artifact": "continuity/WF-1200-Agent-Fleet-Roles.md",
+      "freshness_sla": "weekly",
+      "default_resume_command": "python scripts/workflow_router.py WF-1200 --answer next --validate",
+      "control_override": null,
+      "depends_on": [],
+      "blockers": [
+        "The four WF-1100 one-time Implementer lane exceptions are consumed and their attempts are blocked."
+      ],
+      "stop_lines": [
+        "No reuse of consumed Implementer exceptions and no broad Implementer qualification",
+        "No Senior Engineer dispatch below lane repair cycle 1",
+        "No helper role may approve, merge, or self-review its own work",
+        "No helper spawn with a model other than the role's registry binding",
+        "No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran."
+      ],
+      "primary_route_artifact": "state/workflows/WF-1200.json",
+      "validator_commands": [
+        "python -m unittest discover -s tests -v",
+        "python scripts/workflow_router.py WF-1200 --answer summary --validate"
       ]
     }
   ]

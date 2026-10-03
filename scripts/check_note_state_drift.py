@@ -31,6 +31,11 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    # Direct/cron invocation (python scripts/check_note_state_drift.py) has
+    # scripts/ -- not the repo root -- on sys.path, so `from scripts import ...`
+    # needs the root added, matching the other cron scripts.
+    sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_STATE_DIR = PROJECT_ROOT / "state" / "workflows"
 DEFAULT_ACK_PATH = PROJECT_ROOT / "state" / "note-drift-acknowledged.json"
 
@@ -166,6 +171,34 @@ def _resolve_note(record: dict[str, Any], project_root: Path) -> Path | None:
     return project_root / Path(str(raw).replace("\\", "/"))
 
 
+def _relative(path: Path, project_root: Path) -> str:
+    """Return ``path`` relative to ``project_root`` with forward slashes, never raising.
+
+    ``--state-dir`` may be relative or outside the project, and a record's
+    ``continuity_note`` may point anywhere. Reporting must not crash the scan:
+    resolve both sides, and fall back to the absolute path when the target is
+    outside the root.
+    """
+    try:
+        resolved = path.resolve()
+        root = project_root.resolve()
+    except OSError:
+        return str(path).replace("\\", "/")
+    try:
+        return str(resolved.relative_to(root)).replace("\\", "/")
+    except ValueError:
+        return str(resolved).replace("\\", "/")
+
+
+def _inside(path: Path, project_root: Path) -> bool:
+    """Return whether ``path`` resolves to a location under ``project_root``."""
+    try:
+        path.resolve().relative_to(project_root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def check_workflow(
     state_path: Path,
     project_root: Path,
@@ -173,11 +206,28 @@ def check_workflow(
 ) -> dict[str, Any]:
     """Compare one workflow's authored facts against its continuity note."""
     acknowledgments = acknowledgments or {}
-    record = json.loads(state_path.read_text(encoding="utf-8"))
+    record_name = _relative(state_path, project_root)
+    try:
+        record = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError("top-level JSON value is not an object")
+    except (OSError, ValueError) as error:
+        # A corrupt or unreadable record is a finding, not a crash: one bad file
+        # must not stop the scan (or the roster check) from reporting.
+        return {
+            "workflow_id": state_path.stem,
+            "state_record": record_name,
+            "note": None,
+            "missing": [],
+            "paraphrased": [],
+            "acknowledged": [],
+            "derived_facts_skipped": 0,
+            "error": f"state record unreadable or invalid: {error}",
+        }
     workflow_id = record.get("workflow_id", state_path.stem)
     report: dict[str, Any] = {
         "workflow_id": workflow_id,
-        "state_record": str(state_path.relative_to(project_root)).replace("\\", "/"),
+        "state_record": record_name,
         "note": None,
         "missing": [],
         "paraphrased": [],
@@ -190,12 +240,19 @@ def check_workflow(
     if note_path is None:
         report["error"] = "state record has no continuity_note field"
         return report
-    report["note"] = str(note_path.relative_to(project_root)).replace("\\", "/")
+    report["note"] = _relative(note_path, project_root)
+    if not _inside(note_path, project_root):
+        report["error"] = "continuity note path resolves outside the project root"
+        return report
     if not note_path.is_file():
         report["error"] = "continuity note file does not exist"
         return report
 
-    raw_note = note_path.read_text(encoding="utf-8")
+    try:
+        raw_note = note_path.read_text(encoding="utf-8")
+    except (OSError, ValueError) as error:
+        report["error"] = f"continuity note unreadable: {error}"
+        return report
     note_text = _normalize(raw_note)
     note_blocks = _note_blocks(raw_note)
 
@@ -237,10 +294,64 @@ def check_workflow(
     return report
 
 
+def check_roster(project_root: Path, require_fleet: bool = False) -> dict[str, Any]:
+    """Verify the WF-1200 note's generated role roster against the registry.
+
+    The registry owns role bindings; the note carries a generated mirror; the
+    ``WF-1200`` workflow record is the independent fleet-presence signal. All
+    three live under ``project_root`` (``--state-dir`` only selects which
+    records are scanned for authored-fact drift). All three must be regular
+    files. Any one present while another is missing (or is not a regular file)
+    is drift, so removing the artifacts one at a time can never end in a clean
+    pass.
+
+    The only skip is "no sign of a fleet at all" when ``require_fleet`` is
+    False, which is reserved for projects that genuinely have no fleet (library
+    use, ``--allow-no-fleet``). The CLI fails closed by default: a workspace
+    that is supposed to have a fleet must not pass because everything was
+    deleted.
+    """
+    registry = project_root / "state" / "fleet-role-registry.json"
+    note = project_root / "continuity" / "WF-1200-Agent-Fleet-Roles.md"
+    record = project_root / "state" / "workflows" / "WF-1200.json"
+    note_rel = _relative(note, project_root)
+    artifacts = {"registry": registry, "roster note": note, "WF-1200 record": record}
+    present = [name for name, path in artifacts.items() if path.exists()]
+    if not present:
+        if require_fleet:
+            return {
+                "status": "drift",
+                "reason": "fleet is required but registry, roster note, and WF-1200 record are all absent",
+                "note": note_rel,
+            }
+        return {"status": "skipped", "reason": "no fleet registry, roster note, or WF-1200 record", "note": None}
+    broken = [name for name, path in artifacts.items() if not path.is_file()]
+    if broken:
+        return {
+            "status": "drift",
+            "reason": f"fleet artifact missing or not a regular file: {', '.join(broken)}",
+            "note": note_rel,
+        }
+    from scripts import fleet_roster_block  # local import: A19 must run from a bare checkout
+
+    result = fleet_roster_block.check_note(registry, note, source=fleet_roster_block.DEFAULT_SOURCE_LABEL)
+    return {
+        "status": "ok" if result.ok else "drift",
+        "reason": result.reason,
+        "note": note_rel,
+    }
+
+
+def has_drift(result: dict[str, Any]) -> bool:
+    """Return whether a scan result should fail the check."""
+    return bool(result["workflows_with_drift"] or result.get("roster_drift"))
+
+
 def scan(
     state_dir: Path,
     project_root: Path,
     ack_path: Path | None = None,
+    require_fleet: bool = False,
 ) -> dict[str, Any]:
     """Check every workflow state record in ``state_dir``."""
     acknowledgments = load_acknowledgments(ack_path) if ack_path else {}
@@ -248,10 +359,13 @@ def scan(
         check_workflow(path, project_root, acknowledgments)
         for path in sorted(state_dir.glob("WF-*.json"))
     ]
+    roster = check_roster(project_root, require_fleet)
     return {
         "generated_at": _utc_now(),
         "workflows_checked": len(reports),
         "workflows_with_drift": sum(1 for r in reports if r["missing"] or r["error"]),
+        "roster": roster,
+        "roster_drift": 1 if roster["status"] == "drift" else 0,
         "missing_total": sum(len(r["missing"]) for r in reports),
         "paraphrased_total": sum(len(r["paraphrased"]) for r in reports),
         # Surfaced on every run: an acknowledgment suppresses a failure, so it
@@ -277,14 +391,41 @@ def main(argv: list[str] | None = None) -> int:
         "--json", action="store_true",
         help="always print the full JSON report, even when green",
     )
+    parser.add_argument(
+        "--allow-no-fleet", action="store_true",
+        help="treat a workspace with no fleet artifacts at all as clean (default: fail closed)",
+    )
     args = parser.parse_args(argv)
+    require_fleet = not args.allow_no_fleet
 
     now = _utc_now()
     if not args.state_dir.is_dir():
+        # No workflow records to scan, but the roster mirror is independent of
+        # them: an early "nothing to check" exit must not mask roster drift.
+        roster = check_roster(PROJECT_ROOT, require_fleet)
+        result = {
+            "generated_at": now,
+            "workflows_checked": 0,
+            "workflows_with_drift": 0,
+            "roster": roster,
+            "roster_drift": 1 if roster["status"] == "drift" else 0,
+            "workflows": [],
+        }
+        if has_drift(result):
+            print(f"NOTE DRIFT DEGRADED {now}")
+            print(json.dumps(result, indent=2))
+            return 1
         print(f"NOTE DRIFT OK {now} no_state_dir", file=sys.stderr)
         return 0
 
-    result = scan(args.state_dir, PROJECT_ROOT, args.ack_file)
+    result = scan(args.state_dir, PROJECT_ROOT, args.ack_file, require_fleet)
+
+    # Drift is evaluated BEFORE the empty-scan shortcut: an empty workflow scan
+    # still has a roster to verify and must not report it as clean.
+    if has_drift(result):
+        print(f"NOTE DRIFT DEGRADED {now}")
+        print(json.dumps(result, indent=2))
+        return 1
 
     if result["workflows_checked"] == 0:
         # An empty scan is "nothing to check", not "everything verified".
@@ -293,15 +434,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
         return 0
 
-    if result["workflows_with_drift"]:
-        print(f"NOTE DRIFT DEGRADED {now}")
-        print(json.dumps(result, indent=2))
-        return 1
-
     scope = (
         f"checked={result['workflows_checked']} "
         f"paraphrased={result['paraphrased_total']} "
-        f"acknowledged={result['acknowledged_total']}"
+        f"acknowledged={result['acknowledged_total']} "
+        f"roster={result['roster']['status']}"
     )
     print(f"NOTE DRIFT OK {now} {scope}", file=sys.stderr)
     if args.json:

@@ -1,0 +1,103 @@
+{
+  "authoritative_next_action": "Do not reuse consumed Implementer exceptions. Dispatch the Senior Engineer only at lane repair cycle >= 1 through the admission gate, and never let a helper review its own work.",
+  "authority_boundary": "review_only",
+  "authority_class": "review_ready",
+  "blocker_count": 1,
+  "blockers": [
+    "The four WF-1100 one-time Implementer lane exceptions are consumed and their attempts are blocked."
+  ],
+  "commands": {
+    "dry_run": null,
+    "write": null
+  },
+  "continuity_note": "continuity\\WF-1200-Agent-Fleet-Roles.md",
+  "control_override": null,
+  "current_state": "All six role profiles and role/model gate bindings are configured; every helper role now has an operator-approved fallback (2026-10-03, registry and profile configs). Senior Engineer is openai-codex/gpt-6.1-sol; the Governor's parent-only fallback is openai-codex/gpt-6-astra. The Researcher primary is openai-codex/gpt-6-luna and is qualified (canary 4 of 4; case 003 passed on rerun after a first-attempt refusal). All ten primary/fallback routes answered a live probe. Automatic failover is untested. The four one-time Implementer exceptions were consumed and are not reusable.",
+  "default_resume_command": "python scripts/workflow_router.py WF-1200 --answer next --validate",
+  "dependency_blockers": [],
+  "depends_on": [],
+  "display_name": "Agent Fleet Roles",
+  "effective_status": "route_only",
+  "freshness_sla": "weekly",
+  "generated_at": "2026-10-03T23:10:13Z",
+  "graph_dependency_blockers": [],
+  "helper_safe": false,
+  "human_approval_owner": "operator",
+  "implementation_script": null,
+  "lifecycle": "route_only",
+  "next_action": "Governor opens WF-1100 phase-1 repair-cycle-1 lanes, dispatches the Senior Engineer through the admission gate, and sends each passing diff to independent QA (reviewer model must differ from the lane author).",
+  "owner_action_required": false,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1200.json",
+  "priority": "high",
+  "proof_artifact": "continuity\\WF-1200-Agent-Fleet-Roles.md",
+  "readiness": "route_only",
+  "recall_context": {
+    "available": true,
+    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
+    "result_count": 3,
+    "results": [
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md:L194-L259",
+        "excerpt": "## Helper-agent rules\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6491344409274111,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L148-L157",
+        "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.6374292546584166,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
+      },
+      {
+        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md:L95-L107",
+        "excerpt": "## Skills and references\n",
+        "freshness_state": "fresh",
+        "retrieval_mode": "hybrid",
+        "score": 0.625715831392686,
+        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md"
+      }
+    ]
+  },
+  "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v1",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1200-Agent-Fleet-Roles.md"
+  ],
+  "stop_lines": [
+    "No reuse of consumed Implementer exceptions and no broad Implementer qualification",
+    "No Senior Engineer dispatch below lane repair cycle 1",
+    "No helper role may approve, merge, or self-review its own work",
+    "No helper spawn with a model other than the role's registry binding",
+    "No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran."
+  ],
+  "tier": "P1",
+  "validator_commands": [
+    "python -m unittest discover -s tests -v",
+    "python scripts/workflow_router.py WF-1200 --answer summary --validate"
+  ],
+  "workflow_id": "WF-1200"
+}

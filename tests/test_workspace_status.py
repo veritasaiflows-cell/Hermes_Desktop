@@ -171,12 +171,42 @@ class WorkspaceStatusTests(unittest.TestCase):
         fast = workspace_status.fast_gates()
         self.assertEqual(
             [label for label, _args, _timeout in fast],
-            ["organization", "routing", "wiki", "lane_register"],
+            ["organization", "routing", "wiki", "lane_register", "note_drift"],
         )
         routing = next(args for label, args, _timeout in fast if label == "routing")
         self.assertIn("--validate", routing)
         self.assertIn("--skip-recall-context", routing)
         self.assertNotIn("--no-cache", routing)
+
+    def test_note_drift_gate_runs_the_a19_checker_read_only_and_in_parallel(self) -> None:
+        by_label = {label: (args, timeout) for label, args, timeout in workspace_status.DEFAULT_GATES}
+        self.assertIn("note_drift", by_label)
+        self.assertEqual(by_label["note_drift"][0], ["scripts/check_note_state_drift.py"])
+        self.assertIn("note_drift", workspace_status.PARALLEL_SAFE_GATES)
+
+    def test_note_drift_failure_is_a_warning_not_a_hard_failure(self) -> None:
+        gates = {
+            "organization": {"exit": 0},
+            "routing": {"exit": 0, "stdout": {"workflows": []}},
+            "wiki": {"exit": 0, "stdout": {"status": "fresh"}},
+            "lane_register": {"exit": 0, "stdout": {}},
+            "note_drift": {"exit": 1, "stdout": "NOTE DRIFT DEGRADED"},
+        }
+        status, hard, warnings = workspace_status._health_decision(gates)
+        self.assertEqual(status, "healthy_with_warnings")
+        self.assertEqual(hard, [])
+        self.assertIn("note_drift", warnings)
+
+    def test_note_drift_pass_keeps_health_clean(self) -> None:
+        gates = {
+            "organization": {"exit": 0},
+            "routing": {"exit": 0, "stdout": {"workflows": []}},
+            "wiki": {"exit": 0, "stdout": {"status": "fresh"}},
+            "lane_register": {"exit": 0, "stdout": {}},
+            "note_drift": {"exit": 0},
+        }
+        status, hard, warnings = workspace_status._health_decision(gates)
+        self.assertEqual((status, hard, warnings), ("healthy", [], []))
 
     def test_health_decision_ignores_gates_skipped_by_fast_tier(self) -> None:
         gates = {
@@ -264,7 +294,7 @@ class WorkspaceStatusTests(unittest.TestCase):
         )
         self.assertIn("--check-only", archive[1])
 
-    def test_gate_runner_executes_gates_serially_in_declared_order(self) -> None:
+    def test_gate_runner_preserves_declared_order_for_unlisted_gates(self) -> None:
         calls = []
         def fake_run(label, args, timeout, project_root):
             calls.append(label)
@@ -279,6 +309,76 @@ class WorkspaceStatusTests(unittest.TestCase):
 
         self.assertEqual(list(result), ["first", "second"])
         self.assertEqual(calls, ["first", "second"])
+
+    def test_parallel_safe_gates_overlap_and_results_keep_declared_order(self) -> None:
+        import threading
+        import time as _time
+
+        safe = sorted(workspace_status.PARALLEL_SAFE_GATES)[:3]
+        barrier = threading.Barrier(len(safe), timeout=5)
+
+        def fake_run(label, args, timeout, project_root):
+            # Deadlocks (BrokenBarrierError) unless all safe gates run concurrently.
+            barrier.wait()
+            return {"label": label, "exit": 0, "elapsed_ms": 1}
+
+        gates = [(label, ["scripts/x.py"], 30) for label in safe]
+        with patch.object(workspace_status, "_run", side_effect=fake_run):
+            result = workspace_status._run_gates(gates, project_root=PROJECT_ROOT)
+
+        self.assertEqual(list(result), safe)
+        self.assertTrue(all(entry["exit"] == 0 for entry in result.values()))
+
+    def test_writer_gates_never_overlap_each_other(self) -> None:
+        import threading
+        import time as _time
+
+        active = {"n": 0, "max": 0}
+        lock = threading.Lock()
+
+        def fake_run(label, args, timeout, project_root):
+            with lock:
+                active["n"] += 1
+                active["max"] = max(active["max"], active["n"])
+            _time.sleep(0.05)
+            with lock:
+                active["n"] -= 1
+            return {"label": label, "exit": 0, "elapsed_ms": 1}
+
+        writers = ["lane_register", "vector_memory", "workspace_index", "unknown_gate"]
+        for label in writers:
+            self.assertNotIn(label, workspace_status.PARALLEL_SAFE_GATES)
+        gates = [(label, ["scripts/x.py"], 30) for label in writers]
+        with patch.object(workspace_status, "_run", side_effect=fake_run):
+            result = workspace_status._run_gates(gates, project_root=PROJECT_ROOT)
+
+        self.assertEqual(list(result), writers)
+        self.assertEqual(active["max"], 1)
+
+    def test_serial_env_override_disables_parallelism(self) -> None:
+        calls = []
+
+        def fake_run(label, args, timeout, project_root):
+            calls.append(label)
+            return {"label": label, "exit": 0, "elapsed_ms": 1}
+
+        safe = sorted(workspace_status.PARALLEL_SAFE_GATES)[:3]
+        gates = [(label, ["scripts/x.py"], 30) for label in safe]
+        with (
+            patch.dict(os.environ, {"WORKSPACE_STATUS_SERIAL": "1"}),
+            patch.object(workspace_status, "_run", side_effect=fake_run),
+        ):
+            result = workspace_status._run_gates(gates, project_root=PROJECT_ROOT)
+
+        self.assertEqual(calls, safe)
+        self.assertEqual(list(result), safe)
+
+    def test_parallel_safe_set_excludes_proven_writers(self) -> None:
+        # Measured 2026-09-26: these gates touched files (SQLite WAL/SHM or schema).
+        for writer in ("lane_register", "vector_memory", "workspace_index"):
+            self.assertNotIn(writer, workspace_status.PARALLEL_SAFE_GATES)
+        declared = {label for label, _args, _timeout in workspace_status.DEFAULT_GATES}
+        self.assertTrue(workspace_status.PARALLEL_SAFE_GATES <= declared)
 
     def test_direct_script_entrypoint_resolves_project_imports(self) -> None:
         env = os.environ.copy()
