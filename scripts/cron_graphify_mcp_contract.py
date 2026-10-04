@@ -6,6 +6,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -27,6 +28,7 @@ EXPECTED_ARGS = (
 )
 ALLOWED_TOOLS = frozenset(ALLOWED_OPERATIONS)
 ADVERTISED_TOOLS = ALLOWED_TOOLS
+CLI_TIMEOUT_SECONDS = 480
 _APPROVED_CONFIG_FIELDS = frozenset(
     {"command", "args", "connect_timeout", "tools", "enabled"}
 )
@@ -398,8 +400,39 @@ def main(
     return 0
 
 
-if __name__ == "__main__":
+def _cli_main(*, isolated: bool | None = None) -> int:
+    """Run the watchdog without inheriting another Python runtime's packages.
+
+    Cron can launch the correct venv but still pass a managed-runtime
+    PYTHONPATH containing ABI-incompatible SDK extensions. Re-execute this
+    repo-owned entrypoint once under the same selected interpreter in isolated
+    mode, removing only Python import overrides from its child environment.
+    Profile identity and the configured MCP command/tool boundary are unchanged.
+    """
+    if isolated is None:
+        isolated = bool(sys.flags.isolated)
+    if not isolated:
+        environment = dict(os.environ)
+        environment.pop("PYTHONPATH", None)
+        environment.pop("PYTHONHOME", None)
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-I", "-B", str(Path(__file__).resolve()), *sys.argv[1:]],
+                cwd=PROJECT_ROOT,
+                env=environment,
+                timeout=CLI_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"GRAPHIFY MCP CONTRACT FAIL error=isolated_{type(exc).__name__}")
+            return 1
+        return completed.returncode
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-graph", type=Path)
     arguments = parser.parse_args()
-    raise SystemExit(main(candidate_graph=arguments.candidate_graph))
+    return main(candidate_graph=arguments.candidate_graph)
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli_main())

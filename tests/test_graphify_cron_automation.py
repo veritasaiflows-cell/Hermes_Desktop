@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stderr, redirect_stdout
 import json
+import os
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from urllib.error import URLError
 
 
@@ -60,7 +62,7 @@ class GraphifyArtifactMonitorTests(unittest.TestCase):
         self.assertIn("GRAPHIFY ARTIFACT STALE", stdout.getvalue())
         self.assertIn("source_changed", stdout.getvalue())
 
-    def test_repeated_stale_episode_heartbeats_quietly(self) -> None:
+    def test_repeated_stale_episode_remains_failed_with_stable_output(self) -> None:
         from scripts import cron_graphify_artifact_monitor
 
         report = {
@@ -85,9 +87,43 @@ class GraphifyArtifactMonitorTests(unittest.TestCase):
 
         self.assertEqual(first, 1)
         self.assertIn("GRAPHIFY ARTIFACT STALE", first_out.getvalue())
-        self.assertEqual(second, 0)
-        self.assertEqual(second_out.getvalue(), "")
-        self.assertIn("STILL STALE", second_err.getvalue())
+        self.assertEqual(second, 1)
+        self.assertEqual(second_out.getvalue(), first_out.getvalue())
+        self.assertEqual(second_err.getvalue(), "")
+
+    def test_report_timestamp_does_not_change_failure_identity(self) -> None:
+        from scripts import cron_graphify_artifact_monitor
+
+        report = {
+            "schema": "graphify-freshness.v1", "status": "stale",
+            "issues": [{"code": "source_changed", "path": "scripts/a.py"}],
+        }
+        with TemporaryDirectory() as directory:
+            outputs = []
+            for stamp in ("2026-10-04T01:00:00Z", "2026-10-04T02:00:00Z"):
+                stdout = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                    code = cron_graphify_artifact_monitor.main(
+                        Path("."), check=lambda _root: {**report, "generated_at": stamp},
+                        state_path=self._state_path(directory),
+                    )
+                self.assertEqual(code, 1)
+                outputs.append(stdout.getvalue())
+            self.assertEqual(outputs[0], outputs[1])
+            self.assertNotIn("generated_at", outputs[0])
+
+    def test_malformed_fresh_report_never_passes(self) -> None:
+        from scripts import cron_graphify_artifact_monitor
+
+        for report in (None, {}, {"status": "fresh", "issues": ["drift"]},
+                       {"schema": "graphify-freshness.v1", "status": "fresh", "issues": "bad"}):
+            with self.subTest(report=report), TemporaryDirectory() as directory:
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    code = cron_graphify_artifact_monitor.main(
+                        Path("."), check=lambda _root: report,
+                        state_path=self._state_path(directory),
+                    )
+                self.assertEqual(code, 1)
 
     def test_changed_stale_report_pages_again(self) -> None:
         from scripts import cron_graphify_artifact_monitor
@@ -164,6 +200,52 @@ class GraphifyArtifactMonitorTests(unittest.TestCase):
 
 
 class GraphifyMcpContractTests(unittest.TestCase):
+    def test_cli_isolates_selected_interpreter_from_foreign_pythonpath(self) -> None:
+        from scripts import cron_graphify_mcp_contract as contract
+
+        environment = {"PYTHONPATH": "foreign/site-packages", "PYTHONHOME": "foreign/python",
+                       "HERMES_HOME": "approved-profile", "PATH": "approved-tools"}
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(contract.sys, "argv", ["watchdog.py", "--candidate-graph", "literal graph.json"]),
+            patch.object(contract.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)) as run,
+            patch.object(contract, "main", side_effect=AssertionError("do not probe before isolation")),
+        ):
+            code = contract._cli_main(isolated=False)
+            self.assertEqual(dict(os.environ), environment)
+        self.assertEqual(code, 7)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], [contract.sys.executable, "-I", "-B"])
+        self.assertEqual(command[3], str(Path(contract.__file__).resolve()))
+        self.assertEqual(command[4:], ["--candidate-graph", "literal graph.json"])
+        child = run.call_args.kwargs["env"]
+        self.assertNotIn("PYTHONPATH", child)
+        self.assertNotIn("PYTHONHOME", child)
+        self.assertEqual(child["HERMES_HOME"], "approved-profile")
+        self.assertEqual(child["PATH"], "approved-tools")
+        self.assertEqual(run.call_args.kwargs["timeout"], contract.CLI_TIMEOUT_SECONDS)
+
+    def test_isolated_cli_parses_arguments_without_restarting(self) -> None:
+        from scripts import cron_graphify_mcp_contract as contract
+
+        with (
+            patch.object(contract.sys, "argv", ["watchdog.py", "--candidate-graph", "literal graph.json"]),
+            patch.object(contract.subprocess, "run", side_effect=AssertionError("no restart")),
+            patch.object(contract, "main", return_value=0) as main,
+        ):
+            self.assertEqual(contract._cli_main(isolated=True), 0)
+        main.assert_called_once_with(candidate_graph=Path("literal graph.json"))
+
+    def test_isolated_cli_spawn_errors_and_timeouts_fail_closed(self) -> None:
+        from scripts import cron_graphify_mcp_contract as contract
+
+        for error in (OSError("private diagnostic"), subprocess.TimeoutExpired(["fixture"], 480)):
+            with self.subTest(error=type(error).__name__), redirect_stdout(io.StringIO()) as stdout:
+                with patch.object(contract.subprocess, "run", side_effect=error):
+                    self.assertEqual(contract._cli_main(isolated=False), 1)
+                self.assertIn("GRAPHIFY MCP CONTRACT FAIL", stdout.getvalue())
+                self.assertNotIn("private diagnostic", stdout.getvalue())
+
     def _valid_config(self) -> dict[str, object]:
         from scripts.cron_graphify_mcp_contract import EXPECTED_ARGS, EXPECTED_COMMAND
         from scripts.graphify_mcp_benchmark import ALLOWED_OPERATIONS
@@ -617,6 +699,9 @@ class GraphifyCodeRefreshHoldTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(len(events), 1)
         self.assertIn("GRAPHIFY CODE REFRESH PROMOTED", stdout.getvalue())
+
+
+
 
     def test_freshness_exception_fails_closed(self) -> None:
         from scripts import cron_graphify_code_refresh

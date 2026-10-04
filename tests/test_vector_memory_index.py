@@ -1,5 +1,6 @@
 import json
 import hashlib
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 from unittest.mock import patch
@@ -274,6 +275,58 @@ class VectorMemoryIndexTests(unittest.TestCase):
 
             self.assertFalse(index_path.exists())
 
+    def test_hybrid_backend_failure_is_labeled_as_full_text_fallback(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("memory routing evidence", encoding="utf-8")
+            index = Path(directory) / "memory.sqlite"
+            build_index(index, [SourceSpec(note)], embedding_provider="none")
+            results = search_index(index, "memory routing", retrieval_mode="hybrid",
+                                   embedding_provider="none")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].retrieval_mode, "full_text")
+            self.assertIn("semantic unavailable: full_text fallback", results[0].warnings)
+
+    def test_empty_fallback_packet_still_reports_degraded_mode(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("memory routing evidence", encoding="utf-8")
+            index = Path(directory) / "memory.sqlite"
+            build_index(index, [SourceSpec(note)], embedding_provider="none")
+            packet = vector_memory_index.build_query_packet(
+                index, "nonexistentzz", retrieval_mode="hybrid", embedding_provider="none",
+            )
+            self.assertEqual(packet["result_count"], 0)
+            self.assertEqual(packet["requested_retrieval_mode"], "hybrid")
+            self.assertEqual(packet["retrieval_mode"], "full_text")
+            self.assertEqual(packet["status"], "degraded")
+            self.assertIn("semantic unavailable: full_text fallback", packet["warnings"])
+
+    def test_hybrid_missing_or_incompatible_embeddings_report_fallback(self):
+        with TemporaryDirectory() as directory:
+            note = Path(directory) / "note.md"
+            note.write_text("memory routing evidence", encoding="utf-8")
+            index = Path(directory) / "memory.sqlite"
+            build_index(index, [SourceSpec(note)], embedding_provider="none")
+            with patch.object(vector_memory_index, "_build_query_embedding", return_value=[1.0, 0.0]):
+                for vector, model in ((None, "nomic-embed-text:latest"), ("[1.0, 0.0]", "other-model"),
+                                      ("[1.0, 0.0, 0.0]", "nomic-embed-text:latest"),
+                                      ("[NaN, 1.0]", "nomic-embed-text:latest"),
+                                      ("[Infinity, 1.0]", "nomic-embed-text:latest"),
+                                      ("[0.0, 0.0]", "nomic-embed-text:latest")):
+                    with self.subTest(vector=vector, model=model):
+                        with closing(sqlite3.connect(index)) as connection:
+                            connection.execute(
+                                "UPDATE memory_memories SET embedding_vector_json=?, embedding_model=?, embedding_provider='ollama'",
+                                (vector, model),
+                            )
+                            connection.commit()
+                        packet = vector_memory_index.build_query_packet(index, "memory", retrieval_mode="hybrid")
+                        self.assertEqual(packet["status"], "degraded")
+                        self.assertEqual(packet["retrieval_mode"], "full_text")
+                        with self.assertRaisesRegex(ValueError, "compatible indexed embeddings"):
+                            search_index(index, "memory", retrieval_mode="semantic")
+
     def test_cli_query_emits_machine_readable_retrieval_packet(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "approved"
@@ -354,7 +407,11 @@ class VectorMemoryIndexTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(payload["retrieval_mode"], "hybrid")
+            # This invocation explicitly disables embeddings: it requested
+            # hybrid retrieval but actually performed a lexical fallback.
+            self.assertEqual(payload["requested_retrieval_mode"], "hybrid")
+            self.assertEqual(payload["retrieval_mode"], "full_text")
+            self.assertEqual(payload["status"], "degraded")
             self.assertEqual(payload["result_count"], 1)
             self.assertTrue(payload["results"][0]["source_path"].endswith("beta.md"))
 
@@ -370,8 +427,7 @@ class VectorMemoryIndexTests(unittest.TestCase):
 
             with patch.object(vector_memory_index, "_safe_embedding_for_text", side_effect=fake_embedding):
                 build_index(index_path, [SourceSpec(note)])
-
-            hits = vector_memory_index.memory_search("local embeddings", index=index_path, limit=1)
+                hits = vector_memory_index.memory_search("local embeddings", index=index_path, limit=1)
 
             self.assertEqual(len(hits), 1)
             self.assertEqual(hits[0].source_path, str(note.resolve()))

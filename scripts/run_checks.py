@@ -104,7 +104,7 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
     Falls back to unittest discovery if pytest is not installed.
     """
     start = time.perf_counter_ns()
-    pytest_available = shutil.which("pytest") is not None
+    pytest_available = True
     try:
         import pytest as _pytest  # noqa: F401
     except ImportError:
@@ -137,7 +137,13 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
             # unittest rerun: it would execute the suite a second time with no
             # timeout and guarantee an outer-gate timeout with no diagnosis.
             elapsed_ms = (time.perf_counter_ns() - start) // 1_000_000
-            partial = (exc.stdout or "") + (exc.stderr or "")
+            # TimeoutExpired may carry bytes even with text=True, and one
+            # stream can already be decoded. Keep diagnostics rather than
+            # raising TypeError and losing the timeout proof.
+            def decoded(stream: str | bytes | None) -> str:
+                return stream.decode("utf-8", errors="replace") if isinstance(stream, bytes) else (stream or "")
+
+            partial = decoded(exc.stdout) + decoded(exc.stderr)
             log_path = _write_timeout_log(partial)
             print(f"pytest timeout after {PYTEST_TIMEOUT_SECONDS}s; partial log: {log_path}")
             if partial.strip():
@@ -179,12 +185,27 @@ def run_tests() -> tuple[bool, list[str], int, int, int]:
     )
 
 
+TIMEOUT_LOG_RETENTION_DAYS = 14
+
+
+def _prune_timeout_logs(log_dir: Path) -> None:
+    """Delete pytest-timeout logs older than the retention window (best effort)."""
+    cutoff = time.time() - TIMEOUT_LOG_RETENTION_DAYS * 86400
+    for old in log_dir.glob("pytest-timeout-*.log"):
+        try:
+            if old.is_file() and old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+
+
 def _write_timeout_log(output: str) -> str:
     """Persist partial pytest output from a timed-out run for later diagnosis."""
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     path = PROJECT_ROOT / "tmp" / f"pytest-timeout-{stamp}.log"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _prune_timeout_logs(path.parent)
         path.write_text(output[-200000:], encoding="utf-8")
         return str(path)
     except OSError:

@@ -15,11 +15,12 @@ record as truth.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -147,6 +148,22 @@ class SearchResult:
     heading: str | None = None
     line_start: int = 1
     line_end: int = 1
+
+
+class _SemanticUnavailable(ValueError):
+    """The query cannot use a compatible semantic signal."""
+
+
+class _FallbackResults(list[SearchResult]):
+    """Preserve query-level degradation even when lexical fallback has no hits."""
+
+    retrieval_mode = "full_text"
+    warnings = ("semantic unavailable: full_text fallback",)
+
+    def __init__(self, results: list[SearchResult]) -> None:
+        super().__init__(replace(result, warnings=tuple(dict.fromkeys(
+            (*result.warnings, *self.warnings)
+        ))) for result in results)
 
 
 def build_index(
@@ -299,15 +316,21 @@ def search_index(
 
         if retrieval_mode == "hybrid":
             full_text_rows = _query_full_text_rows(connection, query, exact=exact)
-            semantic_rows = _query_semantic_rows(
-                connection,
-                query,
-                limit=limit * 2,
-                embedding_provider=embedding_provider,
-                embedding_model=embedding_model,
-                ollama_base_url=ollama_base_url,
-                embedding_timeout=embedding_timeout,
-            )
+            try:
+                semantic_rows = _query_semantic_rows(
+                    connection,
+                    query,
+                    limit=limit * 2,
+                    embedding_provider=embedding_provider,
+                    embedding_model=embedding_model,
+                    ollama_base_url=ollama_base_url,
+                    embedding_timeout=embedding_timeout,
+                )
+            except _SemanticUnavailable:
+                return _FallbackResults(_search_fulltext(
+                    resolved_index_path, query, limit=limit,
+                    allow_stale=allow_stale, exact=exact,
+                ))
 
             return _merge_fulltext_semantic(
                 full_text_rows,
@@ -386,7 +409,10 @@ def build_query_packet(
     payload = {
         "generated_at": _utc_now(),
         "query": query,
-        "retrieval_mode": retrieval_mode,
+        "requested_retrieval_mode": retrieval_mode,
+        "retrieval_mode": getattr(results, "retrieval_mode", retrieval_mode),
+        "status": "degraded" if isinstance(results, _FallbackResults) else "healthy",
+        "warnings": list(getattr(results, "warnings", ())),
         "result_count": len(results),
         "results": [asdict(result) for result in results],
         "index_path": str(Path(index_path)),
@@ -699,22 +725,29 @@ def _search_semantic(
         timeout=embedding_timeout,
     )
     if query_embedding is None:
-        raise ValueError("Embedding backend unavailable for semantic retrieval")
+        raise _SemanticUnavailable("Embedding backend unavailable for semantic retrieval")
 
     rows = connection.execute(
         "SELECT source_path, section_id, heading, line_start, line_end, source_family, "
         "authority_class, source_hash, content, embedding_vector_json "
-        "FROM memory_memories WHERE embedding_vector_json IS NOT NULL"
+        "FROM memory_memories WHERE embedding_vector_json IS NOT NULL "
+        "AND embedding_provider = ? AND embedding_model = ?",
+        (embedding_provider, embedding_model),
     ).fetchall()
 
     candidates: list[tuple[float, sqlite3.Row]] = []
+    compatible_count = 0
     for row in rows:
         embedding = _parse_embedding(row["embedding_vector_json"])
         if embedding is None:
             continue
         score = _cosine_similarity(query_embedding, embedding)
+        if score is not None:
+            compatible_count += 1
         if score is not None and score > 0:
             candidates.append((score, row))
+    if not compatible_count:
+        raise _SemanticUnavailable("No compatible indexed embeddings for semantic retrieval")
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     results: list[SearchResult] = []
@@ -763,12 +796,14 @@ def _query_semantic_rows(
         timeout=embedding_timeout,
     )
     if query_embedding is None:
-        return []
+        raise _SemanticUnavailable("Embedding backend unavailable for semantic retrieval")
 
     rows = connection.execute(
         "SELECT source_path, section_id, heading, line_start, line_end, source_family, "
         "authority_class, source_hash, content, embedding_vector_json FROM memory_memories "
-        "WHERE embedding_vector_json IS NOT NULL"
+        "WHERE embedding_vector_json IS NOT NULL "
+        "AND embedding_provider = ? AND embedding_model = ?",
+        (embedding_provider, embedding_model),
     ).fetchall()
 
     scored: list[tuple[sqlite3.Row, float]] = []
@@ -780,6 +815,8 @@ def _query_semantic_rows(
         if score is None:
             continue
         scored.append((row, score))
+    if not scored:
+        raise _SemanticUnavailable("No compatible indexed embeddings for semantic retrieval")
     scored.sort(key=lambda item: item[1], reverse=True)
     return scored[:limit]
 
@@ -1034,19 +1071,21 @@ def _parse_embedding(raw: str | None) -> list[float] | None:
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float | None:
-    if not left or not right:
-        return None
-    min_len = min(len(left), len(right))
-    if min_len == 0:
+    # Different dimensions are different embedding spaces, not vectors that
+    # can be made compatible by silently truncating them.
+    if not left or not right or len(left) != len(right):
         return None
     dot_product = 0.0
     left_norm_sq = 0.0
     right_norm_sq = 0.0
-    for left_value, right_value in zip(left[:min_len], right[:min_len], strict=False):
+    for left_value, right_value in zip(left, right, strict=True):
+        if not math.isfinite(left_value) or not math.isfinite(right_value):
+            return None
         dot_product += left_value * right_value
         left_norm_sq += left_value * left_value
         right_norm_sq += right_value * right_value
-    if left_norm_sq == 0.0 or right_norm_sq == 0.0:
+    if (left_norm_sq == 0.0 or right_norm_sq == 0.0
+            or not all(math.isfinite(value) for value in (dot_product, left_norm_sq, right_norm_sq))):
         return None
     return dot_product / ((left_norm_sq ** 0.5) * (right_norm_sq ** 0.5))
 

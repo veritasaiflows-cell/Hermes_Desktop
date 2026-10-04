@@ -84,7 +84,7 @@ def _compact_alert(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema": report.get("schema"),
         "status": report.get("status"),
-        "generated_at": report.get("generated_at"),
+
         "baseline_path": report.get("baseline_path"),
         "issue_counts": counts,
         "issue_total": len(issues),
@@ -98,21 +98,26 @@ def main(
     check: FreshnessCheck = check_freshness,
     state_path: Path | None = None,
 ) -> int:
-    """Exit zero and stay silent on stdout when fresh or already reported.
+    """Exit zero only when fresh; leave alert deduplication to the scheduler.
 
-    The first sighting of a stale episode pages (exit 1, compact alert on
-    stdout). Repeats of the same episode heartbeat on stderr only (exit 0)
-    so an unhealed drift does not page hourly; A18 promotion starts a new
-    episode only if the report actually changes.
+    An unchanged stale episode must remain a failed run, not a false recovery.
+    Failure output is timestamp-free and starts with its stable episode digest,
+    so Hermes can deduplicate incidents without losing the health signal.
     """
     now = _utc_now()
     digest_path = Path(state_path) if state_path is not None else _digest_state_path(project_root)
     try:
         report = check(Path(project_root).resolve())
+        if (not isinstance(report, dict)
+                or report.get("schema") != "graphify-freshness.v1"
+                or report.get("status") not in {"fresh", "stale"}
+                or not isinstance(report.get("issues"), list)
+                or (report["status"] == "fresh" and report["issues"])):
+            raise ValueError("invalid freshness report")
     except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print(
             "GRAPHIFY ARTIFACT UNAVAILABLE "
-            f"{now} error={type(exc).__name__}"
+            f"error={type(exc).__name__}"
         )
         return 1
     if report.get("status") == "fresh":
@@ -124,16 +129,10 @@ def main(
         return 0
     digest = _alert_digest(report)
     previous = _read_digest(digest_path)
-    if previous is not None and previous.get("digest") == digest:
-        print(
-            f"GRAPHIFY ARTIFACT STILL STALE {now} "
-            f"first_seen={previous.get('first_seen', 'unknown')}",
-            file=sys.stderr,
-        )
-        return 0
-    print(f"GRAPHIFY ARTIFACT STALE {now}")
+    print(f"GRAPHIFY ARTIFACT STALE episode={digest}")
     print(json.dumps(_compact_alert(report), indent=2, sort_keys=True))
-    _write_digest(digest_path, digest, now)
+    if previous is None or previous.get("digest") != digest:
+        _write_digest(digest_path, digest, now)
     return 1
 
 

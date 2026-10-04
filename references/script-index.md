@@ -31,9 +31,18 @@ Owned by `references/automation-layer.md`.
 | `cron_canonical_integrity.py` | A13 — verify canonical SQLite integrity (read-only) | `test_freshness_cron.py` |
 | `cron_registration_validator.py` | Verify every cron wrapper resolves to a repo script | `test_cron_registration_validator.py` |
 | `check_note_state_drift.py` | A19 — authored blockers/stop-lines/status in state records must appear in the continuity note, and the WF-1200 generated role roster must match the registry (`--state-dir --ack-file --json`); also a fast-tier startup gate (`note_drift`, warning-class) | `test_note_state_drift.py` |
+| `qa_review_driver.py` | Formal QA review runner: admits via the gate, pins `--provider`/`-m`, verifies the effective model from the session record, fails closed on unknown/mismatch/author match. Exit 0 verified, 1 failed, 2 refused. |
 | `fleet_roster_block.py` | Generates the WF-1200 note's role-roster block from `state/fleet-role-registry.json`; `--check` / `--write` (only the BEGIN/END-marked region is rewritten) | `test_fleet_roster_block.py` |
 
 ## Agent qualification (canary) harnesses
+
+### Bounded fleet measurement (WF-1200)
+
+| Script | Purpose | Test anchor |
+|---|---|---|
+| `hermes_otel_efficiency.py` | Metadata-only, bounded async efficiency observer; profile-local activation, strict trace context, success/failure sampling. Contract: `source/hermes-otel-pilot/efficiency.md`. | `test_otel_efficiency.py` |
+| `fleet_measurement.py` | Governor-owned inline pilot runner: gated dispatch, actual-model checks, verification, independent review and local acceptance receipt. Not a global dispatch replacement. | `test_fleet_measurement.py` |
+| `verify_fleet_measurement.py` | Bounded exact-service/trace collector read-back; deduplication, parent/interval checks and observed numeric usage. CLI requires `--trace-file`, `--offset`, repeated `--trace-id`. | `test_fleet_measurement.py` |
 
 | Script | Purpose | Arguments | Test anchor | Owning reference |
 |---|---|---|---|---|

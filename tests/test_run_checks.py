@@ -3,7 +3,8 @@ import json
 import os
 import subprocess
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -325,6 +326,7 @@ class RunChecksTests(unittest.TestCase):
             cmd=["pytest"], timeout=240, output=partial, stderr=""
         )
         with (
+            patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
             patch.object(run_checks.subprocess, "run", side_effect=timeout),
             patch.object(
                 run_checks, "_write_timeout_log", return_value="<test-log>"
@@ -344,6 +346,56 @@ class RunChecksTests(unittest.TestCase):
         self.assertEqual(test_count, 15)
         self.assertGreaterEqual(failure_count, 1)
         log_mock.assert_called_once()
+
+    def test_importable_pytest_does_not_require_path_entry(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "3 passed in 0.1s", "")
+        with (
+            patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
+            patch.object(run_checks.shutil, "which", return_value=None),
+            patch.object(run_checks.subprocess, "run", return_value=completed) as run_mock,
+            patch.object(run_checks, "build_test_suite", side_effect=AssertionError("no fallback")),
+        ):
+            self.assertEqual(run_checks.run_tests()[3], 3)
+        self.assertEqual(run_mock.call_args.args[0][:3], [sys.executable, "-m", "pytest"])
+
+    def test_timeout_bytes_and_mixed_streams_preserve_diagnostics(self) -> None:
+        for output, stderr in ((b"2 passed in 0.1s\n", "FAILED tests/x.py::test_y\n"),
+                               ("2 passed in 0.1s\n", b"FAILED tests/x.py::test_y\xff\n")):
+            with (
+                self.subTest(output=output),
+                patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
+                patch.object(run_checks.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                    ["pytest"], 240, output=output, stderr=stderr)),
+                patch.object(run_checks, "_write_timeout_log", return_value="<test-log>") as log,
+                patch.object(run_checks, "build_test_suite", side_effect=AssertionError("no fallback")),
+            ):
+                ok, failures, _elapsed, count, _failed = run_checks.run_tests()
+            self.assertFalse(ok)
+            self.assertEqual(count, 2)
+            self.assertIn("test_y", " ".join(failures))
+            self.assertIsInstance(log.call_args.args[0], str)
+
+    def test_timeout_log_prunes_logs_older_than_retention(self) -> None:
+        import time as _time
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            tmp = root / "tmp"
+            tmp.mkdir()
+            old = tmp / "pytest-timeout-20200101T000000Z.log"
+            recent = tmp / "pytest-timeout-20990101T000000Z.log"
+            unrelated = tmp / "other-old.log"
+            for path in (old, recent, unrelated):
+                path.write_text("x", encoding="utf-8")
+            stale = _time.time() - (run_checks.TIMEOUT_LOG_RETENTION_DAYS + 1) * 86400
+            os.utime(old, (stale, stale))
+            os.utime(unrelated, (stale, stale))
+            with patch.object(run_checks, "PROJECT_ROOT", root):
+                written = run_checks._write_timeout_log("partial")
+            self.assertTrue(Path(written).is_file())
+            self.assertFalse(old.exists())
+            self.assertTrue(recent.exists())
+            self.assertTrue(unrelated.exists())
 
 
 if __name__ == "__main__":
