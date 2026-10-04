@@ -484,6 +484,97 @@ def _publish_generation_unlocked(
     return _selection_from_pointer(root)
 
 
+SNAPSHOTS_RELATIVE = ("source", "graphify-candidates")
+MIN_RETAINED_GENERATIONS = 2
+
+
+def _force_rmtree(path: Path) -> None:
+    """Remove a tree whose files were deliberately published read-only."""
+
+    def _on_error(function: Any, failing_path: str, _exc: Any) -> None:
+        os.chmod(failing_path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        function(failing_path)
+
+    shutil.rmtree(path, onerror=_on_error)
+
+
+def _acceptance_snapshot(root: Path, generation_dir: Path, snapshots_root: Path) -> Path | None:
+    """Return the generation's snapshot dir if it lives directly in the candidates dir."""
+    acceptance_path = generation_dir / ACCEPTANCE_NAME
+    if not acceptance_path.is_file():
+        return None
+    try:
+        acceptance = _load_json_object(acceptance_path, label="Generation acceptance record")
+        candidate = (root / _validate_snapshot_path(acceptance.get("snapshot_path"))).resolve()
+    except GraphifyGenerationError:
+        return None
+    # Only ever delete snapshots that live directly in the candidates dir.
+    if candidate.parent == snapshots_root.resolve() and not _is_link_or_reparse(candidate):
+        return candidate
+    return None
+
+
+def _prune_generations_unlocked(project_root: Path, *, keep: int, dry_run: bool) -> dict[str, Any]:
+    root = Path(project_root).resolve()
+    selection = _selection_from_pointer(root)
+    generation_root = root / GRAPH_DIR_NAME / GENERATIONS_DIR_NAME
+    snapshots_root = root.joinpath(*SNAPSHOTS_RELATIVE)
+    generations = sorted(
+        p for p in generation_root.iterdir()
+        if p.is_dir() and not _is_link_or_reparse(p) and _GENERATION_ID.fullmatch(p.name)
+    )
+    # Generation IDs start with a UTC timestamp, so name order is age order.
+    retained = {p.name for p in generations[-keep:]} | {selection.generation_id}
+    protected_snapshots = {
+        snapshot
+        for p in generations
+        if p.name in retained
+        for snapshot in [_acceptance_snapshot(root, p, snapshots_root)]
+        if snapshot is not None
+    }
+    removed: list[str] = []
+    removed_snapshots: list[str] = []
+    for generation_dir in generations:
+        if generation_dir.name in retained:
+            continue
+        removed.append(generation_dir.name)
+        snapshot = _acceptance_snapshot(root, generation_dir, snapshots_root)
+        if snapshot in protected_snapshots:
+            snapshot = None
+        if snapshot is not None and snapshot.is_dir():
+            removed_snapshots.append(snapshot.name)
+        if dry_run:
+            continue
+        _force_rmtree(generation_dir)
+        if snapshot is not None and snapshot.is_dir():
+            _force_rmtree(snapshot)
+    if not dry_run and removed:
+        _selection_from_pointer(root)
+    return {
+        "schema": "graphify-generation-prune.v1",
+        "dry_run": dry_run,
+        "keep": keep,
+        "selected_generation": selection.generation_id,
+        "retained_generations": sorted(retained),
+        "removed_generations": removed,
+        "removed_snapshots": removed_snapshots,
+    }
+
+
+def prune_generations(project_root: Path, *, keep: int = 3, dry_run: bool = False) -> dict[str, Any]:
+    """Delete all but the newest ``keep`` generations under the writer lock.
+
+    The currently selected generation is always retained, and at least two
+    generations are kept so a pointer rollback target always exists. The
+    pointer is re-verified before and after deletion; an invalid pointer
+    fails closed before anything is removed.
+    """
+    if not isinstance(keep, int) or keep < MIN_RETAINED_GENERATIONS:
+        raise GraphifyGenerationError(f"keep must be an integer >= {MIN_RETAINED_GENERATIONS}")
+    with publication_lock(project_root, shared=False):
+        return _prune_generations_unlocked(project_root, keep=keep, dry_run=dry_run)
+
+
 def publish_generation(
     project_root: Path,
     candidate_artifact_dir: Path,

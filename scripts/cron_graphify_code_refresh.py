@@ -25,10 +25,13 @@ from scripts.graphify_freshness import check_freshness, write_baseline
 from scripts.graphify_gate_edges import reconcile
 from scripts.graphify_generation import (
     current_pointer_bytes,
+    prune_generations,
     publication_lock,
     publish_generation,
     restore_current_pointer,
 )
+
+RETAINED_GENERATIONS = 3
 
 FreshnessCheck = Callable[[Path], dict[str, Any]]
 SNAPSHOT_SCHEMA = "graphify-source-snapshot.v1"
@@ -415,8 +418,11 @@ def main(
     check: FreshnessCheck = check_freshness,
     promote_once: bool = False,
     promote: PromotionRunner = run_one_shot_promotion,
+    prune: Callable[[Path, int], dict[str, Any]] | None = None,
 ) -> int:
     """Remain read-only unless a separately invoked one-shot promotion is authorized."""
+    if prune is None:
+        prune = lambda project, keep: prune_generations(project, keep=keep)  # noqa: E731
     now = _utc_now()
     root = Path(project_root).resolve()
     try:
@@ -446,6 +452,13 @@ def main(
             }
         status = str(outcome.get("status", "blocked"))
         label = "PROMOTED" if status == "promoted" else "BLOCKED"
+        if status == "promoted":
+            # Retention runs after the writer lock is released (the lock is not
+            # re-entrant); a failure here never undoes a verified promotion.
+            try:
+                outcome["retention"] = prune(root, RETAINED_GENERATIONS)
+            except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                outcome["retention"] = {"status": "prune_failed", "error_type": type(exc).__name__}
         print(f"GRAPHIFY CODE REFRESH {label} {now}")
         print(json.dumps(outcome, indent=2, sort_keys=True))
         return 0 if status == "promoted" else 1
@@ -481,9 +494,19 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="build, validate, and atomically select one isolated Graphify generation",
     )
+    parser.add_argument(
+        "--prune",
+        type=int,
+        metavar="KEEP",
+        help="only prune: keep the newest KEEP generations (>=2) plus the selected one",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="with --prune, report without deleting")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
+    if args.prune is not None:
+        print(json.dumps(prune_generations(args.project_root, keep=args.prune, dry_run=args.dry_run), indent=2))
+        raise SystemExit(0)
     raise SystemExit(main(args.project_root, promote_once=args.promote_once))

@@ -700,8 +700,58 @@ class GraphifyCodeRefreshHoldTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertIn("GRAPHIFY CODE REFRESH PROMOTED", stdout.getvalue())
 
+    def test_successful_promotion_prunes_old_generations(self) -> None:
+        from scripts import cron_graphify_code_refresh
 
+        report = {"schema": "graphify-freshness.v1", "status": "stale", "issues": []}
+        prunes: list[int] = []
+        stdout = io.StringIO()
+        with TemporaryDirectory() as directory, redirect_stdout(stdout):
+            result = cron_graphify_code_refresh.main(
+                Path(directory),
+                check=lambda _root: report,
+                promote_once=True,
+                promote=lambda _root, gid: {"status": "promoted", "generation_id": gid},
+                prune=lambda _root, keep: prunes.append(keep) or {"removed_generations": ["g-old"]},
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(prunes, [cron_graphify_code_refresh.RETAINED_GENERATIONS])
+        self.assertIn("g-old", stdout.getvalue())
 
+    def test_blocked_promotion_never_prunes(self) -> None:
+        from scripts import cron_graphify_code_refresh
+
+        report = {"schema": "graphify-freshness.v1", "status": "stale", "issues": []}
+        prunes: list[int] = []
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            result = cron_graphify_code_refresh.main(
+                Path(directory),
+                check=lambda _root: report,
+                promote_once=True,
+                promote=lambda _root, gid: {"status": "blocked", "generation_id": gid},
+                prune=lambda _root, keep: prunes.append(keep) or {},
+            )
+        self.assertEqual(result, 1)
+        self.assertEqual(prunes, [])
+
+    def test_prune_failure_does_not_fail_a_successful_promotion(self) -> None:
+        from scripts import cron_graphify_code_refresh
+
+        def broken(_root: Path, keep: int) -> dict:
+            raise OSError("in use")
+
+        report = {"schema": "graphify-freshness.v1", "status": "stale", "issues": []}
+        stdout = io.StringIO()
+        with TemporaryDirectory() as directory, redirect_stdout(stdout):
+            result = cron_graphify_code_refresh.main(
+                Path(directory),
+                check=lambda _root: report,
+                promote_once=True,
+                promote=lambda _root, gid: {"status": "promoted", "generation_id": gid},
+                prune=broken,
+            )
+        self.assertEqual(result, 0)
+        self.assertIn("prune_failed", stdout.getvalue())
 
     def test_freshness_exception_fails_closed(self) -> None:
         from scripts import cron_graphify_code_refresh
