@@ -1,7 +1,7 @@
 {
   "schema": "workflow-alias-index.v1",
   "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-08-16T04:10:00Z",
+  "generated_at": "2026-10-04T05:33:42Z",
   "aliases": {
     "workflow-a": "WF-1000",
     "product research": "WF-1000",
@@ -44,6 +44,13 @@
     "fleet roles": "WF-1200",
     "fleet-roles": "WF-1200",
     "model roles": "WF-1200",
-    "agent fleet roles": "WF-1200"
+    "agent fleet roles": "WF-1200",
+    "smb-discovery": "WF-1006",
+    "smb service design": "WF-1006",
+    "business process discovery": "WF-1006",
+    "ai workflow diagnostic": "WF-1006",
+    "ai-workflow-diagnostic": "WF-1006",
+    "ai integration diagnostic": "WF-1006",
+    "smb-ai-diagnostic": "WF-1006"
   }
 }

@@ -4,7 +4,7 @@
 {
   "schema": "workflow-alias-index.v1",
   "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-08-16T04:10:00Z",
+  "generated_at": "2026-10-04T05:33:42Z",
   "aliases": {
     "workflow-a": "WF-1000",
     "product research": "WF-1000",
@@ -24,7 +24,37 @@
     "campaign execution": "WF-1003",
     "campaign-execution": "WF-1003",
     "campaigns": "WF-1003",
-    "workflow d": "WF-1003"
+    "workflow d": "WF-1003",
+    "workflow-e": "WF-1004",
+    "workflow e": "WF-1004",
+    "agent trust audit": "WF-1004",
+    "agent-trust-audit": "WF-1004",
+    "trust-audit": "WF-1004",
+    "trust audit": "WF-1004",
+    "proof-lab": "WF-1000",
+    "proof lab": "WF-1000",
+    "workflow-f": "WF-1005",
+    "workflow f": "WF-1005",
+    "promise-desk": "WF-1005",
+    "promise desk": "WF-1005",
+    "promise-gap": "WF-1005",
+    "promise gap": "WF-1005",
+    "smb-services": "WF-1100",
+    "smb services platform": "WF-1100",
+    "smb-platform": "WF-1100",
+    "small business services": "WF-1100",
+    "agent-fleet-roles": "WF-1200",
+    "fleet roles": "WF-1200",
+    "fleet-roles": "WF-1200",
+    "model roles": "WF-1200",
+    "agent fleet roles": "WF-1200",
+    "smb-discovery": "WF-1006",
+    "smb service design": "WF-1006",
+    "business process discovery": "WF-1006",
+    "ai workflow diagnostic": "WF-1006",
+    "ai-workflow-diagnostic": "WF-1006",
+    "ai integration diagnostic": "WF-1006",
+    "smb-ai-diagnostic": "WF-1006"
   }
 }
 ```

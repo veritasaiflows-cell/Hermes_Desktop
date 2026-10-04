@@ -1,7 +1,7 @@
 ---
 name: privacy-safe-prospect-intake
 description: "Use when checking synthetic prospect intake boundaries."
-version: 1.0.0
+version: 1.1.0
 author: Efficiens
 license: MIT
 metadata:
@@ -14,6 +14,9 @@ metadata:
 ## When to use
 Use when checking synthetic prospect intake boundaries. Use smb-process-discovery for detailed process mapping/calculations; smb-discovery-coaching for roleplay; this skill owns the shared approval-checklist template.
 Suggested sequence: intake gate → process discovery → stack assessment → proposal. Use only relevant steps, not all skills every time.
+
+## AI Workflow Diagnostic alignment
+Read workspace-root `references/smb-ai-workflow-diagnostic.md`. Capture the invented buyer's automation objective, one repetitive task and intended benefit category; diagnostic interest is not access permission. Ask about data categories and approval gaps, not sample real emails or records. Route accepted synthetic inputs to the existing discovery/stack/proposal skills.
 
 ## Purpose, scope and non-scope
 Produce a bounded synthetic internal draft and train Randall to distinguish facts, estimates and authority. No real-data processing, outreach, software installation, client-system action or deployed-capability claim. Conversation roleplay belongs to smb-discovery-coaching.
@@ -58,6 +61,7 @@ Local support (relative to this skill folder): [Output template](templates/outpu
 Related skill smb-discovery-coaching is profile-local; use skill_view(name). If unavailable, report it and stay out of roleplay. These packages do not migrate it.
 
 ## Change history
+1.1.0: AI diagnostic intake framing; no change to synthetic-only refusal or approval-checklist ownership. Operator-direction source: default-profile Hermes session `20261003_121135_1566a31e`, message `62961`, `2026-10-04T05:09:03.259194+00:00`; exact text and scope are owned by `references/smb-ai-workflow-diagnostic.md` (workspace root), separately from registration ratification.
 1.0.0: Architect Astra bounded design; Sonnet pre-install QA adaptations; Governor drafting. Original combined request timed out and is preserved in derived/smb-four-skills/. Installation and test outcomes belong to proof records, not claims in the procedure.
 
 

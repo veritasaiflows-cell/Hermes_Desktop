@@ -1,7 +1,7 @@
 ---
 name: client-stack-assessment
 description: "Use when assessing a fictional SMB software stack."
-version: 1.0.0
+version: 1.1.0
 author: Efficiens
 license: MIT
 metadata:
@@ -14,6 +14,9 @@ metadata:
 ## When to use
 Use when assessing a fictional SMB software stack. Use privacy-safe-prospect-intake for handling; smb-process-discovery for savings; smb-proposal-pilot-design for scoped proposals; coaching owns roleplay.
 Suggested sequence: intake gate → process discovery → stack assessment → proposal. Use only relevant steps, not all skills every time.
+
+## AI Workflow Diagnostic alignment
+Read workspace-root `references/smb-ai-workflow-diagnostic.md`. Support task-level AI integration feasibility, not a tool shopping list. Document what supplied synthetic evidence establishes versus what needs a separately authorized technical check. This skill does not gain network or credential access from the diagnostic posture.
 
 ## Purpose, scope and non-scope
 Produce a bounded synthetic internal draft and train Randall to distinguish facts, estimates and authority. No real-data processing, outreach, software installation, client-system action or deployed-capability claim. Conversation roleplay belongs to smb-discovery-coaching.
@@ -41,7 +44,7 @@ Return stop codes and a minimal explanation without reproducing rejected content
 3. Draw plain-text nodes/arrows; label every edge scenario-supplied, assumed or unknown. No verified live connection is implied.
 4. Map retyping, duplicate sources, broken handoffs and exceptions to scenario evidence.
 5. Classify possible path as manual export, read-only comparison, draft assistance or later integration; connector/API/OAuth feasibility remains unknown without separately authorized verification.
-6. Identify least-permission and human-review questions, not credentials, configuration or operational instructions.
+6. For each candidate integration edge record product/version/plan, exact proposed operation, evidence reference/date, supported API/export path, licensing and permission questions, owner, trigger/event identifier, duplicate/retry behavior, rate limits, model data boundary and human-review point. Missing items remain unknown. Documentation-supported is not tenant-tested; never infer Outlook, OneDrive or API access from the word Excel. Ask questions, not for credentials or configuration changes.
 7. Consume discovery baseline if offered; do not own another savings formula or turn hypothetical capacity into cash.
 8. Create learning exercise with fictional CSV/schema or diagram, expected result, and remaining technical gates before application/reporting use.
 
@@ -58,6 +61,7 @@ Local support (relative to this skill folder): [Output template](templates/outpu
 Related skill smb-discovery-coaching is profile-local; use skill_view(name). If unavailable, report it and stay out of roleplay. These packages do not migrate it.
 
 ## Change history
+1.1.0: AI diagnostic integration-evidence checklist; synthetic and no-network boundaries unchanged. Operator-direction source: default-profile Hermes session `20261003_121135_1566a31e`, message `62961`, `2026-10-04T05:09:03.259194+00:00`; exact text and scope are owned by `references/smb-ai-workflow-diagnostic.md` (workspace root), separately from registration ratification.
 1.0.0: Architect Astra bounded design; Sonnet pre-install QA adaptations; Governor drafting. Original combined request timed out and is preserved in derived/smb-four-skills/. Installation and test outcomes belong to proof records, not claims in the procedure.
 
 Workspace-root architecture decision items 1,3,8,10. Authority record: operator-chat-wf1006-registration-ratification-20261004T005955Z. Exact scope: “internal registration and associated workflow-record synchronization”; exclusions: “external contact, real-data handling, implementation, or spending”.

@@ -1,7 +1,7 @@
 ---
 name: smb-proposal-pilot-design
 description: "Use when drafting a synthetic bounded SMB pilot proposal."
-version: 1.0.0
+version: 1.1.0
 author: Efficiens
 license: MIT
 metadata:
@@ -14,6 +14,9 @@ metadata:
 ## When to use
 Use when drafting a synthetic bounded SMB pilot proposal. Use smb-process-discovery for baseline method and client-stack-assessment for dependencies; privacy-safe-prospect-intake owns approval checklist; coaching owns roleplay.
 Suggested sequence: intake gate → process discovery → stack assessment → proposal. Use only relevant steps, not all skills every time.
+
+## AI Workflow Diagnostic alignment
+Read workspace-root `references/smb-ai-workflow-diagnostic.md`. Package findings with [AI diagnostic report](templates/ai-diagnostic-report.md); use the ordinary output template for a pilot-only exercise. Report shape is future prospect-facing, but this skill's output remains synthetic/internal and cannot be sent. Process mapping is diagnostic support, not a forced standalone service.
 
 ## Purpose, scope and non-scope
 Produce a bounded synthetic internal draft and train Randall to distinguish facts, estimates and authority. No real-data processing, outreach, software installation, client-system action or deployed-capability claim. Conversation roleplay belongs to smb-discovery-coaching.
@@ -41,7 +44,7 @@ Return stop codes and a minimal explanation without reproducing rejected content
 3. Use supplied stack assessment; absent one, mark dependency feasibility unknown and refer to its owner rather than infer live connections.
 4. Consume baseline/net-savings from discovery. Separate setup from recurring expense; use explicit units and periods. Labor-capacity valuation is NOT cash, revenue or measured savings.
 5. Model economic scenario: capacity value minus incremental recurring expense. Simple modeled payback = setup / positive monthly net value only; otherwise no positive payback. Do not claim cash payback from hypothetical capacity.
-6. Specify duration, baseline window/sample, measurement owner role, acceptance threshold, abort criteria, human review and change-control boundary. These are proposed, not agreed.
+6. Specify duration, baseline window/sample, measurement owner role, acceptance threshold, abort criteria, human review and change-control boundary. For AI tasks also specify schema/field correctness with source evidence, missing/conflicting inputs, prompt-injection resistance, abstention, review time, failure rate, latency, per-case cost and held-out examples. Expected answers stay separate from actual results; NOT_RUN is not a pass. Thresholds are proposed, not agreed.
 7. Specify manual fallback, rollback prerequisites, support owner role and retention/offboarding questions. Unknown mechanisms prevent implementation commitment.
 8. Use skill_view(name="privacy-safe-prospect-intake", file_path="templates/approval-checklist.md") for the approval-checklist reference and WF-1100/WF-1200 technical gates. Return internal draft with unknown price/date/feasibility explicitly labeled.
 
@@ -58,6 +61,7 @@ Local support (relative to this skill folder): [Output template](templates/outpu
 Related skill smb-discovery-coaching is profile-local; use skill_view(name). If unavailable, report it and stay out of roleplay. These packages do not migrate it.
 
 ## Change history
+1.1.0: AI diagnostic report and AI-specific evaluation design; no new implementation or send authority. Operator-direction source: default-profile Hermes session `20261003_121135_1566a31e`, message `62961`, `2026-10-04T05:09:03.259194+00:00`; exact text and scope are owned by `references/smb-ai-workflow-diagnostic.md` (workspace root), separately from registration ratification.
 1.0.0: Architect Astra bounded design; Sonnet pre-install QA adaptations; Governor drafting. Original combined request timed out and is preserved in derived/smb-four-skills/. Installation and test outcomes belong to proof records, not claims in the procedure.
 
 Workspace-root architecture decision items 1,3,10,12. Authority record: operator-chat-wf1006-registration-ratification-20261004T005955Z. Exact scope: “internal registration and associated workflow-record synchronization”; exclusions: “external contact, real-data handling, implementation, or spending”.

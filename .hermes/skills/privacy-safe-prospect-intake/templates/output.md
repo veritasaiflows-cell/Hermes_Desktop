@@ -8,6 +8,8 @@ Review: Not independently reviewed; operator may request review.
 [synthetic input or unknown]
 ## Minimal friction and unknowns
 [synthetic input or unknown]
+## AI diagnostic objective
+[invented repetitive task and desired outcome; effort / capacity / avoided hiring / actual payroll savings; categories only, no ROI calculation]
 ## Supplied estimates (not recalculated)
 [synthetic input or unknown]
 ## Approval-checklist evidence gaps

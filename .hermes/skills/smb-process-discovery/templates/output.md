@@ -16,6 +16,10 @@ Review: Not independently reviewed; operator may request review.
 [synthetic input or unknown]
 ## Hypotheses and score after gates
 [synthetic input or unknown]
+## Task inventory: AI / deterministic rule / human; rationale and review burden
+[one row per task; error consequences, abstention and evidence]
+## Alternatives and diagnostic disposition
+[AI-assisted / non-AI / no change; NEEDS_EVIDENCE / CANDIDATE_FOR_SCOPING / NO_GO / PILOT_PROPOSED; not approval]
 ## Disconfirming evidence and feasibility gaps
 [synthetic input or unknown]
 

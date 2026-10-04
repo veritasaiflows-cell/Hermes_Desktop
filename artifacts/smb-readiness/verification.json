@@ -1,0 +1,18 @@
+{
+  "pdf_pages": 3,
+  "workbook_sheets": [
+    "Readiness",
+    "Discovery worksheet",
+    "Practice log",
+    "Instructions"
+  ],
+  "checklist_items": 15,
+  "practice_completed": false,
+  "formula_note": "formula strings verified; Excel recalculation not performed",
+  "pdf_layout": "all text blocks within page bounds; not human visual review",
+  "files": {
+    "conversation-readiness.pdf": "c6136b488d35ba97c248e61a6fc26d628e3ed72d55f0714de729037497e94836",
+    "readiness-kit.md": "5e4ec0156353445325244cccfedc48801a3d27749741cc2a498e64e94c173f17",
+    "readiness-workbook.xlsx": "adc52b45257d05a31fb710eec50834c2c0cd1ef348c894caff66ac4b9b8275d5"
+  }
+}

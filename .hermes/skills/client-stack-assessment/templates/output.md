@@ -10,6 +10,8 @@ Review: Not independently reviewed; operator may request review.
 [synthetic input or unknown]
 ## Least-permission questions
 [synthetic input or unknown]
+## Candidate integration evidence matrix
+[edge / product-version-plan / proposed operation / source-date / evidence status / API-export / licensing / scopes / event-ID / retries-deduplication / rate limits / model data boundary / review / owner / blocker]
 ## Learning exercise and expected result
 [synthetic input or unknown]
 ## Unverified feasibility and implementation gates

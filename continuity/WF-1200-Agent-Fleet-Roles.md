@@ -202,6 +202,19 @@ Evidence (git-ignored): `derived/otel-efficiency/2026-10-04/{corrective,deploy}/
 Lane register owns live status. This does not start or authorize the queued
 skill-provisioning item below.
 
+## Checkpoint provenance clarification — 2026-10-04
+
+The historical `fleet-review-route-2026-10-03` lane remains blocked and is not
+accepted by the checkpoint. The former route-specific prohibition on a Sol-authored
+lane using the QA fallback predates the QA rebinding (Sol primary, Sonnet fallback)
+and is no longer an accurate route-label rule. Its invariant is preserved and made
+explicit in the queue and mirrored capsule: no QA review unless session-verified
+reviewer model differs from session-verified author model. Registry approval and
+all other stop lines remain required; this is not a qualification or permission
+change and does not clear WF-1100. The WF-1200-RS01 queue item and its original
+operator queueing authority are recorded in the bounded item below. The review
+packet now includes this existing note; checkpointing does not start that item.
+
 **Title:** Role skill provisioning and dispatch verification.
 **Status:** Queued; not started. Owner: Governor (`agent-main`).
 **Authority:** Operator explicitly requested queueing this bounded item in the current chat; this is backlog registration only, not implementation, profile deployment, or permission approval.

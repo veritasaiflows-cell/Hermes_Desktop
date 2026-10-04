@@ -50,16 +50,16 @@ first case study so the before/after stays clean.
   or earned revenue.
 
 ## Next safe action
-Operator-led conversations with 1–3 Wave-1 contractors using the promise-gap
-framing. First measurement pass (public pages only, no contact) only after
-operator confirms which businesses may be examined.
+Use Promise Desk only when public-promise evidence is the requested deliverable; otherwise route AI Workflow Diagnostic preparation to WF-1006. Named targets and consent decision must be approved before any measurement pass.
 
-## Expansion path (registered, not opened)
-This workspace is the engine for a small-business services line. Future
-workflows — each opened separately with its own state record and preflight —
-anticipated by the operator:
-- lead generation / intake triage for trades;
-- workflow repair (broken follow-up, scheduling, invoicing flows);
-- AI implementation and automation assistance for a client's own stack.
-None are opened by this note. WF-1005 remains the single active small-business
-workflow until a named buyer exists.
+Do not collect data on or contact any named business until the operator selects targets and approves. Do not build a Promise Desk implementation script until one buyer conversation has occurred. Scope any requested remediation separately through WF-1006 and the gated WF-1100 platform.
+
+## Separately scoped service path (2026-10-03)
+WF-1006 owns AI Workflow Diagnostic preparation; WF-1100 owns the reusable
+platform foundation. Both remain route_only with their own records and gates.
+Promise Desk is an optional public-evidence service, not a mandatory front door
+for AI-seeking buyers or a bundled remediation service. Lead handling, follow-up,
+scheduling, invoicing and AI implementation are candidate offers only; no module
+is activated here. Posture owner: `references/smb-ai-workflow-diagnostic.md`.
+Starting plan: `.hermes/plans/2026-10-03-smb-service-os.md`.
+Conversation kit: `derived/wf1100/service-os-2026-10-03/conversation-kit.md`.

@@ -5,7 +5,7 @@
   "schema": "active-workflows.v1",
   "routing_schema_version": "workflow-routing-index.v1",
   "generated_by": "control-plane bootstrap",
-  "generated_at": "2026-10-03T19:12:56Z",
+  "generated_at": "2026-10-04T05:33:42Z",
   "workflows": [
     {
       "workflow_id": "WF-1000",
@@ -275,9 +275,9 @@
       "lifecycle": "route_only",
       "readiness": "route_only",
       "effective_status": "route_only",
-      "state_description": "Promise desk for local small businesses. Extracts a business's own public promises (response-time, hours, pricing, licensing), binds each to dated evidence, and measures the gap between promise and published infrastructure. No client AI required. No implementation script yet; control surface only.",
-      "next_action": "Operator-led conversations with 1-3 Wave-1 trade contractors using the promise-gap framing. First public-page measurement pass only after operator confirms which businesses may be examined.",
-      "authoritative_next_action": "Do not collect data on or contact any named business until the operator selects targets and approves. Do not build an implementation script until one buyer conversation has occurred.",
+      "state_description": "Optional Promise Desk for separately authorized public-promise evidence. Not a mandatory front door for buyers seeking AI automation: route those diagnostic requests directly to WF-1006. No implementation script or bundled fix; any implementation remains gated through WF-1100.",
+      "next_action": "Use Promise Desk only when public-promise evidence is the requested deliverable; otherwise route AI Workflow Diagnostic preparation to WF-1006. Named targets and consent decision must be approved before any measurement pass.",
+      "authoritative_next_action": "Do not collect data on or contact any named business until the operator selects targets and approves. Do not build a Promise Desk implementation script until one buyer conversation has occurred. Scope any requested remediation separately through WF-1006 and the gated WF-1100 platform.",
       "implementation_script": null,
       "commands": {
         "dry_run": null,
@@ -315,6 +315,62 @@
       ]
     },
     {
+      "workflow_id": "WF-1006",
+      "display_name": "SMB AI Workflow Diagnostic and Pilot Design",
+      "aliases": [
+        "smb-discovery",
+        "smb service design",
+        "business process discovery",
+        "ai workflow diagnostic",
+        "ai-workflow-diagnostic",
+        "ai integration diagnostic",
+        "smb-ai-diagnostic"
+      ],
+      "tier": "P1",
+      "priority": "high",
+      "lifecycle": "route_only",
+      "readiness": "route_only",
+      "effective_status": "route_only",
+      "state_description": "AI Workflow Diagnostic preparation: task-level AI/rule/human allocation, baseline and net-effort analysis, verified-or-unknown integration paths and a bounded pilot specification. Process mapping is diagnostic work, not the headline offer unless requested. Internal planning and synthetic training only; no deployed integration, measured client savings or approved platform capability.",
+      "next_action": "Rehearse the AI Workflow Diagnostic with the fictional quote-intake case, complete the report and evaluation plan, and resolve baseline/integration unknowns without inventing evidence. Obtain separate outreach and data-handling approvals before real prospect work.",
+      "authoritative_next_action": "Internal planning and synthetic rehearsal only. No real client data, outreach or deployment is authorized. Implementation handoff must separately satisfy WF-1100 and WF-1200 gates; lack of a platform dependency here is not write authority.",
+      "implementation_script": null,
+      "commands": {
+        "dry_run": null,
+        "write": null
+      },
+      "helper_safe": false,
+      "owner_action_required": true,
+      "authority_boundary": "review_only",
+      "authority_class": "route_only",
+      "primary_owner_lane": "agent-main",
+      "secondary_consumers": [
+        "review",
+        "operations"
+      ],
+      "human_approval_owner": "operator",
+      "proof_artifact": "continuity/WF-1006-SMB-Discovery-and-Service-Design.md",
+      "freshness_sla": "weekly",
+      "default_resume_command": "python scripts/workflow_router.py WF-1006 --answer next --validate",
+      "control_override": null,
+      "depends_on": [],
+      "blockers": [
+        "No operator-selected process or client pilot is approved.",
+        "No client data-handling policy is approved."
+      ],
+      "stop_lines": [
+        "No real client data or credentials before operator and client data-handling approval",
+        "No external messages, outreach, publication or named-business examination without explicit operator approval",
+        "No client-system write, send, payment or live automation without operator and client approval",
+        "No claims of deployed capability, measured savings or earned revenue from synthetic demonstrations"
+      ],
+      "primary_route_artifact": "state/workflows/WF-1006.json",
+      "validator_commands": [
+        "python scripts/workflow_router.py WF-1006 --answer summary --validate",
+        "python scripts/check_note_state_drift.py --json"
+      ]
+    },
+    {
       "workflow_id": "WF-1100",
       "display_name": "SMB Services Platform",
       "aliases": [
@@ -328,16 +384,16 @@
       "lifecycle": "route_only",
       "readiness": "route_only",
       "effective_status": "route_only",
-      "state_description": "Phase-1 specs are accepted. Four one-time Implementer attempts timed out after 900 seconds; three incomplete source files remain quarantined, no required test target exists, and no lane was accepted. The repair route is now the Senior Engineer (openai-codex/gpt-6.1-sol) at repair cycle 1; no repair lane has been opened yet.",
-      "next_action": "Governor opens repair-cycle-1 lanes for the four phase-1 lanes, dispatches the Senior Engineer against the accepted architect spec, runs each acceptance command, and sends passing diffs to independent QA.",
-      "authoritative_next_action": "Do not reuse the consumed Implementer exceptions or ingest real client data. Resume only through Senior Engineer repair-cycle-1 lanes, and keep phases 3-5 closed until WF-1005 confirms a real prospect needs a module.",
+      "state_description": "Phase-1 specs are accepted. Four one-time Implementer attempts timed out after 900 seconds; three incomplete source files remain quarantined, no required test target exists, and no lane was accepted. The repair route is now the Senior Engineer (openai-codex/gpt-6.1-sol) at repair cycle 1; no repair lane has been opened yet. Astra service-OS blueprint and day-one discovery artifacts are recorded on 2026-10-03; they are planning deliverables, not accepted platform code.",
+      "next_action": "Reconcile WF-1200 readiness and actual Governor authority, diagnose the shared timeouts, then scope one schema-only repair-cycle-1 canary with acceptance and independent QA before dependent repairs. WF-1006 diagnostic preparation does not open implementation.",
+      "authoritative_next_action": "Keep the WF-1200 dependency and consumed Implementer history. Do not dispatch repairs while readiness remains blocked, ingest real client data before approved handling policy, or reset retry history. Keep phases 3-5 closed until a real prospect need is validated and scoped through WF-1006, optionally informed by authorized WF-1005 evidence; synthetic diagnostics do not satisfy the demand gate.",
       "implementation_script": null,
       "commands": {
         "dry_run": null,
         "write": null
       },
       "helper_safe": false,
-      "owner_action_required": false,
+      "owner_action_required": true,
       "authority_boundary": "review_only",
       "authority_class": "review_ready",
       "primary_owner_lane": "agent-main",
@@ -381,16 +437,16 @@
       "lifecycle": "route_only",
       "readiness": "route_only",
       "effective_status": "route_only",
-      "state_description": "All six role profiles and role/model gate bindings are configured; every helper role now has an operator-approved fallback (2026-10-03, registry and profile configs). Senior Engineer is openai-codex/gpt-6.1-sol; the Governor's parent-only fallback is openai-codex/gpt-6-astra. The Researcher primary is openai-codex/gpt-6-luna and is qualified (canary 4 of 4; case 003 passed on rerun after a first-attempt refusal). All ten primary/fallback routes answered a live probe. Automatic failover is untested. The four one-time Implementer exceptions were consumed and are not reusable.",
-      "next_action": "Governor opens WF-1100 phase-1 repair-cycle-1 lanes, dispatches the Senior Engineer through the admission gate, and sends each passing diff to independent QA (reviewer model must differ from the lane author).",
-      "authoritative_next_action": "Do not reuse consumed Implementer exceptions. Dispatch the Senior Engineer only at lane repair cycle >= 1 through the admission gate, and never let a helper review its own work.",
+      "state_description": "All six role profiles and role/model gate bindings are configured; every helper role now has an operator-approved fallback (2026-10-03, registry and profile configs). Senior Engineer is openai-codex/gpt-6.1-sol; the Governor's parent-only fallback is openai-codex/gpt-6-astra. The Researcher primary is openai-codex/gpt-6-luna and is qualified (canary 4 of 4; case 003 passed on rerun after a first-attempt refusal). All ten primary/fallback routes answered a live probe. Automatic failover is untested. The four one-time Implementer exceptions were consumed and are not reusable. Concurrent operator-approved QA rebinding is now openai-codex/gpt-6.1-sol with Sonnet fallback. QA fallback admission and actual-model verification are present in committed checkpoint 0da0a82 and were exercised by the accepted OTel corrective review. The historical fleet-review-route-2026-10-03 lane remains blocked, not accepted; this does not establish WF-1100 implementation readiness.",
+      "next_action": "Verify accepted proof for the separate QA review-routing lane, then operator and primary Governor reconcile fleet readiness and actual Governor binding before WF-1100 repair dispatch. Never reuse consumed Implementer exceptions or allow same-model review. Queued follow-up WF-1200-RS01: role skill provisioning and dispatch verification; bounded scope and acceptance criteria are in the WF-1200 continuity note. Queue approval does not authorize deployment or permission changes.",
+      "authoritative_next_action": "Keep admission, actual-model verification and reviewer-differs-from-author gates. Select a registry-approved reviewer different from the actual author only after the separate review-routing change is accepted. Reconcile fleet readiness before repair dispatch; automatic failover and typed author labels are not review evidence.",
       "implementation_script": null,
       "commands": {
         "dry_run": null,
         "write": null
       },
       "helper_safe": false,
-      "owner_action_required": false,
+      "owner_action_required": true,
       "authority_boundary": "review_only",
       "authority_class": "review_ready",
       "primary_owner_lane": "agent-main",
@@ -411,8 +467,8 @@
         "No reuse of consumed Implementer exceptions and no broad Implementer qualification",
         "No Senior Engineer dispatch below lane repair cycle 1",
         "No helper role may approve, merge, or self-review its own work",
-        "No helper spawn with a model other than the role's registry binding",
-        "No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran."
+        "No QA review unless session-verified reviewer model differs from session-verified author model",
+        "No helper spawn with a model other than the role's registry binding"
       ],
       "primary_route_artifact": "state/workflows/WF-1200.json",
       "validator_commands": [

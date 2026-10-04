@@ -12,6 +12,8 @@ Review: Not independently reviewed; operator may request review.
 [synthetic input or unknown]
 ## Duration/sample/measurement/threshold
 [synthetic input or unknown]
+## AI evaluation and integration evidence
+[expected versus actual; NOT_RUN until executed; field/evidence correctness, abstention, review time, cost; verified/unknown integration path]
 ## Abort/human review/manual fallback/support/change control
 [synthetic input or unknown]
 ## Approval checklist and implementation gates

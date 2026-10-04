@@ -1,7 +1,7 @@
 ---
 name: smb-process-discovery
-description: "Use when mapping a synthetic SMB business process."
-version: 1.0.0
+description: "Use when diagnosing synthetic SMB tasks for AI automation."
+version: 1.1.0
 author: Efficiens
 license: MIT
 metadata:
@@ -14,6 +14,9 @@ metadata:
 ## When to use
 Use when mapping a synthetic SMB business process. Use privacy-safe-prospect-intake for intake gates; client-stack-assessment for diagrams; smb-proposal-pilot-design for proposals; smb-discovery-coaching for roleplay.
 Suggested sequence: intake gate → process discovery → stack assessment → proposal. Use only relevant steps, not all skills every time.
+
+## AI Workflow Diagnostic alignment
+Read workspace-root `references/smb-ai-workflow-diagnostic.md` for current positioning, report contract and diagnostic dispositions. Process mapping enables the AI integration assessment; it is not the headline offer unless requested. Preserve all synthetic-only stops below.
 
 ## Purpose, scope and non-scope
 Produce a bounded synthetic internal draft and train Randall to distinguish facts, estimates and authority. No real-data processing, outreach, software installation, client-system action or deployed-capability claim. Conversation roleplay belongs to smb-discovery-coaching.
@@ -41,9 +44,9 @@ Return stop codes and a minimal explanation without reproducing rejected content
 3. Tag each assertion synthetic scenario observation, estimate, assumption or unknown with source reference. Synthetic observations are not client evidence.
 4. Validate input units/period and source. Record missing baseline as unknown; do not invent timing or volume.
 5. Compute baseline cases × effort per case, including rework once. Proposed effort includes residual rework once; new overhead is review + exceptions + maintenance not already in proposed effort. Net savings = baseline effort − proposed effort − new overhead. Zero/negative results stay visible.
-6. Rank hypotheses only after input/scope gates; score pain evidence, frequency, baseline quality, reversibility and existing-stack fit each0–2. Score is a decision aid, not validated ROI.
+6. Inventory tasks and assign proposed AI, deterministic-rule or human roles with rationale, input variability, consequence of error, abstention and review needs. Compare AI-assisted, non-AI and no-change options. Rank only after input/scope gates; score pain evidence, frequency, baseline quality, reversibility and existing-stack fit each0–2. Score is a decision aid, not validated ROI.
 7. Identify disconfirming evidence, manual fallback and unanswered feasibility questions; hand diagram work to client-stack-assessment.
-8. Summarize one bounded opportunity and next synthetic test, not a build promise.
+8. Summarize one bounded AI-workflow opportunity (or NO_GO/NEEDS_EVIDENCE), evidence that would change the recommendation and next synthetic test, not a build promise. Distinguish less repetitive work, released capacity, avoided hiring and actual payroll savings; do not claim one from another.
 
 ## Expected outputs
 Use templates/output.md. Include SYNTHETIC / INTERNAL DRAFT / NOT IMPLEMENTED, sources, assumptions, unknowns, disposition and next permitted step. Omit identifying information and approval claims.
@@ -58,6 +61,7 @@ Local support (relative to this skill folder): [Output template](templates/outpu
 Related skill smb-discovery-coaching is profile-local; use skill_view(name). If unavailable, report it and stay out of roleplay. These packages do not migrate it.
 
 ## Change history
+1.1.0: Operator-directed AI diagnostic positioning, task allocation and explicit alternatives; authority and tool boundaries unchanged. Operator-direction source: default-profile Hermes session `20261003_121135_1566a31e`, message `62961`, `2026-10-04T05:09:03.259194+00:00`; exact text and scope are owned by `references/smb-ai-workflow-diagnostic.md` (workspace root), separately from registration ratification.
 1.0.0: Architect Astra bounded design; Sonnet pre-install QA adaptations; Governor drafting. Original combined request timed out and is preserved in derived/smb-four-skills/. Installation and test outcomes belong to proof records, not claims in the procedure.
 
 Workspace-root architecture decision items 1,8,10,12. Authority record: operator-chat-wf1006-registration-ratification-20261004T005955Z. Exact scope: “internal registration and associated workflow-record synchronization”; exclusions: “external contact, real-data handling, implementation, or spending”.

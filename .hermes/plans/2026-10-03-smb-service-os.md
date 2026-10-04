@@ -4,6 +4,12 @@
 
 **Binding remediation:** `references/wf1100-architecture-decisions.md` supersedes conflicting text. Planning conditional; implementation NOT READY.
 
+**Current offer alignment:** `references/smb-ai-workflow-diagnostic.md` owns
+AI Workflow Diagnostic positioning and report structure. WF-1006 is the direct
+diagnostic entry; WF-1005 is optional public-promise evidence. Historical proofs
+and download copies retain their original wording and are not current offer
+instructions. No technical acceptance, approval or failure history is superseded.
+
 Status: **planning deliverables authorized by operator request 2026-10-03**; implementation, client ingestion, named-business examination and external actions retain their existing gates. This is a service-delivery operating model, not a new kernel or general ERP.
 
 ## Provenance and acceptance boundary
@@ -19,8 +25,8 @@ Status: **planning deliverables authorized by operator request 2026-10-03**; imp
 | Layer | Verified current state | Next deliverable |
 |---|---|---|
 | Governance/control plane | Routing, workflow records, stop lines, helper admission and leased lanes exist | Retain as execution authority; do not fork it into a second scheduler |
-| Demand front door | WF-1005 exists; no named target approved, no validated buyer | Operator selects 1–3 owners; user-led conversations with the kit |
-| Discovery/service design | WF-1006 is newly scoped; internal templates are available | One process map, baseline, ranked opportunity and bounded pilot proposal |
+| Demand entry | WF-1006 diagnostic preparation; WF-1005 optional public-promise evidence; no validated buyer | Synthetic rehearsal first; outreach and handling decisions before real prospect work |
+| AI Workflow Diagnostic | WF-1006 internal templates; no integration deployed | Task inventory, AI/rules/human design, baseline/net effort, integration evidence and bounded pilot specification |
 | Tenant registry/schema/import/demo | Four failed Implementer attempts; three quarantined files; required platform tests absent | Senior Engineer repair cycle 1 plus independent QA and integrated synthetic proof |
 | Reporting | Planned, not implemented | First read-only report only after foundation acceptance |
 | Delivery automation | No client automation is deployed | One synthetic export-to-summary or follow-up-draft rehearsal, then demand-gated pilot |
@@ -28,7 +34,7 @@ Status: **planning deliverables authorized by operator request 2026-10-03**; imp
 
 ## Minimum viable service OS
 
-Reuse this chain: **conversation → process map → baseline → opportunity choice → scoped pilot → approved access → test → deliver → observe → improve/offboard**.
+Reuse this chain: **AI Workflow Diagnostic (conversation → task/process analysis → baseline → integration feasibility → business case) → scoped pilot → approved access → test → deliver → observe → improve/offboard**.
 
 1. Workspace control plane owns workflow state, lane leases, dispatch and stop lines. Each engagement receives an ID and explicit owner; no model can promote itself.
 2. Every client gets its own profile, authorized contacts, permissions, source manifest, SQLite store, evidence, logs and retention agreement. Never put client records in the global business knowledge graph or a shared vector index. [SUPERSEDED/QUALIFIED: Target design; synthetic six-field contract unchanged. See architecture decisions.]
@@ -42,9 +48,9 @@ Reuse this chain: **conversation → process map → baseline → opportunity ch
 ## Workflow reconciliation
 
 - **WF-1005 stays Promise Desk.** Public evidence and promise-gap framing remain separate from building a fix. No unsolicited monitoring, messages or named-business examination without the existing approval/consent decision. Its output may inform a separately scoped WF-1006 engagement.
-- **WF-1006 is the single new workflow.** Its immediate deliverable is an internal discovery/service-design kit and synthetic rehearsal. It has no execution dependency on a working platform because it does not implement or ingest client data; WF-1100 is an explicit gated handoff, not a dependency removed to permit writes. It remains route_only with owner-action gates.
+- **WF-1006 is the diagnostic owner, not another new workflow.** Its immediate deliverable is an internal AI Workflow Diagnostic kit and synthetic rehearsal. It has no execution dependency on a working platform because it does not implement or ingest client data; WF-1100 is an explicit gated handoff, not a dependency removed to permit writes. It remains route_only with owner-action gates.
 - **WF-1100 remains the reusable platform.** Retain its WF-1200 dependency and consumed exception history. Do not create module shells just to show momentum; scope reporting after foundation proof, and adapters/inventory/procurement/CRM only after validated demand.
-- **WF-1200 keeps its gates.** Its route_only status and consumed-attempt blocker cannot be silently cleared. Its workflow record is reconciled to the concurrent operator-approved QA rebinding: QA primary and Senior Engineer are both Sol. A separate active fleet-review-route lane is now implementing registry-listed QA fallback admission and actual-model verification; its acceptance is not claimed here. Registry/profiles and the other lane's note/code remain untouched. Verify that lane's accepted proof and reconcile fleet readiness and actual Governor binding before repair dispatch.
+- **WF-1200 keeps its gates.** Its route_only status and consumed-attempt blocker cannot be silently cleared. Its workflow record is reconciled to the concurrent operator-approved QA rebinding: QA primary and Senior Engineer are both Sol. The former statement that a fleet-review-route lane is active is superseded: the historical lane is blocked. QA fallback admission and actual-model verification are present in committed checkpoint `0da0a82` and were exercised by the accepted OTel corrective review; neither that evidence nor this plan accepts the blocked historical lane or opens platform repair. Registry/profiles and the other lane's note/code remain untouched. Verify that lane's accepted proof and reconcile fleet readiness and actual Governor binding before repair dispatch.
 
 ## Today — 2026-10-03
 
@@ -92,7 +98,7 @@ Use the validated pytest-enabled Hermes venv interpreter; default `python` here 
 |---|---|---|
 | First | CSV/Excel literacy, SQL/SQLite, provenance and reconciliation | Import synthetic sales; explain counts/totals and refuse duplicate/conflicting batches |
 | Next | Client-native Google Workspace or Microsoft 365 basics | Map one form/export/report workflow; never add another app without a reason |
-| Next | One automation tool: provisional n8n; compare Make/Zapier only for client-fit | Synthetic trigger → validate → transform → draft → approval; retry and replay without duplicate output | [SUPERSEDED/QUALIFIED: Design-only; no installation/accounts/execution authorized. See architecture decisions.]
+| Next | Select one automation tool only after stack-fit: Power Automate for a Microsoft-centric candidate, n8n for a cross-system candidate; no default vendor commitment | Design synthetic trigger → validate → AI draft if warranted → review → separately approved action; no installation/accounts/execution authorized |
 | Before live integration | API contracts, OAuth scopes, pagination, rate limits, webhooks | Read a fixture, verify signature, reject stale events, and explain least privilege |
 | Always | Git/diffs, pytest, logs, backups and restore | Reproduce a bug, pass a focused test and restore a sandbox snapshot |
 | Only where useful | Schema-constrained AI extraction/classification/drafting | Labeled synthetic cases, evidence links, abstention, review and zero autonomous sends |

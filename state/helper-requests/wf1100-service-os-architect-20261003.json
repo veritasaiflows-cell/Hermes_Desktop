@@ -1,0 +1,15 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "wf1100-service-os-architect-20261003",
+  "task_class": "analysis",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "architect",
+  "model": "openai-codex/gpt-6-astra",
+  "objective": "Blueprint a governed small-business service operating system and an actionable today/7-day/30-day plan grounded in existing WF-1005, WF-1100, WF-1200 and the failed phase-1 implementation.",
+  "scope": "Analyze the parent-frozen evidence pack only; return text. Include architecture, service discovery/delivery lifecycle, workflow reconciliation, repair lane order, acceptance criteria, owner learning path and approval boundaries. No live clients, tools, writes or external actions.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 20,
+  "owner": "agent-main"
+}
