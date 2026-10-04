@@ -10,6 +10,8 @@ canonical/secrets/
 *.db-wal
 *.sqlite-shm
 *.sqlite-wal
+# Lane register: live runtime state, rewritten by every gate/lane operation.
+state/concurrent-lane-register.sqlite
 
 # Timestamped wiki LKG manifest rotations (keep canonical bootstrap-manifest.json)
 wiki/.lkg/bootstrap-manifest.*Z.json

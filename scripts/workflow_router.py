@@ -1280,6 +1280,28 @@ def _authoritative_workflow_payload(
     }
 
 
+def _write_capsule_if_changed(path: Path, capsule: dict[str, Any]) -> bool:
+    """Write a capsule only when its content (ignoring ``generated_at``) changed.
+
+    Gates refresh capsules on every run; re-stamping identical content creates
+    timestamp-only drift in tracked ``state/workflows/*.json`` files. When the
+    substantive content is unchanged, keep the existing file (and its original
+    ``generated_at``) untouched. Mutates ``capsule['generated_at']`` to the
+    preserved value so callers see what is on disk.
+    """
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        existing = None
+    if isinstance(existing, dict) and "generated_at" in existing:
+        comparable = json.loads(json.dumps(dict(capsule, generated_at=existing["generated_at"])))
+        if comparable == existing:
+            capsule["generated_at"] = existing["generated_at"]
+            return False
+    path.write_text(json.dumps(capsule, indent=2, sort_keys=True), encoding="utf-8")
+    return True
+
+
 def route_workflows(
     selector: str | None = None,
     *,
@@ -1420,10 +1442,7 @@ def route_workflows(
 
         if write_capsules:
             workflows_dir.mkdir(parents=True, exist_ok=True)
-            (project_root / capsule["primary_route_artifact"]).write_text(
-                json.dumps(capsule, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+            _write_capsule_if_changed(project_root / capsule["primary_route_artifact"], capsule)
 
         payloads.append(_answer_payload(capsule, answer))
 

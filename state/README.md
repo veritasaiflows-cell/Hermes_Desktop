@@ -13,7 +13,9 @@ operator overrides, lane coordination, and generated workflow summaries.
 - `operator-interest-profile.json` — operator-approved WF-1000 audience, thesis,
   strategic-fit, content-angle, and default category-exclusion contract.
 - `ACTIVE_WORKFLOWS.md` and `WORKFLOW_ALIAS_INDEX.md` — human-readable mirrors.
-- `concurrent-lane-register.sqlite` — durable lane coordination state.
+- `concurrent-lane-register.sqlite` — durable lane coordination state. Local
+  runtime state: git-ignored (it mutates on every gate run). Back it up with
+  `sqlite3 .backup`; lane closeout proof lives in commit messages and `derived/`.
 - `implementation-jobs/` — authoritative machine-readable long-work jobs and phase state.
 - `workflow-routing-index.json` and `workflows/` — generated routing surfaces.
 

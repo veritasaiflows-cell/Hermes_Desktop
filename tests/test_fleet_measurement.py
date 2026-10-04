@@ -254,7 +254,10 @@ def gate_root(tmp_path):
     root = tmp_path / "gate-root"
     (root / "state").mkdir(parents=True)
     shutil.copy2(ROOT / "state" / "fleet-role-registry.json", root / "state" / "fleet-role-registry.json")
-    register = (ROOT / "state" / "concurrent-lane-register.sqlite").as_posix()
+    register_path = ROOT / "state" / "concurrent-lane-register.sqlite"
+    if not register_path.is_file():
+        pytest.skip("local lane register absent (untracked runtime state)")
+    register = register_path.as_posix()
     source = sqlite3.connect(f"file:{register}?mode=ro", uri=True)
     target = sqlite3.connect(str(root / "state" / "concurrent-lane-register.sqlite"))
     try:

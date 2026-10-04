@@ -329,6 +329,24 @@ class WorkflowRouterTests(unittest.TestCase):
             self.assertEqual(payload["workflow_id"], "WF-1000")
             self.assertEqual(payload["effective_status"], "monitor_only")
 
+    def test_capsule_rewrite_skips_timestamp_only_changes(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "WF-1000.json"
+            first = {"workflow_id": "WF-1000", "blocker_count": 0, "state_sources": ["a"], "generated_at": "2026-01-01T00:00:00Z"}
+            self.assertTrue(workflow_router._write_capsule_if_changed(path, dict(first)))
+            before = path.read_bytes()
+
+            same = dict(first, generated_at="2026-02-02T00:00:00Z", state_sources=("a",))
+            self.assertFalse(workflow_router._write_capsule_if_changed(path, same))
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(same["generated_at"], "2026-01-01T00:00:00Z")
+
+            changed = dict(first, blocker_count=1, generated_at="2026-03-03T00:00:00Z")
+            self.assertTrue(workflow_router._write_capsule_if_changed(path, changed))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["blocker_count"], 1)
+            self.assertEqual(payload["generated_at"], "2026-03-03T00:00:00Z")
+
     def test_write_index_auto_regenerates_capsules(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
