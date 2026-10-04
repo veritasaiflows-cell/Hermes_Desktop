@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-20T19:52:06Z",
+  "generated_at": "2026-10-04T15:00:16Z",
   "generated_by": "scripts/wiki_bootstrap.py",
   "lkg_manifest": "wiki/.lkg/bootstrap-manifest.json",
   "pages": {
@@ -30,8 +30,8 @@
       ],
       "source_hashes": {
         "references/operating-procedures.md": "666c61d19180bb3150be8f31c5aff733b20c022f7e362db7648c644f85c3f4cb",
-        "scripts/run_checks.py": "17411345886d8b148c5b88f418f591acd0e3eb8018fa206881532f60ad3bd183",
-        "tests/test_run_checks.py": "33e36ae2263887dd3d4ee63be6e1a18dda10750e313a2c69103621ed9fd884cc"
+        "scripts/run_checks.py": "91971a1705ce99b645e2065c475c782969f1240d5cd0af4fe2f15b4265abd36d",
+        "tests/test_run_checks.py": "322500d94439c5bc7b214bf4d7638fb65f1e4689b79dba5ddecb33efe24a7d2e"
       },
       "source_map": [
         "references/operating-procedures.md",

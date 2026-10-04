@@ -3,7 +3,7 @@
 - page_type: decision_map
 - owner: references/operating-procedures.md
 - status: current
-- generated_time: 2026-09-20T19:45:50Z
+- generated_time: 2026-10-01T02:11:17Z
 - source_artifacts:
   - references/operating-procedures.md
   - tests/test_run_checks.py
