@@ -1,0 +1,20 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "fleet-review-route-2026-10-03-review",
+  "task_class": "review",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "qa",
+  "model": "openai-codex/gpt-6.1-sol",
+  "reviews_lane": "fleet-review-route-2026-10-03",
+  "reviewer_model": "openai-codex/gpt-6.1-sol",
+  "objective": "Formal review of the QA review-route gate change and the effective-model QA review driver.",
+  "scope": "Read only the evidence pack passed in the prompt.",
+  "allowed_toolsets": [
+    "read_files",
+    "search_files"
+  ],
+  "allowed_writes": [],
+  "max_duration_minutes": 12,
+  "owner": "agent-main"
+}

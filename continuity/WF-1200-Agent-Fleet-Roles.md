@@ -29,12 +29,13 @@ enforces the registry, not this table). Regenerate with
 | architect | `architect` | `openai-codex/gpt-6-astra` | admissible | read-only | - | `anthropic/claude-opus-5-5` |
 | implementer | `implementer` | `ollama-cloud/deepseek-v4.1-flash` | qualification_required | read-only, write | repair cycle <= 0 | `ollama-cloud/glm-5.3-flash` |
 | senior_engineer | `seniorengineer` | `openai-codex/gpt-6.1-sol` | admissible | read-only, write | repair cycle >= 1 | `anthropic/claude-sonnet-5-5` |
-| qa | `qa` | `anthropic/claude-sonnet-5-5` | admissible | read-only | - | `openai-codex/gpt-6.1-sol` |
+| qa | `qa` | `openai-codex/gpt-6.1-sol` | admissible | read-only | - | `anthropic/claude-sonnet-5-5` |
 | researcher | `researcher` | `openai-codex/gpt-6-luna` | qualified | read-only | - | `ollama-cloud/deepseek-v4.1-flash` |
 
 Governor parent-only fallback chain: `openai-codex/gpt-6-astra`.
 
 Recorded one-time lane exceptions (lane register owns their status):
+- `implementer` / `otel-efficiency-impl-2026-10-04`
 - `implementer` / `wf1100-p1-client-registry`
 - `implementer` / `wf1100-p1-business-schema`
 - `implementer` / `wf1100-p1-csv-import`
@@ -87,7 +88,7 @@ The Researcher primary moved to `openai-codex/gpt-6-luna`; status is `qualified`
 refused on attempt 1 (no JSON, said the request lacked an admitted task request) and passed on the
 operator-approved rerun (attempt 1 kept as `...-attempt1`).
 
-Standing rule (from the lane's independent review, 2026-10-03): No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran. Qualified on 4 of 4 cases with one
+QA rebinding (operator-approved 2026-10-03, `operator-chat-2026-10-03-qa-sol-rebinding`): QA primary is now `openai-codex/gpt-6.1-sol`, fallback `anthropic/claude-sonnet-5-5`, so formal QA is no longer the same model as the Governor session. Review routing: QA primary and the Senior Engineer share gpt-6.1-sol, so a Sol-authored lane is reviewed on the QA fallback (Sonnet) and a Sonnet-authored lane on the primary (Sol). For role `qa` only, the gate admits the primary or a registry-listed fallback and rejects the author's model (names compared normalised). Formal reviews run through `scripts/qa_review_driver.py`, which verifies the model that actually ran. Plain `hermes -p qa chat` calls are not verified. Qualified on 4 of 4 cases with one
 first-attempt miss, so expect occasional refusals on bare prompts.
 
 ## Governor fallback (operator-approved 2026-10-03; supersedes 2026-09-30)
@@ -113,9 +114,11 @@ Earlier evidence for the 2026-09-30 route is retained under
 ## Escalation ladder (gate-enforced via lane `retry_count`)
 1. Implementer attempts a lane (repair cycle 0). Only implementer may write at cycle 0;
    senior_engineer is refused (escalation-only).
-2. Lane fails QA/acceptance → governor runs `concurrent_lane_manager.py retry`
-   (cycle 1). The gate now refuses implementer and admits only `senior_engineer`
-   (GPT-6.1-Sol) to debug and repair.
+2. Lane fails QA/acceptance → Governor blocks the failed attempt with evidence
+   and plans a scoped successor using `concurrent_lane_manager.py plan --retry 1`,
+   preserving parent job and failure lineage, then leases/starts it. There is no
+   `retry` subcommand. At cycle 1 the gate refuses Implementer and admits only
+   `senior_engineer` (GPT-6.1-Sol) to debug and repair.
 3. A second failure (cycle 2) blocks write spawns of every role; escalate to the
    human operator (existing bounded-repair invariant).
 
@@ -163,6 +166,68 @@ Earlier evidence for the 2026-09-30 route is retained under
 - No helper spawn with a model other than the role's registry binding
 
 ## Next safe action
-Governor opens WF-1100 phase-1 repair-cycle-1 lanes, dispatches only
-`senior_engineer` through the admission gate, and sends each passing diff to
-independent QA. The consumed Implementer exceptions are not reused.
+Verify accepted proof for the separate QA review-routing lane, then operator and primary Governor reconcile fleet readiness and actual Governor binding before WF-1100 repair dispatch. Never reuse consumed Implementer exceptions or allow same-model review. Queued follow-up WF-1200-RS01: role skill provisioning and dispatch verification; bounded scope and acceptance criteria are in the WF-1200 continuity note. Queue approval does not authorize deployment or permission changes.
+
+## Queued follow-up: WF-1200-RS01
+
+Related bounded measurement work (operator-approved 2026-10-04): Governor,
+Implementer and QA efficiency OTEL pilot, evidence/specification under
+`derived/otel-efficiency/2026-10-04/`, contract `source/hermes-otel-pilot/efficiency.md`.
+History: Implementer first attempt failed Governor tests (exception consumed);
+Senior Engineer cycle-1 repair failed (2 failed / 1021 passed); Sonnet final QA
+returned FAIL; cycle-2 hold stopped helper writes.
+
+Current state (2026-10-04, operator-approved):
+- Corrective attempt: Governor-executed only (no helper writes, no exception
+  reuse, no repair-history reset), lane `otel-efficiency-corrective-2026-10-04`.
+  Fixed side-effect-free health reads, strengthened the dedupe test, real-gate
+  runner admission with launch-tools subset check, and loss-aware receipt/read-back.
+  Full suite 1061 passed, 59 subtests. Fresh Sonnet QA (actual model verified,
+  session `20261004_070650_f85848`): PASS_WITH_NOTES, all 9 scoped items fixed.
+- Deployment lane `otel-efficiency-deploy-2026-10-04`: efficiency mode enabled in
+  `implementer` and `qa` profiles only (plugin keys + hash-parity files), window
+  ends 2026-10-05T14:00:00Z. Live controlled canary: success run accepted and
+  injected-failure run rejected; exact collector read-back passed with child
+  `hermes.turn`/`hermes.api` spans inside the parent trace. Overhead ≈13 µs per
+  hook callback (in-process only). Collector PID/config unchanged.
+- Default profile deliberately deferred until the legacy diagnostic pilot closes
+  (2026-10-04T20:21:35Z): gated one-shot cron `8e057ead898b` at 13:35 Arizona
+  switches it only if the window has passed and closeout job `b1ede4ae3312` ran;
+  desktop reload is the operator's step. Read-only expiry reminder cron
+  `79bcf6f4911b` at 2026-10-05 07:05 Arizona; no automatic disable or extension.
+- Open low findings and non-claims: launch-tools check is trivial while `bot_room`
+  resolves to zero tools; native home branch untested; only controlled-cohort
+  traces; no efficiency, cost or quality claim; no bot qualification.
+Evidence (git-ignored): `derived/otel-efficiency/2026-10-04/{corrective,deploy}/`.
+Lane register owns live status. This does not start or authorize the queued
+skill-provisioning item below.
+
+**Title:** Role skill provisioning and dispatch verification.
+**Status:** Queued; not started. Owner: Governor (`agent-main`).
+**Authority:** Operator explicitly requested queueing this bounded item in the current chat; this is backlog registration only, not implementation, profile deployment, or permission approval.
+
+### Objective and bounded scope
+
+Reduce repeated manual procedure instructions while preserving role boundaries. Cover only the existing Architect, Implementer, Senior Engineer, QA and Researcher profiles and their governed dispatch paths.
+
+- Inventory installed, discoverable, permitted and actually loaded skills separately, including profile-local and trusted workspace sources.
+- Define a minimal approved role-to-skill manifest with one authoritative source per procedure, source/version or hash provenance, and an explicit context budget. Do not preload the whole library.
+- Design automatic read-only delivery of the selected skills through the real dispatch path. Distinguish profile-launched jobs from in-process delegation; neither may silently inherit Governor authority.
+- Reconcile the current prohibition on helper skill tools before proposing any permission change. Prefer Governor-resolved, bounded content delivery where it meets the requirement; do not bypass the admission gate.
+- Prepare a bounded synthetic before/after canary using identical role tasks and verified actual model identities. Reuse accepted measurement tooling where available rather than building a separate telemetry subsystem.
+
+### Acceptance criteria for future execution
+
+1. Each covered role has an explicit minimal skill manifest and deterministic missing, stale or disallowed-skill failure behavior.
+2. Dispatch evidence records which approved skill sources and versions actually reached each job, not merely which files exist or what a bot claims to have read.
+3. Positive and negative canaries verify skill use, role/tool restrictions, client isolation and rejection of unapproved skill access or mutation; existing admission, lease, repair-cycle and independent-review gates remain intact.
+4. Before/after results report task correctness, repeated instruction volume, token use where observable, tool calls, retries and elapsed time. Missing metrics stay unknown; no speed or cost improvement is claimed without measurement.
+5. Governor-run focused tests and independent QA by a different actual model pass before any rollout acceptance; retain rollback instructions and exact changed-profile surfaces.
+
+### Sequence and stop lines
+
+- First reconcile existing WF-1200 review-routing readiness and obtain a scoped design/implementation decision. This item does not supersede current blockers or authorize WF-1100 repairs.
+- Before future writes, obtain the appropriate lane lease and explicit approval for exact profile/configuration or permission changes; any Implementer exception remains separately task-and-lane-specific.
+- No profile, toolset, credential, model, role-qualification or runtime changes are authorized by queueing. No helper dispatch, client data, external messages, new telemetry capture or paid canary is started by this registration.
+- Do not replace or rewrite existing broad skill libraries merely to satisfy an inventory count. Curate only the approved role set after the loading path is verified.
+- Next action for this item: prepare the read-only inventory and proposed role manifests for Governor/operator scope review, without deploying them.

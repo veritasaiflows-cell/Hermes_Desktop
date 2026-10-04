@@ -1,0 +1,17 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "hermes-otel-pilot-qa-2026-10-03",
+  "task_class": "review",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "qa",
+  "model": "openai-codex/gpt-5.6-sol",
+  "reviewer_model": "openai-codex/gpt-5.6-sol",
+  "reviews_lane": "hermes-only-otel-pilot-2026-10-03",
+  "objective": "Independent privacy, bounds, fail-open and diagnostic-proof review of the operator-approved Hermes-only OTLP pilot. Return findings only; no acceptance authority or writes.",
+  "scope": "POST-FIX RE-REVIEW: review the newly frozen post-fix-review-prompt.txt under derived/otel-pilot/2026-10-03, including current full source/tests, initial rejection, blocked closeout, fresh test results, live canary and deployment evidence. Judge privacy, bounds, fail-open, evidence sufficiency and deployment-before-QA process deviations. No tools exposed; inline evidence only. Previous scope for historical context: Review only the frozen contents of scripts/hermes_otel_pilot.py, scripts/verify_hermes_otel_pilot.py, tests/test_hermes_otel_pilot.py, source/hermes-otel-pilot/plugin.yaml, source/hermes-otel-pilot/README.md, derived/otel-pilot/2026-10-03/plan.json, recovered-diagnosis-proof.json and test-output.txt supplied in source/hermes-otel-pilot/qa-packet.md. No additional tools are required or exposed for this invocation; the declared toolsets are a maximum grant only. Do not read secrets, other profiles, raw telemetry, OpenClaw content, or unrelated code. Evaluate whether controlled real-tool canaries prove a diagnostic gain over full capped SQLite v3 diagnostics without claiming real-provider coverage or production reliability gains. Flag material privacy/export/isolation/lifecycle/bounds defects. Return PASS or severity/file:line findings only; no writes or adoption approval.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 20,
+  "owner": "agent-main"
+}

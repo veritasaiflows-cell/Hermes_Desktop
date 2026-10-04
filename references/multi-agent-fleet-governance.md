@@ -35,7 +35,7 @@ runtime failover; no Governor may be spawned as a helper.
 | Architect / `architect` | `openai-codex/gpt-6-astra` (fallback `anthropic/claude-opus-5-5`) | admissible, read-only | specs + lane decomposition |
 | Implementer / `implementer` | `ollama-cloud/deepseek-v4.1-flash` (fallback `ollama-cloud/glm-5.3-flash`) | qualification_required (write needs canary pass or an exact one-time lane exception) | repair cycle 0 only |
 | Senior Engineer / `seniorengineer` | `openai-codex/gpt-6.1-sol` (fallback `anthropic/claude-sonnet-5-5`) | admissible, escalation-only | repair cycle ≥ 1 (after implementer failure) |
-| QA / `qa` | `anthropic/claude-sonnet-5-5` (fallback `openai-codex/gpt-6.1-sol`) | admissible, read-only review | must differ from lane author |
+| QA / `qa` | `openai-codex/gpt-6.1-sol` (fallback `anthropic/claude-sonnet-5-5`) | admissible, read-only review | must differ from lane author |
 | Researcher / `researcher` | `openai-codex/gpt-6-luna` (fallback `ollama-cloud/deepseek-v4.1-flash`) | qualified on 2026-10-03 (canary 4/4; case 003 refused on attempt 1, passed on rerun) | unchanged |
 
 Escalation: implementer attempt fails acceptance → `retry` the lane (cycle 1)
@@ -74,7 +74,7 @@ Gate-enforced invariants (all fail closed in `admit_request`):
 Every role now carries one registry-recorded fallback (`fallback_providers`), mirrored into that
 profile's Hermes config. The registry owns the facts; the WF-1200 roster block is generated from it.
 The admission gate binds a request to the role's primary only, so a fallback is a runtime route and
-is never separately admissible. No QA review of a lane authored by gpt-6.1-sol may run on the QA fallback (it would be the author's own model); reviewer-differs-from-author is checked against the model that actually ran. Under automatic failover the model that runs differs from the
+is never separately admissible. QA primary is `gpt-6.1-sol` (operator, 2026-10-03), a lane authored by gpt-6.1-sol (the Senior Engineer) is reviewed on the QA fallback `claude-sonnet-5-5`, and a lane authored by Sonnet (the Governor) on the QA primary `gpt-6.1-sol`. For role `qa` ONLY, the gate admits the primary or any registry-listed fallback, and rejects the lane author's model; author and reviewer names are compared normalised (`gpt-6.1-sol` equals `openai-codex/gpt-6.1-sol`). Run formal reviews through `scripts/qa_review_driver.py`, which pins the route and verifies the model that ACTUALLY ran from the session record, failing closed when it is unknown, differs from the pinned route, or equals the author. The gate alone checks only the declared `reviewer_model`; reviewer-differs-from-author is checked against the model that actually ran. Under automatic failover the model that runs differs from the
 registry primary: the reviewer-differs-from-author rule must be checked against the model that
 actually ran. Researcher requalification: primary changed `gpt-5.6-luna` to `gpt-6-luna`; evidence in
 `derived/model-routing/canaries/gpt-6-luna-2026-10-03/`. Researcher fallback

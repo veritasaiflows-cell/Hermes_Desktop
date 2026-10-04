@@ -1,0 +1,12 @@
+name: hermes-otel-pilot
+version: "0.2.0"
+description: "Bounded metadata-only OTLP: legacy diagnostic mode or opt-in Governor/Implementer/QA efficiency pilot. No raw payloads or identifiers."
+author: Efficiens
+provides_hooks:
+  - pre_llm_call
+  - pre_api_request
+  - post_api_request
+  - api_request_error
+  - pre_tool_call
+  - post_tool_call
+  - on_session_end

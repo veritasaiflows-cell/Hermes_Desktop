@@ -973,6 +973,111 @@ class ReviewAttributionTests(unittest.TestCase):
         self.assertEqual(event["reviewer_model"], "gpt-5.6-sol")
 
 
+class QaReviewRouteTests(unittest.TestCase):
+    """QA reviews may run on the primary OR a registry-listed QA fallback, never on the author's model.
+
+    Operator decision 2026-10-03: QA primary is gpt-6.1-sol (also the Senior Engineer), fallback is
+    claude-sonnet-5-5 (also the Governor session). Each author direction needs an admissible,
+    independent route; the gate compares NORMALISED model names so a bare name cannot dodge a
+    provider-qualified author record.
+    """
+
+    SOL = "openai-codex/gpt-6.1-sol"
+    SONNET = "anthropic/claude-sonnet-5-5"
+
+    def _request(self, model: str, reviewer: str | None = None, **extra: object) -> dict[str, object]:
+        return {
+            "schema": helper_agent_router.REQUEST_SCHEMA,
+            "task_id": "qa-route-001",
+            "task_class": "review",
+            "phase": "pre-implementation",
+            "mode": "read-only",
+            "role": "qa",
+            "model": model,
+            "reviews_lane": "WF-1000::helper-gate-fixture",
+            "reviewer_model": reviewer if reviewer is not None else model,
+            "objective": "Independent review of the lane's integrated diff.",
+            "scope": "Read-only review of the integrated result.",
+            "allowed_toolsets": ["read_files", "search_files"],
+            "allowed_writes": [],
+            "max_duration_minutes": 30,
+            "owner": "agent-main",
+            **extra,
+        }
+
+    def _admit(self, author: str, request: dict[str, object]) -> dict[str, object]:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _install_registry(root)
+            fixture = _LaneFixture(root)
+            fixture.lease()
+            connection = sqlite3.connect(str(fixture.manager.register_path))
+            try:
+                connection.execute(
+                    "UPDATE lanes SET expected_model=? WHERE lane_id=?",
+                    (author, "WF-1000::helper-gate-fixture"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            return helper_agent_router.admit_request(request, project_root=root)
+
+    def test_sol_authored_lane_is_reviewed_on_the_sonnet_fallback(self) -> None:
+        result = self._admit(self.SOL, self._request(self.SONNET))
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_sonnet_authored_lane_is_reviewed_on_the_sol_primary(self) -> None:
+        result = self._admit(self.SONNET, self._request(self.SOL))
+        self.assertEqual(result["status"], "admitted", result["reasons"])
+
+    def test_sol_authored_lane_cannot_be_reviewed_on_sol(self) -> None:
+        result = self._admit(self.SOL, self._request(self.SOL))
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("must differ" in r for r in result["reasons"]), result["reasons"])
+
+    def test_sonnet_authored_lane_cannot_be_reviewed_on_sonnet(self) -> None:
+        result = self._admit(self.SONNET, self._request(self.SONNET))
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("must differ" in r for r in result["reasons"]), result["reasons"])
+
+    def test_bare_reviewer_name_cannot_dodge_a_provider_qualified_author(self) -> None:
+        # Pre-existing hole: 'gpt-6.1-sol' != 'openai-codex/gpt-6.1-sol' as raw strings.
+        for author, reviewer in ((self.SOL, "gpt-6.1-sol"), ("gpt-6.1-sol", self.SOL), (self.SONNET, "claude-sonnet-5-5")):
+            with self.subTest(author=author, reviewer=reviewer):
+                result = self._admit(author, self._request(reviewer))
+                self.assertEqual(result["status"], "rejected", result["reasons"])
+                self.assertTrue(any("must differ" in r for r in result["reasons"]), result["reasons"])
+
+    def test_reviewer_model_must_equal_the_route_actually_requested(self) -> None:
+        result = self._admit(self.SOL, self._request(self.SONNET, reviewer=self.SOL))
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("reviewer_model" in r for r in result["reasons"]), result["reasons"])
+
+    def test_a_model_outside_the_qa_chain_is_still_rejected(self) -> None:
+        result = self._admit(self.SOL, self._request("openai-codex/gpt-6-astra"))
+        self.assertEqual(result["status"], "rejected")
+        self.assertTrue(any("approved binding" in r or "approved route" in r for r in result["reasons"]), result["reasons"])
+
+    def test_fallback_routes_stay_inadmissible_for_non_qa_roles(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _install_registry(root)
+            result = helper_agent_router.admit_request(
+                _write_request(task_class="analysis", role="architect", model="anthropic/claude-opus-5-5"),
+                project_root=root,
+            )
+        self.assertEqual(result["status"], "rejected")
+
+    def test_qa_fallback_cannot_take_a_write_or_non_review_task(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _install_registry(root)
+            result = helper_agent_router.admit_request(
+                _write_request(task_class="implementation", role="qa", model=self.SONNET), project_root=root
+            )
+        self.assertEqual(result["status"], "rejected")
+
+
 class RepairCycleEscalationTests(unittest.TestCase):
     """Two or more repair cycles on a lane stop further write spawns."""
 
@@ -1073,7 +1178,7 @@ class FleetRoleBindingTests(unittest.TestCase):
             "architect": "anthropic/claude-opus-5-5",
             "implementer": "ollama-cloud/glm-5.3-flash",
             "senior_engineer": "anthropic/claude-sonnet-5-5",
-            "qa": "openai-codex/gpt-6.1-sol",
+            "qa": "anthropic/claude-sonnet-5-5",
             "researcher": "ollama-cloud/deepseek-v4.1-flash",
         }
         for role, expected in expected_fallbacks.items():
@@ -1084,6 +1189,11 @@ class FleetRoleBindingTests(unittest.TestCase):
                 self.assertTrue(item.get("approval_ref"), role)
                 # a fallback must never be the role's own primary
                 self.assertNotEqual(f"{item['provider']}/{item['model']}", bindings[role], role)
+        # 2026-10-03 operator decision: formal QA runs on GPT-6.1-Sol, so the QA fallback is
+        # Sonnet (a fallback may not equal its own primary). Sol is also the Senior Engineer
+        # primary, so a Sol-authored lane needs a non-Sol reviewer.
+        self.assertEqual(bindings["qa"], "openai-codex/gpt-6.1-sol")
+        self.assertEqual(live["roles"]["qa"]["approval_ref"], "operator-chat-2026-10-03-qa-sol-rebinding")
         self.assertEqual(bindings["researcher"], "openai-codex/gpt-6-luna")
         self.assertIn(live["roles"]["researcher"]["status"], {"qualified", "qualification_required"})
         if live["roles"]["researcher"]["status"] == "qualification_required":

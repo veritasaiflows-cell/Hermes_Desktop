@@ -1,0 +1,20 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "fleet-qa-sol-2026-10-03-review",
+  "task_class": "review",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "role": "qa",
+  "model": "openai-codex/gpt-6.1-sol",
+  "reviews_lane": "fleet-fallbacks-2026-10-03",
+  "reviewer_model": "openai-codex/gpt-6.1-sol",
+  "objective": "Formal independent review of the operator-approved fleet fallbacks and the later QA rebinding to gpt-6.1-sol (lanes fleet-fallbacks-2026-10-03 and fleet-qa-sol-2026-10-03). Replaces the senior-profile analysis-class read, which the gate does not treat as a review.",
+  "scope": "Read only the evidence pack passed in the prompt.",
+  "allowed_toolsets": [
+    "read_file",
+    "search_files"
+  ],
+  "allowed_writes": [],
+  "max_duration_minutes": 10,
+  "owner": "agent-main"
+}

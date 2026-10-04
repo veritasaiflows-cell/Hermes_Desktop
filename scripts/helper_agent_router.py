@@ -457,6 +457,32 @@ def _check_lane(
             )
 
 
+def _norm_model(value: object) -> str:
+    """Canonical comparison key for a model name: ``provider/model`` and bare ``model`` agree.
+
+    The lane register stores whatever the author typed, so ``gpt-6.1-sol`` and
+    ``openai-codex/gpt-6.1-sol`` must compare equal or a bare name dodges the
+    author/reviewer diversity check.
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.strip().rsplit("/", 1)[-1].strip().casefold()
+
+
+def _route_keys(entry: dict[str, Any]) -> set[str]:
+    """Return the accepted spellings (qualified and bare) of one registry route."""
+    return {f"{entry.get('provider')}/{entry.get('model')}", str(entry.get("model"))}
+
+
+def _qa_routes(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """The QA primary followed by its registry-listed fallbacks, in registry order."""
+    routes = [spec]
+    fallbacks = spec.get("fallback_providers")
+    if isinstance(fallbacks, list):
+        routes.extend(item for item in fallbacks if isinstance(item, dict))
+    return routes
+
+
 def _check_review_attribution(
     request: dict[str, Any], project_root: Path, reasons: list[str]
 ) -> None:
@@ -521,7 +547,7 @@ def _check_review_attribution(
             reasons,
         )
         return
-    if author_model.strip() == reviewer_model.strip():
+    if _norm_model(author_model) == _norm_model(reviewer_model):
         _reject(
             "author and reviewer must differ: reviewer_model matches the lane's "
             f"author model {author_model!r}; route the review to a different model",
@@ -616,7 +642,14 @@ def _check_role_binding(
         _reject(f"role {role!r} registry entry is malformed", reasons)
         return
     bound = f"{spec.get('provider')}/{spec.get('model')}"
-    if not isinstance(model, str) or model.strip() not in {bound, str(spec.get("model"))}:
+    # Only QA reviews may run on a registry-listed fallback: a review route must be able to
+    # differ from the lane author's model, and the primary alone cannot guarantee that.
+    # Every other role stays bound to its primary; a fallback is a runtime route there.
+    accepted_models = _route_keys(spec)
+    if role == "qa":
+        for route in _qa_routes(spec):
+            accepted_models |= _route_keys(route)
+    if not isinstance(model, str) or model.strip() not in accepted_models:
         _reject(
             f"model {model!r} is not the approved binding for role {role!r} ({bound})",
             reasons,
@@ -644,7 +677,11 @@ def _check_role_binding(
         _reject(f"role {role!r} may not take task_class {task_class!r}", reasons)
     if role == "qa" or task_class == "review":
         reviewer_model = request.get("reviewer_model")
-        if reviewer_model is not None and reviewer_model not in {bound, spec.get("model")}:
+        if (
+            reviewer_model is not None
+            and isinstance(model, str)
+            and _norm_model(reviewer_model) != _norm_model(model)
+        ):
             _reject("reviewer_model must equal the spawned role's model binding", reasons)
 
     # Escalation ladder: bound which role may work a lane by its repair cycle.

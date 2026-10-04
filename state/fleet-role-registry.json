@@ -79,16 +79,16 @@
     },
     "qa": {
       "profile": "qa",
-      "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
       "approved_by": "operator",
-      "approval_ref": "operator-chat-2026-10-03-qa-sonnet-rebinding",
+      "approval_ref": "operator-chat-2026-10-03-qa-sol-rebinding",
       "fallback_providers": [
         {
-          "provider": "openai-codex",
-          "model": "gpt-6.1-sol",
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5",
           "approved_by": "operator",
-          "approval_ref": "operator-chat-2026-10-03-fleet-fallbacks"
+          "approval_ref": "operator-chat-2026-10-03-qa-sol-rebinding"
         }
       ],
       "status": "admissible",
@@ -124,6 +124,17 @@
     }
   },
   "lane_exceptions": [
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "otel-efficiency-impl-2026-10-04",
+      "task_id": "otel-efficiency-observer-first-attempt",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-04-otel-implementer-helper"
+    },
     {
       "schema": "helper-lane-exception.v1",
       "kind": "one_time_lane_write",
