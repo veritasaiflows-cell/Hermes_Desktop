@@ -69,7 +69,7 @@ MAX_PHASES = 128
 MAX_BYTES = 131072
 MAX_RESPONSE = 4096
 HTTP_TIMEOUT = 0.4
-ACTIVATION_MAX = 86400.0
+ACTIVATION_MAX = 7 * 86400.0
 MAX_USAGE = 10 ** 9
 HOOKS = ("pre_llm_call", "pre_api_request", "post_api_request", "api_request_error",
          "pre_tool_call", "post_tool_call", "on_session_end")

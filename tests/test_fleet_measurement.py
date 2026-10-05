@@ -551,3 +551,25 @@ def test_readback_cli_requires_expected_names_and_roles(tmp_path, capsys):
     assert check.main(base + ["--expect-name", "fleet.review", "--expect-role", "governor"]) == 1
     assert check.main(base + ["--expect-name", "fleet.task", "--expect-role", "qa"]) == 1
     capsys.readouterr()
+
+
+# --- Expiry extension (lane otel-expiry-extend-impl-20261005) -----------------
+
+def test_measurement_run_accepts_six_day_expiry_and_rejects_eight_days():
+    """The run expiry cap reuses the shared efficiency cap, not a private literal."""
+    from scripts.hermes_otel_efficiency import ACTIVATION_MAX
+    assert ACTIVATION_MAX == 7 * 86400.0
+    assert fleet.ACTIVATION_MAX == ACTIVATION_MAX, "MeasurementRun must reuse the shared cap"
+
+    def build(expires_at):
+        return fleet.MeasurementRun(expires_at=expires_at, emitter=FakeEmitter(), runner=success,
+                                    admitter=lambda r: {"status": "admitted"},
+                                    exporter=lambda role, sid: None, tool_resolver=no_tools)
+
+    accepted = build(time.time() + 6 * 86400)
+    try:
+        assert accepted.deadline > time.monotonic()
+    finally:
+        accepted.close()
+    with pytest.raises(ValueError):
+        build(time.time() + 8 * 86400)

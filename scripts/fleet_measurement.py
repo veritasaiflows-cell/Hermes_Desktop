@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable
 
 from scripts import helper_agent_router as gate
+from scripts.hermes_otel_efficiency import ACTIVATION_MAX
 from scripts.qa_review_driver import effective_model, parse_session_id
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,8 +105,8 @@ class MeasurementRun:
         if isinstance(expires_at, bool) or not isinstance(expires_at, (float, int)):
             raise ValueError("expiry must be an epoch number")
         remaining = expires_at - time.time()
-        if not 0 < remaining <= 86400:
-            raise ValueError("expiry must be within 24 hours")
+        if not 0 < remaining <= ACTIVATION_MAX:
+            raise ValueError("expiry must be within the maximum activation window")
         if cohort not in {"controlled", "live"}:
             raise ValueError("invalid cohort")
         owned = emitter is None

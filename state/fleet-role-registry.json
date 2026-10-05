@@ -189,6 +189,18 @@
       "first_attempt_only": true,
       "approved_by": "operator",
       "approval_ref": "operator-chat-2026-10-05-otel-all-six-roles"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "otel-expiry-extend-impl-20261005",
+      "task_id": "otel-expiry-extend-first-attempt",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-05-extend-pilot"
     }
   ]
 }
+

@@ -41,6 +41,7 @@ Recorded one-time lane exceptions (lane register owns their status):
 - `implementer` / `wf1100-p1-csv-import`
 - `implementer` / `wf1100-p1-demo-datasets`
 - `implementer` / `otel-allroles-impl-20261005`
+- `implementer` / `otel-expiry-extend-impl-20261005`
 
 <!-- END GENERATED: fleet-role-roster -->
 
@@ -187,7 +188,7 @@ Current state (2026-10-04, operator-approved):
   session `20261004_070650_f85848`): PASS_WITH_NOTES, all 9 scoped items fixed.
 - Deployment lane `otel-efficiency-deploy-2026-10-04`: efficiency mode enabled in
   `implementer` and `qa` profiles only (plugin keys + hash-parity files), window
-  ends 2026-10-05T14:00:00Z. Live controlled canary: success run accepted and
+  ending 2026-10-05T14:00:00Z. Live controlled canary: success run accepted and
   injected-failure run rejected; exact collector read-back passed with child
   `hermes.turn`/`hermes.api` spans inside the parent trace. Overhead ≈13 µs per
   hook callback (in-process only). Collector PID/config unchanged.
@@ -202,6 +203,34 @@ Current state (2026-10-04, operator-approved):
 Evidence (git-ignored): `derived/otel-efficiency/2026-10-04/{corrective,deploy}/`.
 Lane register owns live status. This does not start or authorize the queued
 skill-provisioning item below.
+
+## Efficiency pilot status update — 2026-10-05
+
+Supersedes the window/deferral lines above; history is preserved.
+
+- All six fleet roles now run `mode: efficiency` (commit `ceb4dc2`, lane
+  `otel-allroles-impl-20261005`, implementer DeepSeek first attempt, Sonnet QA
+  PASS_WITH_NOTES). Parent job `otel-allroles-20261005` was accepted by the
+  Governor after its 139-test acceptance command passed. Deploy lane
+  `otel-allroles-deploy-20261005` enabled architect, seniorengineer, researcher;
+  the default-profile switch job completed 2026-10-04 13:36 Arizona.
+- Operator-approved expiry extension (lane `otel-expiry-extend-impl-20261005`,
+  first attempt by DeepSeek, Sol QA verdict accept): `ACTIVATION_MAX` raised from
+  24 hours to exactly 7 days in `scripts/hermes_otel_efficiency.py`, with
+  `scripts/fleet_measurement.py` reusing the same constant; pinned by new tests.
+  Governor-run suite: 200 passed. Reviewed plugin copied to all six profile plugin
+  dirs with hash parity and fresh-process probes (lane
+  `otel-expiry-extend-deploy-20261005`).
+- All six profiles' `expires_at_utc` was set to `2026-10-12T14:00:00Z` by the
+  no-agent cron job `8c86be1a2e64` at 2026-10-05T14:00:00Z (deliberately gated:
+  setting it earlier exceeds the 7-day cap and would turn fresh processes off).
+  The read-only expiry reminder `79bcf6f4911b` moved to 2026-10-12 07:05 Arizona.
+- Long-lived processes (including the running desktop) keep the old deadline until
+  relaunched; that is the operator's step. No efficiency, cost, or quality claim
+  is asserted. Remaining open low notes: exact 7-day boundary not frozen-clock
+  tested; role/home mismatch matrix enforced in runtime probes but only partially
+  in committed tests.
+- Evidence (git-ignored): `derived/otel-efficiency/2026-10-05/expiry-extend/`.
 
 ## Checkpoint provenance clarification — 2026-10-04
 

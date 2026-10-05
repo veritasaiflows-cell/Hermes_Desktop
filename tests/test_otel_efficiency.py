@@ -1740,3 +1740,13 @@ def test_api_model_label_recognizes_gpt_6_luna_but_not_near_misses():
         assert attrs(api_spans[1])["hermes.model"] == "unknown"
     finally:
         observer.close()
+
+
+# ---------------------------------------------------------------------------
+# expiry extension (lane otel-expiry-extend-impl-20261005)
+# ---------------------------------------------------------------------------
+
+def test_activation_max_is_exactly_seven_days():
+    """Operator-approved extension: the cap is exactly 7 days, never longer."""
+    module = load_efficiency()
+    assert module.ACTIVATION_MAX == 7 * 86400.0
