@@ -40,6 +40,7 @@ Recorded one-time lane exceptions (lane register owns their status):
 - `implementer` / `wf1100-p1-business-schema`
 - `implementer` / `wf1100-p1-csv-import`
 - `implementer` / `wf1100-p1-demo-datasets`
+- `implementer` / `otel-allroles-impl-20261005`
 
 <!-- END GENERATED: fleet-role-roster -->
 

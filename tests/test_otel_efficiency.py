@@ -1600,3 +1600,143 @@ def test_registered_callback_does_not_resolve_paths_or_import_disk(monkeypatch, 
     finally:
         observer.close()
         module._OBSERVER = None
+
+
+# ---------------------------------------------------------------------------
+# all-roles extension (lane otel-allroles-impl-20261005)
+# ---------------------------------------------------------------------------
+
+FLEET_ROLES = ("governor", "architect", "implementer", "senior_engineer", "qa", "researcher")
+NON_ROLES = ("integrator", "Governor", "senior-engineer", "senior engineer", "")
+
+
+def test_new_context_accepts_all_six_fleet_roles_and_rejects_non_roles():
+    module = load_efficiency()
+    assert module.ROLES == FLEET_ROLES
+    now = time.time()
+    for role in FLEET_ROLES:
+        context = module.new_context(role, now + 60)
+        assert context["role"] == role
+        decoded = module.decode_context(module.encode_context(context), role=role,
+                                        expires_at=context["expires_at"])
+        assert decoded == context
+    for role in NON_ROLES:
+        with pytest.raises(ValueError, match="invalid_role"):
+            module.new_context(role, now + 60)
+
+
+@pytest.mark.parametrize("cls_name", ["Emitter", "Observer"])
+def test_emitter_and_observer_accept_every_fleet_role(cls_name):
+    module = load_efficiency()
+    cls = getattr(module, cls_name)
+    now = time.time()
+    for role in FLEET_ROLES:
+        instance = cls(role=role, expires_at=now + 60, sender=lambda payload: 0)
+        try:
+            assert instance.context["role"] == role and instance.propagated is False
+        finally:
+            instance.close()
+    context = sample_context(module, "researcher", trace_id="cd" * 16, parent_span_id="ef" * 8)
+    propagated = cls(role="researcher", expires_at=context["expires_at"], context=context,
+                     sender=lambda payload: 0)
+    try:
+        assert propagated.context == context and propagated.propagated is True
+    finally:
+        propagated.close()
+
+
+@pytest.mark.parametrize("cls_name", ["Emitter", "Observer"])
+def test_emitter_and_observer_reject_roles_outside_the_fleet_allowlist(cls_name):
+    module = load_efficiency()
+    cls = getattr(module, cls_name)
+    now = time.time()
+    for role in NON_ROLES:
+        with pytest.raises(ValueError, match="invalid_role"):
+            cls(role=role, expires_at=now + 60, sender=lambda payload: 0)
+
+
+def test_register_senior_engineer_activation_requires_seniorengineer_home(monkeypatch, tmp_path):
+    module = load_efficiency()
+    import hermes_constants
+    monkeypatch.setattr(module, "send_http", lambda payload: 0)
+    monkeypatch.delenv(module.CONTEXT_ENV, raising=False)
+    matching = make_home(tmp_path, "seniorengineer")
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: matching)
+    context = FakeContext(register_config(matching, "senior_engineer"))
+    try:
+        module.register(context)
+        observer = module._OBSERVER
+        assert observer is not None
+        assert observer.role == "senior_engineer" and observer.home == matching.resolve()
+        assert observer.context["role"] == "senior_engineer"
+        assert set(context.hooked) == set(module.HOOKS)
+    finally:
+        if module._OBSERVER is not None:
+            module._OBSERVER.close()
+        module._OBSERVER = None
+    mismatched = make_home(tmp_path, "senior_engineer")
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: mismatched)
+    context = FakeContext(register_config(mismatched, "senior_engineer"))
+    module.register(context)
+    assert module._OBSERVER is None, "senior_engineer must not activate on a senior_engineer folder"
+    assert set(context.hooked) == set(module.HOOKS)
+    module._OBSERVER = None
+
+
+@pytest.mark.parametrize("role", ["architect", "researcher"])
+def test_register_activates_for_architect_and_researcher_with_matching_homes(monkeypatch, tmp_path,
+                                                                              role):
+    module = load_efficiency()
+    import hermes_constants
+    monkeypatch.setattr(module, "send_http", lambda payload: 0)
+    monkeypatch.delenv(module.CONTEXT_ENV, raising=False)
+    home = make_home(tmp_path, role)
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: home)
+    context = FakeContext(register_config(home, role))
+    try:
+        module.register(context)
+        observer = module._OBSERVER
+        assert observer is not None
+        assert observer.role == role and observer.home == home.resolve()
+        assert observer.propagated is False and observer.context["role"] == role
+        assert set(context.hooked) == set(module.HOOKS)
+    finally:
+        if module._OBSERVER is not None:
+            module._OBSERVER.close()
+        module._OBSERVER = None
+
+
+def test_register_stays_inert_when_architect_claims_researcher_named_home(monkeypatch, tmp_path):
+    module = load_efficiency()
+    import hermes_constants
+    monkeypatch.setattr(module, "send_http", lambda payload: 0)
+    monkeypatch.delenv(module.CONTEXT_ENV, raising=False)
+    researcher_home = make_home(tmp_path, "researcher")
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: researcher_home)
+    context = FakeContext(register_config(researcher_home, "architect"))
+    module.register(context)
+    assert module._OBSERVER is None, "role architect must not activate on a researcher folder"
+    assert set(context.hooked) == set(module.HOOKS)
+    module._OBSERVER = None
+
+
+def test_api_model_label_recognizes_gpt_6_luna_but_not_near_misses():
+    module = load_efficiency()
+    assert module.MODELS[-1] == "gpt-6-luna"
+    observer, packets = make_observer(module)
+    try:
+        observer.pre_llm_call(turn_id="luna")
+        observer.pre_api_request(turn_id="luna", api_request_id="api-luna", model="gpt-6-luna",
+                                 provider="ollama-cloud")
+        observer.post_api_request(turn_id="luna", api_request_id="api-luna")
+        observer.pre_api_request(turn_id="luna", api_request_id="api-near-miss")
+        observer.post_api_request(turn_id="luna", api_request_id="api-near-miss",
+                                  model="gpt-6-luna-preview")
+        observer.session_end(turn_id="luna", completed=True)
+        assert observer.flush(timeout=2)
+        api_spans = [span for span in spans(packets[0]) if span["name"] == "hermes.api"]
+        assert len(api_spans) == 2
+        assert attrs(api_spans[0])["hermes.model"] == "gpt-6-luna"
+        assert attrs(api_spans[1])["hermes.model"] == "unknown"
+    finally:
+        observer.close()

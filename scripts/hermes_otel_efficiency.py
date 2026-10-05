@@ -47,12 +47,14 @@ from pathlib import Path
 
 SERVICE = "hermes-fleet-efficiency"
 CONTEXT_ENV = "HERMES_FLEET_TRACE_CONTEXT"
-ROLES = ("governor", "implementer", "qa")
+ROLES = ("governor", "architect", "implementer", "senior_engineer", "qa", "researcher")
+ROLE_HOMES = {"governor": "hermes", "architect": "architect", "implementer": "implementer",
+              "senior_engineer": "seniorengineer", "qa": "qa", "researcher": "researcher"}
 PHASES = ("task", "dispatch", "execution", "verification", "review", "acceptance")
 OUTCOMES = ("ok", "error", "timeout", "cancelled", "rejected", "accepted", "unknown")
 TOOLS = ("read_file", "search_files", "write_file", "patch")
 MODELS = ("claude-opus-5-5", "gpt-6-astra", "deepseek-v4.1-flash", "glm-5.3-flash",
-          "gpt-6.1-sol", "claude-sonnet-5-5")
+          "gpt-6.1-sol", "claude-sonnet-5-5", "gpt-6-luna")
 PROVIDERS = ("anthropic", "openai-codex", "ollama-cloud")
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
               "prompt_tokens", "total_tokens")
@@ -1050,7 +1052,7 @@ def register(ctx):
             if parsed.tzinfo is not None:
                 timestamp = parsed.astimezone(timezone.utc).timestamp()
                 now = time.time()
-                expected = "hermes" if role == "governor" else role
+                expected = ROLE_HOMES[role]
                 if (home == Path(str(approved)).resolve() and home.name == expected
                         and now < timestamp <= now + ACTIVATION_MAX):
                     raw = os.environ.get(CONTEXT_ENV)

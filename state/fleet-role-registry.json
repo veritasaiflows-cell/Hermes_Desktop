@@ -178,6 +178,17 @@
       "first_attempt_only": true,
       "approved_by": "operator",
       "approval_ref": "operator-chat-2026-09-26"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "otel-allroles-impl-20261005",
+      "task_id": "otel-allroles-observer-first-attempt",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-05-otel-all-six-roles"
     }
   ]
 }

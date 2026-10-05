@@ -12,8 +12,10 @@ reviewed versions of both files; copying only `__init__.py` is insufficient.
 The efficiency service is `hermes-fleet-efficiency`, separate from the old
 `hermes-otel-pilot` diagnostic service.
 
-Only default/Governor, Implementer and QA are authorized. Match actual profile
-home to `approved_home`, and match configured role to the home. Each process has
+All six fleet roles are authorized (operator approval 2026-10-05): governor
+(default home `hermes`), architect, implementer, senior_engineer (home
+`seniorengineer`), qa and researcher; the role-to-home map is `ROLE_HOMES`.
+Match actual profile home to `approved_home`, and match configured role to the home. Each process has
 an absolute UTC expiry, converted to a monotonic deadline. Capture expires even
 when idle. A configuration entry left enabled after expiry is not evidence of
 active capture. No implicit or automatic extension is permitted.
@@ -97,7 +99,7 @@ long-lived sessions.
 
 ## Deployment keys and rollback
 
-Only these keys are authorized in the three profiles:
+Only these keys are authorized in the six fleet profiles:
 `plugins.entries.hermes-otel-pilot.settings` (approved_home, expires_at_utc,
 role, mode), `plugins.entries.hermes-otel-pilot.allow_tool_override` (false),
 and this plugin's membership in `plugins.enabled`/`plugins.disabled`.
