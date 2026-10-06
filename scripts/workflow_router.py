@@ -53,7 +53,10 @@ WORKFLOW_BASENAME = "state/workflows/{workflow_id}.json"
 CONTINUITY_DIR = PROJECT_ROOT / "continuity"
 
 ROUTER_SCHEMA = "workflow-routing-index.v1"
-CAPSULE_SCHEMA = "workflow_capsule.v1"
+CAPSULE_SCHEMA = "workflow_capsule.v2"
+# Runtime-only capsule keys: returned to callers but never written to tracked
+# state/workflows/*.json files, because they change on every refresh.
+CAPSULE_VOLATILE_KEYS = frozenset({"generated_at", "recall_context"})
 ROUTER_REFRESH_COMMAND = (
     "python scripts/workflow_router.py --all --answer summary --validate --write-index"
 )
@@ -1280,25 +1283,28 @@ def _authoritative_workflow_payload(
     }
 
 
-def _write_capsule_if_changed(path: Path, capsule: dict[str, Any]) -> bool:
-    """Write a capsule only when its content (ignoring ``generated_at``) changed.
+def _persisted_capsule(capsule: dict[str, Any]) -> dict[str, Any]:
+    """Return the tracked subset of a capsule (volatile runtime keys removed)."""
+    return {key: value for key, value in capsule.items() if key not in CAPSULE_VOLATILE_KEYS}
 
-    Gates refresh capsules on every run; re-stamping identical content creates
-    timestamp-only drift in tracked ``state/workflows/*.json`` files. When the
-    substantive content is unchanged, keep the existing file (and its original
-    ``generated_at``) untouched. Mutates ``capsule['generated_at']`` to the
-    preserved value so callers see what is on disk.
+
+def _write_capsule_if_changed(path: Path, capsule: dict[str, Any]) -> bool:
+    """Write a capsule's stable fields only when they changed.
+
+    ``generated_at`` and ``recall_context`` (vector scores, ordering, citation
+    line ranges) change on every refresh without any workflow change, so they
+    are runtime-only: callers still receive them in memory, but they are never
+    persisted to tracked ``state/workflows/*.json`` files. The capsule dict is
+    not mutated.
     """
+    persisted = json.loads(json.dumps(_persisted_capsule(capsule)))
     try:
         existing = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         existing = None
-    if isinstance(existing, dict) and "generated_at" in existing:
-        comparable = json.loads(json.dumps(dict(capsule, generated_at=existing["generated_at"])))
-        if comparable == existing:
-            capsule["generated_at"] = existing["generated_at"]
-            return False
-    path.write_text(json.dumps(capsule, indent=2, sort_keys=True), encoding="utf-8")
+    if existing == persisted:
+        return False
+    path.write_text(json.dumps(persisted, indent=2, sort_keys=True), encoding="utf-8")
     return True
 
 
@@ -1344,7 +1350,9 @@ def route_workflows(
     cached_result: dict[str, Any] | None = None
     current_signatures: dict[str, Any] | None = None
 
-    if routing_cache_ttl_seconds > 0 and not write_index and vector_index_path is not None:
+    # Explicit capsule writes must never be satisfied from the result cache:
+    # a cache hit would return before capsules are written or migrated.
+    if routing_cache_ttl_seconds > 0 and not write_capsules and vector_index_path is not None:
         cache_key = _routing_cache_key(
             routing_schema_version=ROUTER_SCHEMA,
             selector=selector,

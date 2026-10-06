@@ -92,9 +92,16 @@ Each generated capsule (`state/workflows/WF-<ID>.json`) includes:
 - `blockers`, `stop_lines`, `owner_action_required`
 - `depends_on` and `dependency_blockers`, resolved from the canonical graph when it is available
 - `graph_dependency_blockers`, which makes declaration/graph drift a hard routing blocker
-- `recall_context`, up to three cited hybrid-retrieval results scoped by the workflow and its graph dependencies
 - `default_resume_command`: the router command to get the next safe action
 - `validator_commands`: checks that must pass before the workflow advances
+
+Capsules use schema `workflow_capsule.v2`. Volatile fields are runtime-only:
+`recall_context` (up to three cited hybrid-retrieval results scoped by the
+workflow and its graph dependencies) and `generated_at` are returned by
+`scripts/workflow_router.py` but never written to the tracked capsule file,
+so a refresh with no substantive workflow change leaves capsules
+byte-identical. Explicit capsule-writing requests bypass the routing result
+cache.
 
 Use these fields instead of parsing free-text `next_action` when selecting
 which script to run.

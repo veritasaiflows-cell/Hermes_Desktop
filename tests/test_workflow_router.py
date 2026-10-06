@@ -329,23 +329,126 @@ class WorkflowRouterTests(unittest.TestCase):
             self.assertEqual(payload["workflow_id"], "WF-1000")
             self.assertEqual(payload["effective_status"], "monitor_only")
 
-    def test_capsule_rewrite_skips_timestamp_only_changes(self):
+    def test_capsule_rewrite_skips_volatile_only_changes(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "WF-1000.json"
-            first = {"workflow_id": "WF-1000", "blocker_count": 0, "state_sources": ["a"], "generated_at": "2026-01-01T00:00:00Z"}
+            recall_a = {"available": True, "results": [{"citation": "a.md:L1-L2", "score": 0.5}]}
+            recall_b = {"available": True, "results": [{"citation": "a.md:L1-L9", "score": 0.7}]}
+            first = {
+                "workflow_id": "WF-1000",
+                "blocker_count": 0,
+                "state_sources": ["a"],
+                "generated_at": "2026-01-01T00:00:00Z",
+                "recall_context": recall_a,
+            }
             self.assertTrue(workflow_router._write_capsule_if_changed(path, dict(first)))
             before = path.read_bytes()
+            on_disk = json.loads(before)
+            for key in workflow_router.CAPSULE_VOLATILE_KEYS:
+                self.assertNotIn(key, on_disk)
 
-            same = dict(first, generated_at="2026-02-02T00:00:00Z", state_sources=("a",))
+            same = dict(first, generated_at="2026-02-02T00:00:00Z", state_sources=("a",), recall_context=recall_b)
             self.assertFalse(workflow_router._write_capsule_if_changed(path, same))
             self.assertEqual(path.read_bytes(), before)
-            self.assertEqual(same["generated_at"], "2026-01-01T00:00:00Z")
+            # The in-memory capsule keeps its runtime values.
+            self.assertEqual(same["generated_at"], "2026-02-02T00:00:00Z")
+            self.assertIs(same["recall_context"], recall_b)
 
             changed = dict(first, blocker_count=1, generated_at="2026-03-03T00:00:00Z")
             self.assertTrue(workflow_router._write_capsule_if_changed(path, changed))
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["blocker_count"], 1)
-            self.assertEqual(payload["generated_at"], "2026-03-03T00:00:00Z")
+            self.assertNotIn("generated_at", payload)
+
+    def test_legacy_capsule_with_volatile_keys_is_rewritten_once(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "WF-1000.json"
+            legacy = {"workflow_id": "WF-1000", "generated_at": "2026-01-01T00:00:00Z", "recall_context": {}}
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+            capsule = dict(legacy, generated_at="2026-05-05T00:00:00Z")
+            self.assertTrue(workflow_router._write_capsule_if_changed(path, capsule))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"workflow_id": "WF-1000"})
+            self.assertFalse(workflow_router._write_capsule_if_changed(path, capsule))
+
+    def test_refresh_capsules_byte_identical_when_recall_changes(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            index_path = root / "tmp" / "workflow-routing-index.json"
+            vector_index_path = root / "tmp" / "vector-memory.sqlite"
+            vector_index_path.parent.mkdir(parents=True, exist_ok=True)
+            vector_index_path.touch()
+            capsule_path = root / "state" / "workflows" / "WF-1000.json"
+
+            def packet(citation: str, score: float) -> dict:
+                return {
+                    "result_count": 1,
+                    "results": [
+                        {
+                            "source_path": "notes/a.md",
+                            "citation": citation,
+                            "score": score,
+                            "excerpt": "Evidence.",
+                            "freshness_state": "fresh",
+                            "retrieval_mode": "hybrid",
+                        }
+                    ],
+                }
+
+            def refresh(recall_packet: dict) -> dict:
+                with patch("scripts.vector_memory_index.build_query_packet", return_value=recall_packet):
+                    return workflow_router.route_workflows(
+                        selector="WF-1000",
+                        answer="summary",
+                        validate=True,
+                        write_index=True,
+                        index_path=index_path,
+                        project_root=root,
+                        state_dir=root / "state",
+                        vector_index_path=vector_index_path,
+                    )
+
+            refresh(packet("notes/a.md:L1-L4", 0.61))
+            first_bytes = capsule_path.read_bytes()
+            first_mtime = capsule_path.stat().st_mtime_ns
+            on_disk = json.loads(first_bytes)
+            self.assertEqual(on_disk["schema"], workflow_router.CAPSULE_SCHEMA)
+            for key in workflow_router.CAPSULE_VOLATILE_KEYS:
+                self.assertNotIn(key, on_disk)
+
+            # Same inputs: no rewrite at all.
+            refresh(packet("notes/a.md:L1-L4", 0.61))
+            self.assertEqual(capsule_path.read_bytes(), first_bytes)
+            self.assertEqual(capsule_path.stat().st_mtime_ns, first_mtime)
+
+            # Shifted citation ranges / scores (doc edit or index rebuild): still identical,
+            # while the caller still receives the fresh recall context.
+            result = refresh(packet("notes/a.md:L3-L9", 0.77))
+            self.assertEqual(capsule_path.read_bytes(), first_bytes)
+            recall = result["workflow"]["recall_context"]
+            self.assertTrue(recall["available"])
+            self.assertEqual(recall["results"][0]["citation"], "notes/a.md:L3-L9")
+
+    def test_refresh_capsules_identical_without_recall_index(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            index_path = root / "tmp" / "workflow-routing-index.json"
+            capsule_path = root / "state" / "workflows" / "WF-1000.json"
+            kwargs = dict(
+                selector="WF-1000",
+                answer="summary",
+                write_index=True,
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                vector_index_path=None,
+            )
+            result = workflow_router.route_workflows(**kwargs)
+            first_bytes = capsule_path.read_bytes()
+            self.assertFalse(result["workflow"]["recall_context"]["available"])
+            workflow_router.route_workflows(**kwargs)
+            self.assertEqual(capsule_path.read_bytes(), first_bytes)
 
     def test_write_index_auto_regenerates_capsules(self):
         with TemporaryDirectory() as directory:
@@ -1053,6 +1156,55 @@ class WorkflowRouterTests(unittest.TestCase):
                     lane_register_path=register_path,
                 )
 
+
+    def test_capsule_write_request_bypasses_populated_routing_cache(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_control_plane(root)
+            index_path = root / "tmp" / "workflow-routing-index.json"
+            vector_index_path = root / "tmp" / "vector-memory.sqlite"
+            vector_index_path.parent.mkdir(parents=True, exist_ok=True)
+            vector_index_path.touch()
+            database_path = root / "canonical" / "efficiens.db"
+            capsule_path = root / "state" / "workflows" / "WF-1000.json"
+            packet = {"result_count": 0, "results": []}
+            common = dict(
+                selector="WF-1000",
+                answer="summary",
+                index_path=index_path,
+                project_root=root,
+                state_dir=root / "state",
+                routing_cache_ttl_seconds=600,
+                routing_database_path=database_path,
+                vector_index_path=vector_index_path,
+            )
+            with patch("scripts.vector_memory_index.build_query_packet", return_value=packet):
+                workflow_router.build_routing_index(
+                    project_root=root,
+                    state_dir=root / "state",
+                    index_path=index_path,
+                    routing_database_path=database_path,
+                    vector_index_path=vector_index_path,
+                )
+                # Populate the cache, then confirm the next read is a cache hit.
+                workflow_router.route_workflows(**common)
+                cached = workflow_router.route_workflows(**common)
+                self.assertEqual(cached["routing_freshness"]["status"], "cached")
+
+                # Plant a legacy capsule; an explicit capsule write must migrate it.
+                legacy = {"workflow_id": "WF-1000", "generated_at": "2026-01-01T00:00:00Z", "recall_context": {}}
+                capsule_path.parent.mkdir(parents=True, exist_ok=True)
+                capsule_path.write_text(json.dumps(legacy), encoding="utf-8")
+                written = workflow_router.route_workflows(write_capsules=True, **common)
+                self.assertNotEqual(written.get("routing_freshness", {}).get("status"), "cached")
+                migrated = capsule_path.read_bytes()
+                on_disk = json.loads(migrated)
+                self.assertEqual(on_disk["schema"], workflow_router.CAPSULE_SCHEMA)
+                for key in workflow_router.CAPSULE_VOLATILE_KEYS:
+                    self.assertNotIn(key, on_disk)
+
+                workflow_router.route_workflows(write_capsules=True, **common)
+                self.assertEqual(capsule_path.read_bytes(), migrated)
 
     def test_skip_recall_context_bypasses_routing_cache(self):
         with TemporaryDirectory() as directory:
