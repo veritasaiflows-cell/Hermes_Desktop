@@ -64,6 +64,57 @@ class GraphifyGenerationPublicationTests(unittest.TestCase):
             self.assertEqual(pointer["artifact_tree_sha256"], selected.artifact_tree_sha256)
             self.assertEqual(graphify_generation.resolve_current_generation(root), selected)
 
+    def test_transaction_restores_pointer_when_publisher_final_read_fails(self) -> None:
+        from unittest.mock import patch
+        from scripts import cron_graphify_code_refresh as refresh, graphify_generation as generation
+
+        # Exercise the real publisher's post-swap read, with and without a prior selector.
+        for has_previous in (True, False):
+            with self.subTest(has_previous=has_previous), TemporaryDirectory() as directory:
+                root = Path(directory)
+                artifact = self._artifact(root)
+                fingerprint = {"scripts/example.py": "c" * 64}
+                if has_previous:
+                    generation.publish_generation(
+                        root, artifact, generation_id="g-old", source_fingerprint=fingerprint,
+                        snapshot_path="source/graphify-candidates/g-old",
+                    )
+                previous = generation.current_pointer_bytes(root)
+                snapshot = refresh.SourceSnapshot(
+                    generation_id="g-new", snapshot_dir=root / "source/graphify-candidates/g-new",
+                    workspace_root=root / "source/graphify-candidates/g-new/workspace",
+                    source_fingerprint=fingerprint,
+                )
+                real_read = generation._selection_from_pointer
+                failed_reads = []
+                postchecks = []
+
+                def fail_new_selection_once(project_root):
+                    pointer_path = project_root / "graphify-out/current-generation.json"
+                    pointer = pointer_path.read_bytes() if pointer_path.exists() else None
+                    if pointer and json.loads(pointer)["generation_id"] == "g-new" and not failed_reads:
+                        failed_reads.append(pointer)
+                        raise OSError("injected post-swap artifact read failure")
+                    return real_read(project_root)
+
+                with patch.object(generation, "_selection_from_pointer", side_effect=fail_new_selection_once):
+                    result = refresh.run_one_shot_promotion(
+                        root, "g-new", create_snapshot=lambda *_args: snapshot,
+                        snapshot_matches=lambda *_args: True,
+                        build_candidate=lambda _snapshot: artifact / "graph.json",
+                        validate_candidate=lambda *_args: None,
+                        publish=generation.publish_generation,
+                        post_publish_check=lambda _root: postchecks.append(True) or {"status": "fresh"},
+                    )
+                self.assertEqual(len(failed_reads), 1)
+                self.assertEqual(result["status"], "blocked")
+                self.assertEqual(postchecks, [])
+                self.assertEqual(generation.current_pointer_bytes(root), previous)
+                if has_previous:
+                    self.assertEqual(generation.resolve_current_generation(root).generation_id, "g-old")
+                else:
+                    self.assertFalse((root / "graphify-out/current-generation.json").exists())
+
     def test_pointer_restore_recovers_the_previous_complete_generation(self) -> None:
         from scripts import graphify_generation
 

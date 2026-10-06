@@ -21,9 +21,17 @@ Authoritative source files, current records, and explicitly designated canonical
 
 Generated SQL indexes, vector indexes, summaries, and caches are routing layers unless explicitly marked canonical.
 
-A retrieval result is not proof by itself. Open the cited source or canonical record before making a consequential claim.
+A retrieval result is not proof by itself. Open the cited source or canonical record before making a consequential claim. Previously verified source content may be reused only under the source-bound reuse rules below.
+
+Resolve conflicts by authority first, then freshness and provenance within the same authority level. A newer memory timestamp never overrules a current authoritative record. Required user-context memory lookups still apply; they may run alongside an independent exact lookup but cannot establish current workflow state. Mandatory full-skill loading, pruned-content reloads, startup checks, and approval boundaries are unchanged.
 
 ## Route selection
+
+### Read a known authoritative record directly
+
+When the owning path, record ID, or adapter is already known, use it before searching an index for the same source. Use the owner's SQL/adapter for structured state; use canonical tables only where explicitly designated authoritative. Workflow state belongs to its workflow-control owners (`state/README.md`), not automatically to canonical `tasks`. Direct reads still require scope, freshness and source validation.
+
+Choose additional routes only for unanswered parts of the request. Stop retrieval when verified evidence answers the question; do not traverse SQL, graph, vector, memory and chat history merely to repeat the same fact. Preserve source handles, warnings, blockers and stop lines when filtering command output. A requested full audit or failed trust gate still requires its defined checks.
 
 ### Use SQL or full-text search first when the request contains:
 
@@ -103,25 +111,26 @@ Do not use hybrid retrieval by default. Use it only when each route contributes 
 
 ## Default routing algorithm
 
-1. Parse the request for exact identifiers, fields, dates, and structured filters.
-2. If strong structured anchors exist, run:
+1. Parse the request for exact identifiers, fields, dates, structured filters and already-known authority owners.
+2. For a known authoritative source, read its record or owning adapter directly, or reuse verified content only under the rules below. Otherwise, for strong structured anchors, use the owning SQL adapter or exact locator:
 
    - `python scripts/workspace_index.py query --index vector/indexes/workspace-index.sqlite --query "..."`
 
-3. If the request is about relationships (dependencies, ownership, impact, supersession), run:
+3. If unanswered parts concern relationships (dependencies, ownership, impact, supersession), run:
 
    - `python scripts/graph_memory.py affected --object-type <type> --object-id <id>`
    - `python scripts/graph_memory.py path --start-type <type> --start-id <a> --end-type <type> --end-id <b>`
    - `python scripts/graph_memory.py neighbors --subject-type <type> --subject-id <id>`
 
-4. If no strong anchors exist, run:
+4. If unanswered parts are conceptual or have no strong anchors or known source, run:
 
    - `python scripts/vector_memory_index.py memory_search --index vector/indexes/vector-memory.sqlite --query "..."`
 
-5. If the first route returns no useful result, run the fallback route as bounded secondary pass.
-6. If multiple routes are used, deduplicate by source path and record ID.
-7. Open every high-confidence candidate and verify freshness.
-8. For each selected result, validate against source with `memory_get`:
+5. If the chosen route is missing, ambiguous or insufficient, use a bounded fallback appropriate to the missing evidence; an empty result is not proof of absence.
+6. If multiple routes are used, deduplicate by source path and record ID without merging profile/client scopes.
+7. Open relevant selected sources and verify freshness, or apply the source-bound reuse rules below; similarity alone is not selection proof.
+8. For a selected indexed result, inspect its source metadata with `memory_get` where applicable, then verify against the authoritative source. Indexed metadata is not an independent freshness proof. Do not require an index lookup merely to re-read a directly verified authoritative record:
+
 
    ```bash
    python scripts/vector_memory_index.py memory_get \
@@ -216,6 +225,18 @@ For current or consequential questions:
 
 If retrieval quality is insufficient, say so and identify the missing evidence. Use `memory_search` with `--retrieval-mode full_text` for deterministic fallback.
 
+## Source-bound reuse within the current task
+
+Reuse already-read content only when the evidence remains intact in the current task context and its authority owner, record ID/path, source revision or hash, profile/client scope, validation state and freshness conditions are known. A recent summary or memory timestamp alone is insufficient.
+
+Keep a compact source receipt in the existing task/lane proof when reuse is material: owner and source handle, revision/hash, scope, checked-at time, validation result and invalidation conditions. It is a pointer to evidence, not another source of truth, global cache or new index. Record only approved identifiers and metadata; never copy secrets or client content into a receipt.
+
+Before a current-state answer or consequential action, revalidate the relevant source version and mutable status through the owning read path. An unchanged validated revision/hash can avoid another full-content transfer, not the freshness check itself. If an owner exposes no reliable version/freshness check, read the authoritative record again.
+
+Invalidate reuse after a relevant write, concurrent state/lane transition, changed revision/hash, expiry, unknown freshness, conflicting evidence, profile/client scope change, or loss of required evidence through compaction. A request for a fresh audit triggers the audit's checks. Re-open affected sources and retain unresolved conflicts rather than trusting the newer recollection.
+
+Do not reload intact, still-current procedure content merely to repeat it, but load every required full skill before action and reload any pruned skill. Reuse never grants authority, satisfies a missing approval, or waives a required validator or user-context lookup.
+
 ## Memory writes
 
 Write structured information to SQL only when a defined schema and authority owner exist.
@@ -261,7 +282,7 @@ Do not optimize only for speed, result count, or similarity score.
 
 Use this sequence:
 
-`classify -> choose SQL, graph, or vector -> fallback only if needed -> open source -> verify -> answer`
+`classify -> known authoritative record, otherwise task-appropriate SQL, graph, or vector -> fallback only if needed -> source read or valid source-bound reuse -> verify -> answer`
 
 SQL finds exact structure.
 
@@ -277,3 +298,4 @@ The source record establishes truth.
 - v1.1 — Replaced routing placeholders with executable commands (`memory_search`, `memory_get`) and local-ollama-backed hybrid retrieval.
 - v1.2 — Added the graph route (`scripts/graph_memory.py`) for relationship-shaped questions; routing order is now SQL → graph → vector.
 - v1.3 — Added the graph branch to the default routing algorithm and the adapter list; title now covers SQL, graph, and vector.
+- v1.4 — Operator-approved documentation-only clarification: direct known-owner reads, conditional exact-first routing and source-bound reuse with explicit invalidation; no cache infrastructure, permission change or measured speed claim.

@@ -1,10 +1,11 @@
 # Workspace automation layer
 
-Automation IDs A1-A17 are implemented as scheduled, deterministic jobs. A8 is
+Automation IDs A1-A17 are implemented as deterministic jobs; schedules and pause
+state are listed below. A8 is
 the feedback/evaluation sweep; it creates review-only candidates from repeated
-metadata and never applies a production harness change. A18 remains scheduled-paused,
-but its explicitly authorized `--promote-once` path builds and validates an isolated
-Graphify candidate before atomically selecting an immutable generation.
+metadata and never applies a production harness change. A18 has operator-approved
+nightly code-only publication: its profile launcher requests `--promote-once`,
+building and validating an isolated candidate when the selected graph is not fresh.
 
 ## Authoritative code (version-controlled)
 
@@ -86,25 +87,66 @@ is missing.
 | A13 | canonical integrity | daily 07:00 | verifies canonical SQLite integrity |
 | A14 | lane lease watchdog | hourly at :55 | alerts on missing, expiring, or expired active-lane leases; saves locally |
 | A15 | Graphify artifact monitor | hourly at :20 | alerts on stale or unavailable selected Graphify artifacts; pages once per stale episode (digest-keyed) then heartbeats on stderr until healed or the report changes; alert payload is compact counts+paths |
-| A16 | Graphify MCP contract | daily 07:25 | checks the fixed-facade configuration, seven advertised tools, closed raw schemas, and `graph_stats` |
+| A16 | Graphify MCP contract | paused (daily 07:25 retained) | live-connector watchdog paused with the operator-disabled default-profile connector; isolated A18 candidate validation remains available |
 | A17 | Graphify version advisory | Sunday 12:00 | reports only newer stable Graphify releases; never installs |
-| A18 | Graphify code refresh | daily 02:10 (paused) | scheduled runs require explicit one-shot authorization; `--promote-once` builds an isolated candidate and atomically selects it only after all gates pass |
+| A18 | Graphify code refresh | daily 02:10 Arizona | standing operator-approved code-only publication; launcher passes `--promote-once`, skips fresh graphs, and selects a candidate only after all gates pass |
 | A19 | Note/state drift | daily 08:40 | every authored blocker, stop line, and `effective_status` in `state/workflows/WF-*.json` must appear in that workflow's continuity note, and the generated role roster in the WF-1200 note must equal what `state/fleet-role-registry.json` renders (`scripts/fleet_roster_block.py`). Also runs in the fast startup gate (`workspace_status.py --fast`, label `note_drift`) as a warning-class check; the heartbeat remains the scheduled owner. Regenerate the roster with `python scripts/fleet_roster_block.py --write` after any registry change |
 
 All are `no_agent` (no LLM). They print to STDOUT only on failure/degraded,
 except A8 intentionally emits a compact candidate ID when human review is
-required and A17 emits an update advisory when a strictly newer release exists;
-ready/current runs remain silent.
+required, A17 emits an update advisory when a strictly newer release exists, and
+A18 emits a promotion receipt after a successful rebuild; ready/current runs remain silent.
 
 A18 never invokes semantic extraction, `graphify update`, or any Graphify writer
-against the selected or legacy `graphify-out/` artifact. Its paused schedule remains
-read-only. An explicitly authorized `--promote-once` acquires a kernel-backed writer
+against the selected or legacy `graphify-out/` artifact. Standing operator approval
+(2026-10-06 UTC) authorizes the existing nightly launcher to pass `--promote-once`
+for code-only publication; unflagged direct invocations remain check-only. It acquires a kernel-backed writer
 lock before source fingerprinting, creates a Git-visible source snapshot, builds an
 isolated code-only candidate, reconciles/diagnoses/baselines it, checks the fixed MCP
 facade against that candidate, rechecks source hashes, and atomically replaces one
 pointer only after the complete immutable generation is accepted. A failed
-post-publication freshness check restores the prior pointer. Hermes configuration
-changes still require explicit operator approval.
+post-publication freshness check restores the prior pointer. Existing MCP clients
+remain bound to their startup generation; a fresh selected graph is not proof that
+a long-running client reconnected. Verify the serving generation before use.
+Hermes configuration changes still require explicit operator approval.
+
+### Graphify profile deployment and reversible connector disablement
+
+The operator authorized nightly code-only publication on 2026-10-06 UTC and
+subsequently directed: "continue with disabling the MCP connector". These are
+separate approvals: connector disablement does not withdraw A18 publication
+authority or enable semantic/cloud-model extraction.
+
+Default-profile state verified at 2026-10-06T14:53:32Z:
+
+- `mcp_servers.graphify.enabled` is `false`; the server entry, command,
+  arguments and seven-tool selection remain intact for rollback.
+- A16 `9d97cea727e1` is paused to avoid false live-connector alarms.
+- A15 `bdaad284019a` remains enabled; A18 `1d045780243a` remains enabled at
+  `10 2 * * *` Arizona. Their scheduler records were unchanged by disablement.
+- A fresh Hermes process registered zero Graphify tools or connections. The
+  existing chat's connection/tool cache was not forcibly unloaded; restart or
+  a supported reload is needed to release an already-running connection.
+- The selected generation `g-20261006T141150Z-2264476d3aa5` was fresh and its
+  graph and selector hashes stayed unchanged. The isolated seven-tool candidate
+  contract passed despite connector disablement, and the deployed A18 launcher
+  returned `GRAPHIFY CODE REFRESH SKIP ... reason=artifact_current`.
+
+The nightly deployment and rollback repair evidence is in
+`derived/graphify-nightly/2026-10-06/closeout.json`; the operator-directed
+disablement readbacks are in
+`derived/graphify-mcp-disable/2026-10-06/closeout.json`. These gitignored receipts
+describe local execution, not files shipped by a source commit. The rollback
+repair was independently reviewed before rollout; the later configuration
+disablement was deterministically verified, not relabeled as independent QA.
+
+To reverse the disablement, use
+`hermes config set mcp_servers.graphify.enabled true`, resume A16 with
+`hermes cron resume 9d97cea727e1`, and refresh the owning Hermes process. Local
+Graphify artifacts, profile launchers/configuration, cron state and profile-local
+skills are outside this workspace's Git history; a checkout alone does not
+reproduce their deployment. A15/A18 and local graph access do not require the
+user-facing connector to be enabled.
 
 ## Feedback/evaluation loop (A8)
 

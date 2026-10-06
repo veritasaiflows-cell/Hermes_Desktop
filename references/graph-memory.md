@@ -26,13 +26,18 @@ provenance, not proof.
 | `canonical/` (SQL) | "What is the exact state of X?" | Deterministic lookup — authoritative |
 | `graph/` (this layer) | "How is X connected to Y?" | Typed edges, BFS traversal |
 | `vector/` (semantic) | "What is similar to X?" | Embedding similarity |
-| `graphify-out/` (derived) | "What code relates to what?" | LLM-inferred, disposable, gitignored |
+| `graphify-out/` (derived) | "What code relates to what?" | Parser-derived or LLM-extracted, disposable, gitignored |
 
 Graphify is a **derived routing layer** for codebase questions. It is not the
 durable graph: most edges are AST- or LLM-extracted, and the workspace adds only
 deterministic static gate-dispatch edges with exact source paths and lines. None
 are canonical assertions. The durable graph stores the relationships the agent
 asserts with provenance and confidence.
+
+The Graphify MCP connector is an optional interface to the same local derived
+graph, not another graph store. Its activation and dependent monitoring state
+are owned by `references/automation-layer.md`. Disabling that interface does
+not remove local graph artifacts, CLI access or isolated candidate validation.
 
 Graphify freshness is checked separately with
 `python scripts/graphify_freshness.py`. The gate compares the selected immutable
@@ -55,8 +60,10 @@ code-only graph in the Git-visible candidate snapshot, reconciles declared gate
 edges, runs structural diagnostics, writes/checks the candidate baseline, probes
 the fixed MCP facade, rechecks live source hashes, then atomically swaps one
 complete read-only generation pointer. Failed post-publication freshness restores
-the prior pointer. The A18 schedule stays paused; unflagged invocations remain
-read-only.
+the prior pointer. The A18 nightly launcher uses this transaction under standing
+operator-approved code-only publication; see `references/automation-layer.md`.
+Unflagged direct invocations remain check-only. Verify the generation actually
+served by the client; an existing MCP process stays pinned until reconnected.
 
 `graphify_gate_edges.py` derives `runs_gate` edges from the literal
 `DEFAULT_GATES` contract in `scripts/workspace_status.py`. The freshness gate

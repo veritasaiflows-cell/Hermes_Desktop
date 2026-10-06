@@ -364,15 +364,17 @@ def run_one_shot_promotion(
                     "candidate_graph": str(candidate_graph),
                 }
             previous_pointer = capture_pointer(root, lock_held=True)
-            selection = publish(
-                root,
-                candidate_graph.parent,
-                generation_id=generation_id,
-                source_fingerprint=snapshot.source_fingerprint,
-                snapshot_path=snapshot.snapshot_dir.relative_to(root).as_posix(),
-                lock_held=True,
-            )
             try:
+                # Publication can swap the pointer and then raise during its
+                # final artifact read. Keep that entire call inside rollback.
+                selection = publish(
+                    root,
+                    candidate_graph.parent,
+                    generation_id=generation_id,
+                    source_fingerprint=snapshot.source_fingerprint,
+                    snapshot_path=snapshot.snapshot_dir.relative_to(root).as_posix(),
+                    lock_held=True,
+                )
                 post_promotion = post_publish_check(root)
             except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
                 restore_pointer(root, previous_pointer, lock_held=True)
