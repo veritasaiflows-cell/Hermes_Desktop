@@ -61,6 +61,12 @@ class ScriptDocValidatorTests(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertEqual(report["issues"][0]["code"], "scripts_dir_missing")
 
+    def test_live_workspace_scripts_all_have_test_anchors(self) -> None:
+        # Regression: scripts tested under a differently named file must be mapped.
+        report = validate_script_docs(Path(__file__).resolve().parents[1])
+        missing = [i["path"] for i in report["issues"] if i["code"] == "test_anchor_missing"]
+        self.assertEqual(missing, [])
+
     def test_graphify_cron_scripts_share_the_aggregate_test_anchor(self) -> None:
         directory, root = self._workspace()
         self.addCleanup(directory.cleanup)

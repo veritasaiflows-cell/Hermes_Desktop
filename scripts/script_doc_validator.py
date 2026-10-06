@@ -80,6 +80,10 @@ def _test_anchor(script_name: str, test_files: set[str]) -> bool:
         "runtime_metadata.py": "test_run_checks",
         "workflow_runner.py": "test_workflow_router",
         "concurrent_lane_manager.py": "test_concurrent_lane_manager",
+        "check_note_state_drift.py": "test_note_state_drift",
+        "hermes_otel_efficiency.py": "test_otel_efficiency",
+        "verify_fleet_measurement.py": "test_fleet_measurement",
+        "verify_hermes_otel_pilot.py": "test_hermes_otel_pilot",
     }
     return aggregate.get(script_name, "") in test_files
 
