@@ -22,7 +22,6 @@
   "display_name": "Workflow B - Listing Drafts",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-10-04T18:48:56Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -35,37 +34,6 @@
   "priority": "medium",
   "proof_artifact": "continuity\\WF-1001-Listing-Drafts.md",
   "readiness": "route_only",
-  "recall_context": {
-    "available": true,
-    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
-    "result_count": 3,
-    "results": [
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L7-L27",
-        "excerpt": "## 1. Canonical entities currently in use\n",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.639927294092463,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L148-L157",
-        "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.632330282278735,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md:L28-L71",
-        "excerpt": "\nWF-1000 interest-aligned metrics also include `thesis_id`, `audience_id`,\n`qualification_mode`, `quality_status`, and `margin_basis` dimensions.",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.613160239530964,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\commerce-data-model.md"
-      }
-    ]
-  },
   "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
   "routing_contract": "workflow-routing-index.v1",
   "routing_schema_version": "workflow-routing-index.v1",
@@ -74,7 +42,7 @@
     "alias_source": "workflow-alias-index.v1",
     "overrides": "workflow-control-overrides.v1"
   },
-  "schema": "workflow_capsule.v1",
+  "schema": "workflow_capsule.v2",
   "secondary_artifacts": [
     "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
     "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",

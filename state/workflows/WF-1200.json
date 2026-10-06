@@ -19,7 +19,6 @@
   "display_name": "Agent Fleet Roles",
   "effective_status": "route_only",
   "freshness_sla": "weekly",
-  "generated_at": "2026-10-04T18:48:56Z",
   "graph_dependency_blockers": [],
   "helper_safe": false,
   "human_approval_owner": "operator",
@@ -32,37 +31,6 @@
   "priority": "high",
   "proof_artifact": "continuity\\WF-1200-Agent-Fleet-Roles.md",
   "readiness": "route_only",
-  "recall_context": {
-    "available": true,
-    "index_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\vector\\indexes\\vector-memory.sqlite",
-    "result_count": 3,
-    "results": [
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md:L194-L259",
-        "excerpt": "## Helper-agent rules\n",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.6491344409274111,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\operating-procedures.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md:L148-L157",
-        "excerpt": "\n- **WF-1000 scheduled resume.** Blocked: \"No approved external connector\n  configuration yet for phase 3.\" Wrap `default_resume_command` in a cron only",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.6374292546584166,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\references\\automation-layer.md"
-      },
-      {
-        "citation": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md:L95-L107",
-        "excerpt": "## Skills and references\n",
-        "freshness_state": "fresh",
-        "retrieval_mode": "hybrid",
-        "score": 0.625715831392686,
-        "source_path": "C:\\Users\\Veritas\\Documents\\HermesWorkspace\\AGENTS.md"
-      }
-    ]
-  },
   "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
   "routing_contract": "workflow-routing-index.v1",
   "routing_schema_version": "workflow-routing-index.v1",
@@ -71,7 +39,7 @@
     "alias_source": "workflow-alias-index.v1",
     "overrides": "workflow-control-overrides.v1"
   },
-  "schema": "workflow_capsule.v1",
+  "schema": "workflow_capsule.v2",
   "secondary_artifacts": [
     "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
     "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
