@@ -1,0 +1,15 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "capsule-churn-architect-20261006",
+  "task_class": "analysis",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "objective": "Specify how the workflow routing refresh stops writing volatile fields (generated_at, recall/vector results with scores, citation line ranges) into tracked state/workflows/*.json capsules.",
+  "scope": "Read scripts/workflow_router.py, scripts/cron_routing_refresh.py, related tests, and consumers of capsule recall_context. No writes. Return: volatile field inventory, consumers affected, minimal design (move volatile data to the gitignored routing index or regenerate at read time), single-lane write scope, and acceptance tests including byte-identical capsules across two refreshes.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 15,
+  "owner": "agent-main",
+  "role": "architect",
+  "model": "anthropic/claude-opus-5-5"
+}
