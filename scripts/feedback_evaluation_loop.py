@@ -82,13 +82,31 @@ def _days_between(earlier: str, later: str) -> float:
 def run_fixed_cohort(*, project_root: Path = PROJECT_ROOT) -> dict[str, object]:
     """Run the stable, small feedback/harness cohort without persisting raw output."""
     started = time.perf_counter_ns()
-    completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", *COHORT_TARGETS],
-        cwd=str(Path(project_root)),
-        capture_output=True,
-        text=True,
-        timeout=COHORT_TIMEOUT_SECONDS,
-    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", *COHORT_TARGETS],
+            cwd=str(Path(project_root)),
+            capture_output=True,
+            text=True,
+            timeout=COHORT_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        snapshot = correctness_snapshot(Path(project_root))
+        return {
+            "cohort_id": COHORT_ID,
+            "execution_category": (
+                "timeout" if isinstance(error, subprocess.TimeoutExpired) else "launch_error"
+            ),
+            "exit_code": None,
+            "python_version": list(sys.version_info[:3]),
+            "result": "fail",
+            "test_count": 0,
+            "test_failure_count": 0,
+            "duration_ms": (time.perf_counter_ns() - started) // 1_000_000,
+            "source_fingerprint": snapshot["source_fingerprint"],
+            "tested_commit": snapshot["tested_commit"],
+            "failure_ids_sha256": _failure_ids_sha256([]),
+        }
     duration_ms = (time.perf_counter_ns() - started) // 1_000_000
     outcomes = _pytest_outcome_counts(completed.stdout)
     failures = _pytest_failure_ids(completed.stdout)
@@ -98,8 +116,23 @@ def run_fixed_cohort(*, project_root: Path = PROJECT_ROOT) -> dict[str, object]:
         and outcomes["test_count"] > 0
         and outcomes["test_failure_count"] == 0
     )
+    if cohort_passed:
+        execution_category = "none"
+    elif completed.returncode == 1 and "No module named pytest" in completed.stderr:
+        execution_category = "pytest_unavailable"
+    elif completed.returncode == 2:
+        execution_category = "collection_or_interruption"
+    elif completed.returncode in (0, 5) and outcomes["test_count"] == 0:
+        execution_category = "no_tests"
+    elif outcomes["test_failure_count"] > 0:
+        execution_category = "tests_failed"
+    else:
+        execution_category = "runner_error"
     return {
         "cohort_id": COHORT_ID,
+        "execution_category": execution_category,
+        "exit_code": completed.returncode,
+        "python_version": list(sys.version_info[:3]),
         "result": "pass" if cohort_passed else "fail",
         "test_count": outcomes["test_count"],
         "test_failure_count": outcomes["test_failure_count"],

@@ -52,7 +52,8 @@ ROLE_HOMES = {"governor": "hermes", "architect": "architect", "implementer": "im
               "senior_engineer": "seniorengineer", "qa": "qa", "researcher": "researcher"}
 PHASES = ("task", "dispatch", "execution", "verification", "review", "acceptance")
 OUTCOMES = ("ok", "error", "timeout", "cancelled", "rejected", "accepted", "unknown")
-TOOLS = ("read_file", "search_files", "write_file", "patch")
+TOOLS = ("read_file", "search_files", "write_file", "patch", "execute_code",
+         "browser_exec", "terminal", "mem0_search", "delegate_task")
 MODELS = ("claude-opus-5-5", "gpt-6-astra", "deepseek-v4.1-flash", "glm-5.3-flash",
           "gpt-6.1-sol", "claude-sonnet-5-5", "gpt-6-luna")
 PROVIDERS = ("anthropic", "openai-codex", "ollama-cloud")
@@ -837,16 +838,54 @@ class Observer(Emitter):
             return
         state["sequence"] += 1
         attributes = [_attribute("hermes.sequence", state["sequence"]),
+                      _attribute("hermes.role", self.role),
                       _attribute("hermes.operation", kind),
                       _attribute("hermes.status", outcome)]
         if kind == "tool":
             tool = _tool_name(values.get("tool_name")) if "tool_name" in values else open_tool
             attributes.append(_attribute("tool.name", tool))
         else:
-            model = self._hook_label(state, values, "model", MODELS, open_model)
-            provider = self._hook_label(state, values, "provider", PROVIDERS, open_provider)
-            attributes.append(_attribute("hermes.model", model))
-            attributes.append(_attribute("hermes.provider", provider))
+            end_model = self._hook_label(state, values, "model", MODELS)
+            end_provider = self._hook_label(state, values, "provider", PROVIDERS)
+            model = open_model if values.get("model") is None else end_model
+            provider = open_provider if values.get("provider") is None else end_provider
+            changed = any(a != b and a != "unknown" and b != "unknown"
+                          for a, b in ((open_model, end_model), (open_provider, end_provider)))
+            start_known = "unknown" not in (open_model, open_provider)
+            end_known = "unknown" not in (end_model, end_provider)
+            if changed:
+                # One observable invocation with conflicting endpoints: never
+                # silently assign all its usage to either model or invent retries.
+                model = provider = "unknown"
+                source = "conflicting_hooks"
+            elif "unknown" in (model, provider):
+                source = "unrecognized_hook"
+            elif start_known and end_known:
+                source = "both_hooks"
+            elif end_known:
+                source = "end_hook"
+            elif start_known:
+                source = "start_hook"
+            else:
+                model = provider = "unknown"
+                source = "unrecognized_hook"
+            attributes.extend([
+                _attribute("hermes.model", model),
+                _attribute("hermes.provider", provider),
+                _attribute("hermes.attribution.source", source),
+                _attribute("hermes.attribution.changed", changed),
+                _attribute("hermes.attribution.complete", "unknown" not in (model, provider)),
+            ])
+            # Unknown-only attempts carry the explicit incomplete attribution
+            # flag; omit redundant endpoint labels to preserve the byte budget.
+            if any(label != "unknown" for label in
+                   (open_model, open_provider, end_model, end_provider)):
+                attributes.extend([
+                    _attribute("hermes.model.start", open_model),
+                    _attribute("hermes.provider.start", open_provider),
+                    _attribute("hermes.model.end", end_model),
+                    _attribute("hermes.provider.end", end_provider),
+                ])
             usage_attributes, invalid = _usage_attributes(values.get("usage"))
             if invalid:
                 state["usage_invalid"] += invalid

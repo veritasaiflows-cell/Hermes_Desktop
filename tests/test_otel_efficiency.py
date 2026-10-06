@@ -601,6 +601,76 @@ def test_usage_unknown_is_never_reported_as_zero():
         observer.close()
 
 
+@pytest.mark.parametrize("end_model,expected,source,changed", [
+    ("gpt-6-astra", "gpt-6-astra", "both_hooks", False),
+    (None, "gpt-6-astra", "start_hook", False),
+    ("gpt-6.1-sol", "unknown", "conflicting_hooks", True),
+    ("private-model", "unknown", "unrecognized_hook", False),
+])
+def test_api_attribution_preserves_start_end(end_model, expected, source, changed):
+    module = load_efficiency()
+    observer, packets = make_observer(module, role="governor")
+    try:
+        observer.pre_llm_call(turn_id="attribution")
+        observer.pre_api_request(turn_id="attribution", api_request_id="a",
+                                 model="gpt-6-astra", provider="openai-codex")
+        ending = {} if end_model is None else {"model": end_model, "provider": "openai-codex"}
+        observer.post_api_request(turn_id="attribution", api_request_id="a", **ending)
+        observer.session_end(turn_id="attribution", completed=True)
+        assert observer.flush(timeout=2)
+        api = attrs(next(s for s in spans(packets[0]) if s["name"] == "hermes.api"))
+        assert api["hermes.role"] == "governor"
+        assert api["hermes.model.start"] == "gpt-6-astra"
+        assert api["hermes.model.end"] == (end_model if end_model in module.MODELS else "unknown")
+        assert api["hermes.model"] == expected
+        assert api["hermes.attribution.source"] == source
+        assert api["hermes.attribution.changed"] is changed
+        assert "private-model" not in json.dumps(packets)
+    finally:
+        observer.close()
+
+
+@pytest.mark.parametrize("tool", ["execute_code", "browser_exec", "terminal", "mem0_search", "delegate_task"])
+def test_current_tools_have_safe_labels_and_roles(tool):
+    module = load_efficiency()
+    observer, packets = make_observer(module)
+    try:
+        observer.pre_llm_call(turn_id="tools")
+        observer.pre_tool_call(turn_id="tools", tool_call_id="t", tool_name=tool)
+        observer.post_tool_call(turn_id="tools", tool_call_id="t", status="error")
+        observer.session_end(turn_id="tools", completed=True)
+        assert observer.flush(timeout=2)
+        recorded = attrs(next(s for s in spans(packets[0]) if s["name"] == "hermes.tool"))
+        assert recorded["tool.name"] == tool
+        assert recorded["hermes.role"] == "implementer"
+        assert recorded["hermes.status"] == "error"
+    finally:
+        observer.close()
+
+
+def test_fallback_attempts_keep_separate_model_and_failure_evidence():
+    module = load_efficiency()
+    observer, packets = make_observer(module, role="governor")
+    try:
+        observer.pre_llm_call(turn_id="fallback")
+        observer.pre_api_request(turn_id="fallback", api_request_id="primary",
+                                 model="claude-opus-5-5", provider="anthropic")
+        observer.api_request_error(turn_id="fallback", api_request_id="primary", status="timeout")
+        observer.pre_api_request(turn_id="fallback", api_request_id="fallback",
+                                 model="gpt-6-astra", provider="openai-codex")
+        observer.post_api_request(turn_id="fallback", api_request_id="fallback")
+        observer.session_end(turn_id="fallback", completed=True)
+        assert observer.flush(timeout=2)
+        calls = [attrs(s) for s in spans(packets[0]) if s["name"] == "hermes.api"]
+        assert len(calls) == 2
+        assert [(c["hermes.model"], c["hermes.status"]) for c in calls] == [
+            ("claude-opus-5-5", "timeout"), ("gpt-6-astra", "ok")]
+        assert all(c["hermes.attribution.complete"] for c in calls)
+        assert all(c["hermes.role"] == "governor" for c in calls)
+    finally:
+        observer.close()
+
+
 def test_unrecognized_model_provider_and_tool_labels_degrade_to_unknown():
     module = load_efficiency()
     observer, packets = make_observer(module)

@@ -591,6 +591,47 @@ class FeedbackEvaluationLoopTests(unittest.TestCase):
         self.assertEqual(result["test_failure_count"], 0)
         self.assertEqual(result["source_fingerprint"], "c" * 64)
 
+    def test_fixed_cohort_bounds_process_failures(self):
+        snapshot = {"source_fingerprint": "c" * 64, "tested_commit": "test"}
+        for error, category in [
+            (subprocess.TimeoutExpired("private", 90, output="secret"), "timeout"),
+            (OSError("secret private/path"), "launch_error"),
+        ]:
+            with self.subTest(category=category), patch.object(
+                feedback_evaluation_loop.subprocess, "run", side_effect=error,
+            ), patch.object(feedback_evaluation_loop, "correctness_snapshot", return_value=snapshot):
+                result = feedback_evaluation_loop.run_fixed_cohort()
+                self.assertEqual(result["execution_category"], category)
+                self.assertIsNone(result["exit_code"])
+                self.assertEqual(result["result"], "fail")
+                self.assertEqual(result["test_count"], 0)
+                self.assertNotIn("secret", json.dumps(result))
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_fixed_cohort_records_safe_execution_diagnostics(self):
+        snapshot = {"source_fingerprint": "c" * 64, "tested_commit": "test"}
+        cases = [
+            (1, "", "private/path: No module named pytest\n", "pytest_unavailable"),
+            (2, "1 error in 0.1s", "secret", "collection_or_interruption"),
+            (5, "no tests ran", "secret", "no_tests"),
+            (1, "1 failed, 2 passed in 1s", "secret", "tests_failed"),
+            (3, "", "secret", "runner_error"),
+            (0, "", "secret", "no_tests"),
+            (0, "2 passed in 1s", "", "none"),
+        ]
+        for code, stdout, stderr, category in cases:
+            with self.subTest(category=category), patch.object(
+                feedback_evaluation_loop.subprocess, "run",
+                return_value=SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr),
+            ), patch.object(feedback_evaluation_loop, "correctness_snapshot", return_value=snapshot):
+                result = feedback_evaluation_loop.run_fixed_cohort()
+                self.assertEqual(result["execution_category"], category)
+                self.assertEqual(result["exit_code"], code)
+                self.assertEqual(result["python_version"], list(sys.version_info[:3]))
+                self.assertNotIn("secret", json.dumps(result))
+                self.assertNotIn("private/path", json.dumps(result))
+                self.assertEqual(result["result"], "pass" if category == "none" else "fail")
+
     def test_fixed_cohort_cannot_pass_without_executed_tests(self):
         snapshot = {
             "source_fingerprint": "c" * 64,

@@ -115,10 +115,21 @@ this newer measurement window.
 
 ## Status
 
-Code accepted after the operator-approved corrective attempt and fresh independent
-QA (PASS_WITH_NOTES). Deployed 2026-10-04 to `implementer` and `qa` only, window
-ending 2026-10-05T14:00:00Z; the default profile switches after the legacy pilot
-closes (gated one-shot), then needs an operator desktop reload. Controlled live
-canary and exact collector read-back passed. No efficiency, cost or quality
-improvement is asserted. Current status lives in the WF-1200 continuity note and
-the lane register; evidence in `derived/otel-efficiency/2026-10-04/`.
+Code-only QA accepted the baseline diagnostics and model-attribution changes
+with notes (verified GPT-6.1 Sol). On 2026-10-06 the reviewed observer was deployed
+to `default`, `architect`, `implementer`, `seniorengineer`, `qa`, and `researcher`.
+All profile configurations remained byte-for-byte unchanged; the existing expiry
+is `2026-10-12T14:00:00Z`. Fresh-process activation and controlled collector
+read-back passed for all six profiles. A real native Sol QA turn also passed
+exact-trace model-attribution and coverage checks. Existing desktop/gateway
+processes were not restarted; their updated-code capture remains unverified.
+
+The final rollout reviewer withheld acceptance because its profile identity text
+still named GPT-5.6-Sol, despite verified GPT-6.1 Sol execution. The operator then
+approved correcting exactly those two identity references, explicitly declined
+another QA run, and directed lane closure, commit and push. Governor closeout is
+under that explicit operator disposition, **not a new independent QA PASS**.
+The last reviewer verdict and all prior evidence are preserved. Exact approvals,
+proof pointers, rollback hashes and remaining work are recorded in
+[`telemetry-observer-closeout-20261006.md`](../../references/telemetry-observer-closeout-20261006.md).
+No efficiency, cost or quality improvement is asserted.
