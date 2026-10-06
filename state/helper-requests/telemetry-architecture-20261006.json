@@ -1,0 +1,15 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "telemetry-architecture-20261006",
+  "task_class": "analysis",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "objective": "Specify bounded model-aware telemetry and skill/harness improvement contracts from frozen evidence.",
+  "scope": "Frozen packet only; no tools, files, configuration, or implementation. Return requirements, minimal lane decomposition, privacy safeguards and acceptance tests. Governor records output in telemetry-evidence-20261006.",
+  "allowed_toolsets": ["read_file", "search_files"],
+  "allowed_writes": [],
+  "max_duration_minutes": 5,
+  "owner": "agent-main",
+  "role": "architect",
+  "model": "openai-codex/gpt-6-astra"
+}

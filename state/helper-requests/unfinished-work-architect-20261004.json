@@ -1,0 +1,18 @@
+{
+  "schema": "helper-agent-request.v1",
+  "task_id": "unfinished-work-hardening-architecture",
+  "task_class": "analysis",
+  "phase": "pre-implementation",
+  "mode": "read-only",
+  "objective": "Design the smallest existing-control hardening that preserves unfinished work and provides accountable session pickup and closeout without new orchestration machinery.",
+  "scope": "Read-only architecture from the frozen packet. Return a bounded Markdown plan and independently testable lane decomposition; write no files, use no tools, perform no implementation, change no role bindings or permissions. Registered read-only architecture lane: unfinished-work-architect-20261004 (lane_id intentionally omitted from the read-only admission request).",
+  "allowed_toolsets": [
+    "read_file",
+    "search_files"
+  ],
+  "allowed_writes": [],
+  "max_duration_minutes": 5,
+  "owner": "agent-main",
+  "role": "architect",
+  "model": "openai-codex/gpt-6-astra"
+}
