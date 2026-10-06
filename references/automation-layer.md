@@ -73,7 +73,7 @@ is missing.
 |----|-----|----------|-----------|
 | A1 | wiki freshness regen | daily 08:00 local | republishes wiki; alerts only on failure |
 | A2 | green-gate watchdog | every 4h | fast operational gate: routing + wiki + alias + cron registration + recall-index liveness; alerts on routing/alias/registration failure; stale wiki/vector warn softly; graph depth checks live on A10/A11 |
-| A2-full | code-correctness gate | daily 06:00 | runs full test/smoke suite with telemetry recording; alerts on regression; defers silently (exit 0) when active write lanes touch the correctness surface; pytest budget 240s inside the 300s gate with partial-output logging, no double-rerun |
+| A2-full | code-correctness gate | daily 06:00 | runs full unit suite and source-fingerprint checks with telemetry recording; alerts on regression; defers silently (exit 0) when active write lanes touch the correctness surface; pytest budget 360s inside the 420s gate with partial-output logging, no double-rerun |
 | A3 | routing cache sweep | daily 09:00 | evicts expired and signature-mismatched `canonical/efficiens.db` routing_cache rows |
 | A4 | stale-workflow archive sweep | weekly Sunday 10:00 | flags terminal workflows older than 30 days; archives capsules |
 | A5 | routing index refresh | hourly at :35 | regenerates `state/workflow-routing-index.json` and capsules with bounded fail-closed reporting |

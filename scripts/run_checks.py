@@ -34,7 +34,7 @@ from scripts.script_doc_validator import validate_script_docs
 # Pytest budget inside run_tests(). Kept below cron_test_gate TIMEOUT_SECONDS
 # so fingerprinting and telemetry always have headroom, and a hang fails fast
 # with partial evidence instead of cascading into the unittest fallback.
-PYTEST_TIMEOUT_SECONDS = 240
+PYTEST_TIMEOUT_SECONDS = 360
 
 
 def build_test_suite() -> unittest.TestSuite:

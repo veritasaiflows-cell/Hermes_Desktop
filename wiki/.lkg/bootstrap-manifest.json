@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-06T15:14:27Z",
+  "generated_at": "2026-10-06T15:23:58Z",
   "generated_by": "scripts/wiki_bootstrap.py",
   "lkg_manifest": "wiki/.lkg/bootstrap-manifest.json",
   "pages": {
@@ -103,7 +103,7 @@
       ],
       "source_hashes": {
         "AGENTS.md": "545fe5dcb1ab12c7be15c1f0c24e2effe20f7ab6fbc25f60db45e6dda8b6960f",
-        "references/memory-routing.md": "2afe4a65753fba26547270f2aa0e3a3aa0b69f43df3da5c53f345aed5763681a",
+        "references/memory-routing.md": "ae56f552c21c8a8bddd03a6bb652d6e6dc83a4c31a4375e91b7ebdda65b2f46b",
         "references/operating-procedures.md": "5a5288ffd923d933925ec5fe2ca0b1c47a48d0223f9ae31f2c288715065421f0"
       },
       "source_map": [

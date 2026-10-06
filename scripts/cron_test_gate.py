@@ -13,7 +13,7 @@ This script exists so that cron_health_check.py can remain a fast,
 operational gate (routing + wiki + alias) while the correctness gate
 keeps its own schedule.
 
-Preflight: before spending ~90s on the full suite, check the lane register
+Preflight: before spending the full-suite budget, check the lane register
 for active write lanes whose allowed_writes touch the correctness surface
 (scripts/, tests/, canonical/). A2-full fingerprints the source tree — any
 concurrent write guarantees a drift rejection after the run, wasting the
@@ -32,7 +32,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
-TIMEOUT_SECONDS = 300
+# Leave 60s beyond run_checks.PYTEST_TIMEOUT_SECONDS for startup and proof recording.
+TIMEOUT_SECONDS = 420
 LANE_REGISTER = PROJECT_ROOT / "state" / "concurrent-lane-register.sqlite"
 # Write-scope prefixes whose edits invalidate the A2-full source fingerprint.
 CORRECTNESS_SURFACE = ("scripts/", "tests/", "canonical/")

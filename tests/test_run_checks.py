@@ -14,6 +14,30 @@ from scripts.runtime_metadata import detect_active_model
 
 
 class RunChecksTests(unittest.TestCase):
+    def test_pytest_accepts_suite_above_old_deadline_with_bounded_headroom(self):
+        # A deterministic subprocess seam models wall time without a long sleep.
+        def simulated_suite(command, **kwargs):
+            if kwargs["timeout"] < 250:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, "3 passed in 250.0s\n", "")
+
+        with (
+            patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
+            patch.object(run_checks.subprocess, "run", side_effect=simulated_suite) as run_mock,
+            patch.object(run_checks, "_write_timeout_log", return_value="<test-log>"),
+            patch.object(run_checks, "build_test_suite", side_effect=AssertionError("no fallback")),
+        ):
+            ok, failures, _elapsed, count, failure_count = run_checks.run_tests()
+
+        self.assertTrue(ok, failures)
+        self.assertEqual((count, failure_count), (3, 0))
+        run_mock.assert_called_once()
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 360)
+        self.assertEqual(
+            run_mock.call_args.args[0],
+            [sys.executable, "-m", "pytest", str(run_checks.PROJECT_ROOT / "tests"), "-q"],
+        )
+
     def test_pytest_test_count_sums_executed_test_outcomes(self):
         self.assertEqual(
             run_checks._pytest_test_count("2 failed, 174 passed, 5 subtests passed in 17.9s"),
@@ -323,7 +347,7 @@ class RunChecksTests(unittest.TestCase):
     def test_pytest_timeout_returns_diagnostics_without_unittest_fallback(self) -> None:
         partial = "12 passed, 3 failed in 239.5s\nFAILED tests/test_x.py::test_y"
         timeout = subprocess.TimeoutExpired(
-            cmd=["pytest"], timeout=240, output=partial, stderr=""
+            cmd=["pytest"], timeout=run_checks.PYTEST_TIMEOUT_SECONDS, output=partial, stderr=""
         )
         with (
             patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
@@ -341,7 +365,7 @@ class RunChecksTests(unittest.TestCase):
             )
 
         self.assertFalse(tests_ok)
-        self.assertEqual(failures[0], "pytest_timeout_after_240s")
+        self.assertEqual(failures[0], f"pytest_timeout_after_{run_checks.PYTEST_TIMEOUT_SECONDS}s")
         self.assertIn("test_y", " ".join(failures))
         self.assertEqual(test_count, 15)
         self.assertGreaterEqual(failure_count, 1)
@@ -358,6 +382,24 @@ class RunChecksTests(unittest.TestCase):
             self.assertEqual(run_checks.run_tests()[3], 3)
         self.assertEqual(run_mock.call_args.args[0][:3], [sys.executable, "-m", "pytest"])
 
+    def test_timeout_with_passing_partial_summary_still_rejects(self):
+        # Regression pin: passing assertions do not waive the process deadline.
+        with (
+            patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
+            patch.object(run_checks.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                ["pytest"], run_checks.PYTEST_TIMEOUT_SECONDS,
+                output="3 passed in 239.5s\n", stderr="")) as run_mock,
+            patch.object(run_checks, "_write_timeout_log", return_value="<test-log>") as log_mock,
+            patch.object(run_checks, "build_test_suite", side_effect=AssertionError("no fallback")),
+        ):
+            ok, failures, _elapsed, count, failure_count = run_checks.run_tests()
+
+        self.assertFalse(ok)
+        self.assertEqual(failures, [f"pytest_timeout_after_{run_checks.PYTEST_TIMEOUT_SECONDS}s"])
+        self.assertEqual((count, failure_count), (3, 1))
+        run_mock.assert_called_once()
+        log_mock.assert_called_once()
+
     def test_timeout_bytes_and_mixed_streams_preserve_diagnostics(self) -> None:
         for output, stderr in ((b"2 passed in 0.1s\n", "FAILED tests/x.py::test_y\n"),
                                ("2 passed in 0.1s\n", b"FAILED tests/x.py::test_y\xff\n")):
@@ -365,7 +407,7 @@ class RunChecksTests(unittest.TestCase):
                 self.subTest(output=output),
                 patch.dict(sys.modules, {"pytest": ModuleType("pytest")}),
                 patch.object(run_checks.subprocess, "run", side_effect=subprocess.TimeoutExpired(
-                    ["pytest"], 240, output=output, stderr=stderr)),
+                    ["pytest"], run_checks.PYTEST_TIMEOUT_SECONDS, output=output, stderr=stderr)),
                 patch.object(run_checks, "_write_timeout_log", return_value="<test-log>") as log,
                 patch.object(run_checks, "build_test_suite", side_effect=AssertionError("no fallback")),
             ):
