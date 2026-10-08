@@ -945,5 +945,206 @@ class WorkspaceStatusTests(unittest.TestCase):
         )
 
 
+class UncommittedWorkTests(unittest.TestCase):
+    """Phase 0: aged uncommitted work warns (never fails); mtime age is a heuristic."""
+
+    HOUR = 3600.0
+
+    def _age(self, path: Path, hours: float, now: float) -> None:
+        os.utime(path, (now - hours * self.HOUR, now - hours * self.HOUR))
+
+    @staticmethod
+    def _seed_repo(root: Path, env: dict[str, str], files: dict[str, str]) -> None:
+        for name, body in files.items():
+            (root / name).write_text(body, encoding="utf-8")
+        for args in (
+            ["init", "-q"],
+            ["add", "-A"],
+            ["-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "seed", "--no-verify"],
+        ):
+            subprocess.run(["git", "-c", "core.autocrlf=false", *args], cwd=root, env=env, check=True, capture_output=True)
+
+    def test_scenarios_on_one_real_repository_under_hostile_git_environment(self) -> None:
+        """Clean, staged A/M/D, MM partial staging, unstaged, aged, ignored, unicode/space, deletions.
+
+        The whole scenario runs with inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pointing at a
+        second (decoy) repository; results must describe only the requested repository.
+        """
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+        git = lambda root, *a: subprocess.run(  # noqa: E731
+            ["git", "-c", "core.autocrlf=false", *a], cwd=root, env=env, check=True, capture_output=True
+        )
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as decoy_tmp:
+            root, decoy = Path(tmp), Path(decoy_tmp)
+            self._seed_repo(decoy, env, {"decoy.py": "D = 1\n"})
+            (decoy / "decoy-dirty.py").write_text("x", encoding="utf-8")
+            self._seed_repo(
+                root,
+                env,
+                {".gitignore": "ignored.log\n", "tracked.py": "A = 1\n", "doomed.py": "B = 1\n",
+                 "staged_mod.py": "S = 1\n", "staged_del.py": "R = 1\n", "partial.py": "P = 1\n"},
+            )
+            hostile = {
+                "GIT_DIR": str(decoy / ".git"),
+                "GIT_WORK_TREE": str(decoy),
+                "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
+            }
+            with patch.dict(os.environ, hostile):
+                clean = workspace_status._uncommitted_work(root)
+                self.assertEqual((clean["status"], clean["changed_count"]), ("clean", 0))
+
+                now = 2_000_000_000.0
+                (root / "tracked.py").write_text("A = 2\n", encoding="utf-8")
+                (root / "staged_new.py").write_text("N = 1\n", encoding="utf-8")
+                (root / "staged_mod.py").write_text("S = 2\n", encoding="utf-8")
+                (root / "partial.py").write_text("P = 2\n", encoding="utf-8")
+                git(root, "add", "staged_new.py", "staged_mod.py", "partial.py")
+                git(root, "rm", "-q", "staged_del.py")
+                (root / "partial.py").write_text("P = 3\n", encoding="utf-8")
+                (root / "new dir").mkdir()
+                (root / "new dir" / "notes \u00fc.md").write_text("x", encoding="utf-8")
+                (root / "fresh.py").write_text("x", encoding="utf-8")
+                (root / "ignored.log").write_text("x", encoding="utf-8")
+                (root / "doomed.py").unlink()
+                for name, hours in (("tracked.py", 5), ("new dir/notes \u00fc.md", 30), ("fresh.py", 1),
+                                    ("ignored.log", 99), ("staged_new.py", 6), ("staged_mod.py", 2), ("partial.py", 8)):
+                    self._age(root / name, hours, now)
+
+                aged = workspace_status._uncommitted_work(root, now=now)
+
+            codes = {item["path"]: item["code"] for item in aged["aged"]}
+            self.assertEqual(aged["status"], "aged")
+            self.assertEqual(
+                [item["path"] for item in aged["aged"]],
+                ["new dir/notes \u00fc.md", "partial.py", "staged_new.py", "tracked.py"],
+            )
+            self.assertEqual(codes, {"new dir/notes \u00fc.md": "??", "partial.py": "MM", "staged_new.py": "A", "tracked.py": "M"})
+            # tracked M, doomed D, staged A, staged M, staged D, MM, two untracked; ignored excluded; decoy unseen.
+            self.assertEqual(aged["changed_count"], 8)
+            self.assertEqual((aged["examined_count"], aged["truncated"]), (8, False))
+            self.assertEqual(aged["oldest_age_hours"], 30.0)
+            self.assertEqual(sorted(aged["unknown_age"]), ["doomed.py", "staged_del.py"])
+            self.assertIn("mtime", aged["heuristic"])
+            self.assertFalse(any("decoy" in item["path"] for item in aged["aged"]))
+
+            recent = workspace_status._uncommitted_work(root, now=now - 29 * self.HOUR)
+            self.assertEqual((recent["status"], recent["aged_count"]), ("dirty", 0), "deletions/recent edits never warn alone")
+
+            with patch.object(workspace_status, "UNCOMMITTED_WORK_STAT_LIMIT", 3):
+                bounded = workspace_status._uncommitted_work(root, now=now)
+            self.assertEqual((bounded["changed_count"], bounded["examined_count"], bounded["truncated"]), (8, 3, True))
+
+    def test_invalid_nested_git_dir_never_falls_back_to_an_ancestor_repository(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            self._seed_repo(parent, env, {"parent.py": "X = 1\n"})
+            (parent / "parent-dirty.py").write_text("x", encoding="utf-8")
+            child = parent / "child"
+            (child / ".git").mkdir(parents=True)
+            result = workspace_status._uncommitted_work(child)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertNotIn("aged", result)
+
+    def test_non_repository_roots_and_git_failures_are_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(workspace_status._uncommitted_work(Path(tmp))["status"], "unavailable")
+            (Path(tmp) / ".git").mkdir()
+            with patch.object(workspace_status.subprocess, "run", side_effect=OSError("no git")):
+                self.assertEqual(workspace_status._uncommitted_work(Path(tmp))["status"], "unavailable")
+            failed = subprocess.CompletedProcess([], 128, b"", b"fatal")
+            with patch.object(workspace_status.subprocess, "run", return_value=failed):
+                self.assertEqual(workspace_status._uncommitted_work(Path(tmp))["status"], "unavailable")
+
+    def test_aged_work_warns_without_changing_exit_status(self) -> None:
+        aged = {"status": "aged", "changed_count": 1, "aged_count": 1, "oldest_age_hours": 9.0,
+                "aged": [{"path": "x.py", "code": "M", "age_hours": 9.0}]}
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, (
+            patch.object(workspace_status, "GATES", [])
+        ), patch.object(workspace_status, "_uncommitted_work", return_value=aged), patch.object(
+            workspace_status, "_correctness_status", return_value={"status": "current"}
+        ), redirect_stdout(stdout):
+            code = workspace_status.main(Path(tmp), argv=[])
+        brief = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(brief["health"]["status"], "healthy_with_warnings")
+        self.assertIn("uncommitted_work_aged", brief["health"]["warnings"])
+        self.assertEqual(brief["uncommitted_work"]["aged"][0]["path"], "x.py")
+        self.assertIn("checkpoint_pending", brief["recommended_next_action"])
+
+    def test_preflight_failures_are_unavailable_and_preserve_main_exit(self) -> None:
+        import contextlib
+        import io
+        from unittest.mock import patch
+        from scripts import workspace_status as ws
+
+        cases = (("resolve", PermissionError("denied")),
+                 ("resolve", RuntimeError("symlink loop")),
+                 ("exists", OSError("probe failed")))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for method, error in cases:
+                for hard in ([], ["organization"]):
+                    with self.subTest(method=method, error=type(error).__name__, hard=hard):
+                        buf = io.StringIO()
+                        with patch.object(ws.Path, method, side_effect=error), \
+                             patch.object(ws, "_run_gates", return_value={}), \
+                             patch.object(ws, "_health_decision", return_value=("degraded" if hard else "healthy", hard[:], [])), \
+                             patch.object(ws, "_routing_brief", return_value={}), \
+                             patch.object(ws, "_correctness_status", return_value={"status": "current"}), \
+                             contextlib.redirect_stdout(buf):
+                            result = ws._uncommitted_work(root)
+                            code = ws.main(project_root=root, argv=["--fast"])
+                        self.assertEqual(result, {"status": "unavailable", "reason": type(error).__name__})
+                        brief = json.loads(buf.getvalue())
+                        self.assertEqual(code, 1 if hard else 0)
+                        self.assertEqual(brief["health"]["hard_failures"], hard)
+                        self.assertEqual(brief["uncommitted_work"], result)
+                        self.assertNotIn("uncommitted_work_aged", brief["health"]["warnings"])
+
+    def test_compact_output_discloses_actual_capped_examination(self) -> None:
+        import contextlib
+        import io
+        from unittest.mock import patch
+        from scripts import workspace_status as ws
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("one.txt", "two.txt"):
+                (root / name).write_text("new", encoding="utf-8")
+            # Keep the real helper and parser; only the Git boundary is synthetic.
+            (root / ".git").mkdir()
+            response = subprocess.CompletedProcess([], 0, b"?? one.txt\0?? two.txt\0", b"")
+            buf = io.StringIO()
+            with patch.object(ws, "UNCOMMITTED_WORK_STAT_LIMIT", 1), \
+                 patch.object(ws.subprocess, "run", return_value=response), \
+                 patch.object(ws, "_run_gates", return_value={}), \
+                 patch.object(ws, "_health_decision", return_value=("healthy", [], [])), \
+                 patch.object(ws, "_routing_brief", return_value={}), \
+                 patch.object(ws, "_correctness_status", return_value={"status": "current"}), \
+                 contextlib.redirect_stdout(buf):
+                code = ws.main(project_root=root, argv=["--fast", "--compact"])
+            brief = json.loads(buf.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(brief["uncommitted_work"]["changed_count"], 2)
+            self.assertEqual(brief["uncommitted_work"]["examined_count"], 1)
+            self.assertTrue(brief["uncommitted_work"]["truncated"])
+
+    def test_compact_brief_carries_the_uncommitted_summary(self) -> None:
+        dirty = {"status": "dirty", "changed_count": 2, "aged_count": 0, "oldest_age_hours": 0.5, "aged": []}
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, (
+            patch.object(workspace_status, "GATES", [])
+        ), patch.object(workspace_status, "_uncommitted_work", return_value=dirty), patch.object(
+            workspace_status, "_correctness_status", return_value={"status": "current"}
+        ), redirect_stdout(stdout):
+            code = workspace_status.main(Path(tmp), argv=["--compact"])
+        compact = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(compact["uncommitted_work"]["changed_count"], 2)
+        self.assertNotIn("uncommitted_work_aged", compact["health"]["warnings"])
+
+
 if __name__ == "__main__":
     unittest.main()

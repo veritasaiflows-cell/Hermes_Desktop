@@ -107,6 +107,96 @@ PARALLEL_SAFE_GATES = frozenset(
 )
 MAX_PARALLEL_GATES = 6
 
+# Uncommitted-work age heuristic (Phase 0, 2026-10-06): sessions reaped by a
+# desktop restart left verified edits uncommitted. Warn (never fail) when any
+# examined tracked modification or non-ignored untracked file has an mtime at
+# least this many hours old. mtime is "time since last write", not "time since dirty".
+UNCOMMITTED_WORK_WARN_HOURS = 4.0
+UNCOMMITTED_WORK_LIST_LIMIT = 20
+# Work budget for the fast tier: at most this many lstat calls / seconds.
+UNCOMMITTED_WORK_STAT_LIMIT = 5000
+UNCOMMITTED_WORK_STAT_BUDGET_SECONDS = 2.0
+
+
+def _uncommitted_work(
+    project_root: Path,
+    *,
+    now: float | None = None,
+    threshold_hours: float = UNCOMMITTED_WORK_WARN_HOURS,
+) -> dict[str, Any]:
+    """Return an mtime-age summary of uncommitted, non-ignored changes in ``project_root``.
+
+    Covers tracked modifications, staged changes, deletions, and untracked files
+    (ignored files excluded). Deleted paths have no mtime and are reported under
+    ``unknown_age``. Git is bound explicitly to ``<root>/.git`` and ``<root>`` with
+    every inherited GIT_* variable removed, so neither ancestor discovery nor a
+    foreign GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE can redirect the read. Any git
+    failure (including an invalid ``.git``) yields ``status: unavailable``.
+    """
+    try:
+        root = Path(project_root).resolve()
+        git_marker = root / ".git"
+        if not git_marker.exists():
+            return {"status": "unavailable", "reason": "not_a_git_root"}
+    except (OSError, RuntimeError) as exc:
+        return {"status": "unavailable", "reason": type(exc).__name__}
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                f"--git-dir={git_marker}",
+                f"--work-tree={root}",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--no-renames",
+                "--untracked-files=all",
+            ],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "unavailable", "reason": type(exc).__name__}
+    if completed.returncode != 0:
+        return {"status": "unavailable", "reason": f"git_status_exit_{completed.returncode}"}
+    moment = time.time() if now is None else now
+    entries = [item for item in completed.stdout.decode("utf-8", errors="replace").split("\0") if item]
+    aged: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    oldest = 0.0
+    examined = 0
+    deadline = time.monotonic() + UNCOMMITTED_WORK_STAT_BUDGET_SECONDS
+    for entry in entries:
+        if examined >= UNCOMMITTED_WORK_STAT_LIMIT or time.monotonic() > deadline:
+            break
+        examined += 1
+        code, path = entry[:2], entry[3:]
+        try:
+            age_hours = max(0.0, (moment - (root / path).lstat().st_mtime) / 3600)
+        except OSError:
+            unknown.append(path)
+            continue
+        oldest = max(oldest, age_hours)
+        if age_hours >= threshold_hours:
+            aged.append({"path": path, "code": code.strip() or "?", "age_hours": round(age_hours, 1)})
+    aged.sort(key=lambda item: (-item["age_hours"], item["path"]))
+    return {
+        "status": "aged" if aged else ("dirty" if entries else "clean"),
+        "heuristic": "file mtime age, not time since the change became uncommitted",
+        "threshold_hours": threshold_hours,
+        "changed_count": len(entries),
+        "examined_count": examined,
+        "truncated": examined < len(entries),
+        "aged_count": len(aged),
+        "oldest_age_hours": round(oldest, 1),
+        "aged": aged[:UNCOMMITTED_WORK_LIST_LIMIT],
+        "unknown_age": unknown[:UNCOMMITTED_WORK_LIST_LIMIT],
+        "unknown_age_count": len(unknown),
+    }
+
 
 def fast_gates() -> list[tuple[str, list[str], int]]:
     """Return the startup-tier subset of DEFAULT_GATES in declared order."""
@@ -643,6 +733,12 @@ def main(project_root: Path = PROJECT_ROOT, argv: list[str] | None = None) -> in
         if not hard:
             decision = "healthy_with_warnings"
 
+    uncommitted_work = _uncommitted_work(Path(project_root))
+    if uncommitted_work.get("status") == "aged":
+        warnings.append("uncommitted_work_aged")
+        if not hard:
+            decision = "healthy_with_warnings"
+
     # Use the project_root for git and workflows in tests; production still
     # resolves through the default PROJECT_ROOT.
     git_head = _git_head() if project_root == PROJECT_ROOT else {"branch": "unknown", "commit_short": "unknown", "status_lines": []}
@@ -668,6 +764,11 @@ def main(project_root: Path = PROJECT_ROOT, argv: list[str] | None = None) -> in
         recommended_next_action = (
             "Run python scripts/cron_telemetry_harvest.py to refresh the feedback-evaluation report."
         )
+    elif "uncommitted_work_aged" in warnings:
+        recommended_next_action = (
+            "Commit verified work or record a checkpoint_pending disposition for the aged "
+            "uncommitted paths (see uncommitted_work.aged) before new mutations."
+        )
     elif warnings:
         recommended_next_action = "Review workspace warnings before the next mutation."
     else:
@@ -684,6 +785,7 @@ def main(project_root: Path = PROJECT_ROOT, argv: list[str] | None = None) -> in
         "active_workflows": workflows,
         "routing_brief": routing_brief,
         "correctness": correctness,
+        "uncommitted_work": uncommitted_work,
         "feedback_evaluation": feedback_evaluation,
         "gates": gates,
         "health": {
@@ -707,6 +809,10 @@ def main(project_root: Path = PROJECT_ROOT, argv: list[str] | None = None) -> in
             "correctness": {
                 key: correctness.get(key)
                 for key in ("status", "stale", "test_count", "completed_at")
+            },
+            "uncommitted_work": {
+                key: uncommitted_work.get(key)
+                for key in ("status", "changed_count", "examined_count", "truncated", "aged_count", "oldest_age_hours")
             },
             "recommended_next_action": recommended_next_action,
             "full_brief_path": full_path,

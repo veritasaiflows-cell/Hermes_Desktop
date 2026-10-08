@@ -1,0 +1,214 @@
+{
+  "approval_ref": "references/efficiency-phase0-reduced-closeout.md#operator-approval",
+  "current_phase": "phase0b-implementation",
+  "historical_parent_job_id": "efficiency-phase0-20261006",
+  "historical_workflow_id": "WF-1200",
+  "job_id": "workspace-efficiency",
+  "objective": "Resume and improve workspace efficiency through authoritative phases and exact-first pickup, preserving historical failures and separate design/implementation/deployment acceptance.",
+  "owner": "agent-main",
+  "phases": [
+    {
+      "acceptance_commands": [
+        [
+          "C:/Users/Veritas/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe",
+          "derived/efficiency-phase0/2026-10-08/reduced-closeout/verify_reduced.py",
+          "--require-qa"
+        ]
+      ],
+      "accepted_at": "2026-10-08T04:22:37.582759Z",
+      "allowed_writes": [
+        "references/efficiency-phase0-reduced-closeout.md",
+        "continuity/WF-1300-Workspace-Efficiency.md",
+        "continuity/implementation-jobs/workspace-efficiency.md",
+        "state/implementation-jobs/workspace-efficiency.json",
+        "state/fleet-role-registry.json",
+        "tests/test_helper_agent_router.py",
+        "derived/efficiency-phase0/2026-10-08/reduced-closeout"
+      ],
+      "approval_ref": "references/efficiency-phase0-reduced-closeout.md#operator-approval",
+      "closeout_ref": "references/efficiency-phase0-reduced-closeout.md",
+      "depends_on": [],
+      "goal": "Qualify the unchanged historically reviewed informational warning, exact pickup and main binding/control delta without accepting Phase 0b or a checkpoint.",
+      "next_action": "Reduced scope is accepted and administratively closed. The separate scope-limited checkpoint/push approval and its verification record are in references/efficiency-phase0-checkpoint.md. No further implementation under this approval.",
+      "phase_id": "phase0",
+      "proof_receipts": [
+        {
+          "commands": [
+            {
+              "argv": [
+                "C:/Users/Veritas/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe",
+                "derived/efficiency-phase0/2026-10-08/reduced-closeout/verify_reduced.py",
+                "--require-qa"
+              ],
+              "duration_ms": 562,
+              "exit_code": 0,
+              "status": "passed",
+              "stderr_tail": "",
+              "stdout_tail": "{\n  \"schema\": \"phase0-reduced-verification.v1\",\n  \"ok\": true,\n  \"unchanged_preexisting_file_count\": 24,\n  \"baseline_snapshot_integrity\": true,\n  \"historical_warning_files_verified\": [\n    \"scripts/workspace_status.py\",\n    \"tests/test_workspace_status.py\",\n    \"references/operating-procedures.md\",\n    \"references/workspace-status-maintenance.md\"\n  ],\n  \"changed_test_methods\": [\n    \"FleetRoleBindingTests.test_live_registry_binds_operator_approved_models\"\n  ],\n  \"registry_nonbinding_fields_preserved\": true,\n  \"other_profiles_unchanged\": true,\n  \"source_fingerprint\": {\n    \"source_fingerprint\": \"547849caa459dac2982fb69530ea8204c9f8a0834b0d49c239d304a10176f944\",\n    \"source_file_count\": 150,\n    \"tested_commit\": \"383782e5c54adb84aecf5b77620d0ea48a3fbbd2\"\n  },\n  \"full_outcomes\": {\n    \"test_count\": 1169,\n    \"test_failure_count\": 0\n  },\n  \"focused_outcomes\": {\n    \"test_count\": 281,\n    \"test_failure_count\": 0\n  },\n  \"qa_required\": true,\n  \"checkpoint_pending\": true,\n  \"phase0b_accepted\": false\n}\n"
+            }
+          ],
+          "completed_at": "2026-10-08T04:22:37.582759Z",
+          "phase_id": "phase0",
+          "receipt_id": "91163fef-29da-4562-a042-38aab60715c7",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 150,
+            "source_fingerprint": "547849caa459dac2982fb69530ea8204c9f8a0834b0d49c239d304a10176f944",
+            "tested_commit": "383782e5c54adb84aecf5b77620d0ea48a3fbbd2"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 150,
+            "source_fingerprint": "547849caa459dac2982fb69530ea8204c9f8a0834b0d49c239d304a10176f944",
+            "tested_commit": "383782e5c54adb84aecf5b77620d0ea48a3fbbd2"
+          },
+          "started_at": "2026-10-08T04:22:36.771799Z",
+          "status": "passed"
+        }
+      ],
+      "started_at": "2026-10-08T03:51:49.244127Z",
+      "status": "accepted",
+      "title": "Phase 0 \u2014 reduced warning/tracking qualification"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-c",
+          "import json,hashlib;from pathlib import Path;p=Path('derived/efficiency-phase0b/2026-10-07/amendment-n1n2');d=json.loads((p/'reconciliation.json').read_text());r=json.loads((p/'qa-record.json').read_text());h=json.loads((p/'qa-reviewed-hashes.json').read_text());assert d['planning_acceptance']=='accepted' and not d['blocking_findings'];assert r['effective_model_verified'] and r['effective_model']=='anthropic/claude-opus-5-5' and r['author_model']=='openai-codex/gpt-6-astra' and not r['problems'];assert (p/'qa-stdout.txt').read_text().lstrip().startswith('PLANNING_ACCEPTANCE: PASS');assert all(hashlib.sha256(Path(n).read_bytes()).hexdigest()==v for n,v in h.items());print('Planning-only independent review and frozen hashes verified; no implementation or deployment acceptance')"
+        ]
+      ],
+      "accepted_at": "2026-10-07T18:02:15.983062Z",
+      "allowed_writes": [
+        "derived/efficiency-phase0b/2026-10-07/amendment-n1n2"
+      ],
+      "depends_on": [],
+      "goal": "Resolve real Git policy discovery and first-publication bootstrap at design-contract level only.",
+      "next_action": "Author amendment under efficiency-phase0b-n1n2-20261007; admit one Opus 5.5 review; reconcile actual model, verdict and frozen evidence; stop on HIGH/MEDIUM.",
+      "phase_id": "phase0b-design",
+      "proof_receipts": [
+        {
+          "commands": [
+            {
+              "argv": [
+                "python",
+                "-c",
+                "import json,hashlib;from pathlib import Path;p=Path('derived/efficiency-phase0b/2026-10-07/amendment-n1n2');d=json.loads((p/'reconciliation.json').read_text());r=json.loads((p/'qa-record.json').read_text());h=json.loads((p/'qa-reviewed-hashes.json').read_text());assert d['planning_acceptance']=='accepted' and not d['blocking_findings'];assert r['effective_model_verified'] and r['effective_model']=='anthropic/claude-opus-5-5' and r['author_model']=='openai-codex/gpt-6-astra' and not r['problems'];assert (p/'qa-stdout.txt').read_text().lstrip().startswith('PLANNING_ACCEPTANCE: PASS');assert all(hashlib.sha256(Path(n).read_bytes()).hexdigest()==v for n,v in h.items());print('Planning-only independent review and frozen hashes verified; no implementation or deployment acceptance')"
+              ],
+              "duration_ms": 49,
+              "exit_code": 0,
+              "status": "passed",
+              "stderr_tail": "",
+              "stdout_tail": "Planning-only independent review and frozen hashes verified; no implementation or deployment acceptance\n"
+            }
+          ],
+          "completed_at": "2026-10-07T18:02:15.983062Z",
+          "phase_id": "phase0b-design",
+          "receipt_id": "d5e67d5d-42a2-4bdc-ac87-d52bc4fb4b30",
+          "schema": "implementation-acceptance-receipt.v1",
+          "source_snapshot_after": {
+            "source_file_count": 148,
+            "source_fingerprint": "674cd1cdf34ba92897cbf25197758590b6271c1c7957c367dcd3feb3849c28da",
+            "tested_commit": "383782e5c54adb84aecf5b77620d0ea48a3fbbd2"
+          },
+          "source_snapshot_before": {
+            "source_file_count": 148,
+            "source_fingerprint": "674cd1cdf34ba92897cbf25197758590b6271c1c7957c367dcd3feb3849c28da",
+            "tested_commit": "383782e5c54adb84aecf5b77620d0ea48a3fbbd2"
+          },
+          "started_at": "2026-10-07T18:02:15.630303Z",
+          "status": "passed"
+        }
+      ],
+      "started_at": "2026-10-07T17:39:26.460187Z",
+      "status": "accepted",
+      "title": "Phase 0b \u2014 one N1/N2 design amendment and delta review"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-c",
+          "raise SystemExit('BLOCKED: implementation is approved, but full v3 component/isolation/coverage/performance acceptance commands are not yet qualified; preparation evidence cannot accept this phase')"
+        ]
+      ],
+      "allowed_writes": [
+        "scripts/phase0b_controller/windows_job.py",
+        "scripts/phase0b_controller/runner.py",
+        "tests/test_phase0b_runner.py",
+        "derived/efficiency-phase0b/2026-10-07/runner-b"
+      ],
+      "blocked_at": "2026-10-07T20:48:18.272005Z",
+      "blocked_reason": "B contained-runner first attempt rejected by independently verified Opus session 20261007_183143_c818d2: M1-M7 unresolved (conhost drain, strict breakaway oracle, filesystem-release evidence, log integrity, IO accounting, assignment-refusal cleanup, launcher-only pin semantics). No HIGH reported, no escape demonstrated, no source promotion. Full A/B and Phase 0b isolation/coverage/parent/performance/deployment gates remain unaccepted.",
+      "deferral_ref": "references/efficiency-phase0-reduced-closeout.md#operator-approval",
+      "deferred": true,
+      "depends_on": [
+        "phase0b-design"
+      ],
+      "goal": "Implement and qualify the accepted immutable-tree controller under separate approval, with unchanged budgets and no inherited rejected code.",
+      "next_action": "Phase 0b is explicitly deferred. Do not repair or promote B; preserve its FAIL, seven MEDIUM, consumed review and retry 2. Resume only after a separately budgeted scoped operator approval.",
+      "phase_id": "phase0b-implementation",
+      "proof_receipts": [],
+      "started_at": "2026-10-07T20:11:45.108192Z",
+      "status": "blocked",
+      "title": "Phase 0b \u2014 A core accepted; B rejected with 7 MEDIUM, operator decision required"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-c",
+          "raise SystemExit('BLOCKED: no execution-ready scope/acceptance contract approved; obtain operator authority and independently reviewed exact commands before this phase can start or accept')"
+        ]
+      ],
+      "allowed_writes": [
+        "derived/workspace-efficiency/phase1-plan"
+      ],
+      "blocked_reason": "Registration is authorized now; general Phase 1 implementation is not. Rebaseline and approve an independently reviewed bounded subplan.",
+      "depends_on": [
+        "phase0",
+        "phase0b-implementation"
+      ],
+      "goal": "P1-0 registered pickup; P1-1 governed-change reuse; P1-2 procedural ownership; P1-3 bounded retrieval/session overhead.",
+      "next_action": "Use the authoritative roadmap Phase 1 section; measure one real recurring bottleneck before proposing changes.",
+      "phase_id": "phase1",
+      "proof_receipts": [],
+      "status": "blocked",
+      "title": "Phase 1 \u2014 reduce context, tool calls and rediscovery"
+    },
+    {
+      "acceptance_commands": [
+        [
+          "python",
+          "-c",
+          "raise SystemExit('BLOCKED: no execution-ready scope/acceptance contract approved; obtain operator authority and independently reviewed exact commands before this phase can start or accept')"
+        ]
+      ],
+      "allowed_writes": [
+        "derived/workspace-efficiency/phase2-plan"
+      ],
+      "blocked_reason": "Phase 1 measurement and separately reviewed/approved execution scope required; no scheduler/config changes authorized.",
+      "depends_on": [
+        "phase1"
+      ],
+      "goal": "P2-1 actionable alerts; P2-2 bounded waits/retrieval fallback; P2-3 source-backed weekly efficiency scorecard.",
+      "next_action": "Use the authoritative roadmap Phase 2 section; preserve hard alerts and reuse existing telemetry.",
+      "phase_id": "phase2",
+      "proof_receipts": [],
+      "status": "blocked",
+      "title": "Phase 2 \u2014 actionable alerts and ongoing measurement"
+    }
+  ],
+  "plan_hash": "d0df7956a2b8d0720e5923dd675a1eace6e8d2f896949b992f5fb586647f467c",
+  "plan_path": "continuity/implementation-jobs/workspace-efficiency.md",
+  "registration_item": "P1-0; no general Phase 1 execution grant",
+  "schema": "implementation-job.v1",
+  "status": "blocked",
+  "stop_lines": [
+    "Only the operator-approved accepted Phase 0 checkpoint and fast-forward push may advance refs/heads/master from 383782e5c54adb84aecf5b77620d0ea48a3fbbd2; see references/efficiency-phase0-checkpoint.md. No rejected source, hook installation, controller promotion, force push or deadline increase.",
+    "No helper writes, repair-history reset, consumed-exception reuse or same-model QA.",
+    "Stop on unresolved HIGH/MEDIUM at an authorized review boundary; no automatic correction round.",
+    "No general Phase 1/2 execution, profile/configuration changes, scheduler pause or bootstrap grant is implied by implementation approval."
+  ],
+  "updated_at": "2026-10-08T04:23:25.206019Z",
+  "workflow_id": "WF-1300"
+}

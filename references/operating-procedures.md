@@ -145,6 +145,11 @@ session starts, writes, and closes against the same organization contract.
 7. Apply the standing local checkpoint authority below to significant verified
    tracked workspace source. Report changed paths, generated artifacts,
    verification evidence, remaining debt, and the final checkpoint disposition.
+8. A turn that wrote tracked workspace source ends with exactly one disposition:
+   a verified local commit, or an explicit `checkpoint_pending` record (paths,
+   proof, proposed subject, blocker). The status brief warns
+   `uncommitted_work_aged` when examined non-ignored changes have an mtime at least 4h old;
+   that warning is a prompt to apply this rule, not a commit trigger.
 
 ### Standing local checkpoint authority
 

@@ -1,14 +1,16 @@
 {
   "schema": "fleet-role-registry.v1",
   "workflow_id": "WF-1200",
-  "updated_at": "2026-10-03",
+  "updated_at": "2026-10-07",
   "approved_by": "operator",
   "enforce_roles": true,
   "roles": {
     "governor": {
       "profile": "default",
-      "provider": "anthropic",
-      "model": "claude-opus-5-5",
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "approved_by": "operator",
+      "approval_ref": "references/efficiency-phase0-reduced-closeout.md#operator-approval",
       "fallback_providers": [
         {
           "provider": "openai-codex",
@@ -41,8 +43,10 @@
     },
     "implementer": {
       "profile": "implementer",
-      "provider": "ollama-cloud",
-      "model": "deepseek-v4.1-flash",
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-06-phase0-astra-qa-sol-implementer",
       "fallback_providers": [
         {
           "provider": "ollama-cloud",
@@ -79,10 +83,10 @@
     },
     "qa": {
       "profile": "qa",
-      "provider": "openai-codex",
-      "model": "gpt-6.1-sol",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
       "approved_by": "operator",
-      "approval_ref": "operator-chat-2026-10-03-qa-sol-rebinding",
+      "approval_ref": "derived/model-routing/2026-10-07/qa-opus-permanent/operator-approval.md",
       "fallback_providers": [
         {
           "provider": "anthropic",
@@ -200,6 +204,17 @@
       "first_attempt_only": true,
       "approved_by": "operator",
       "approval_ref": "operator-chat-2026-10-05-extend-pilot"
+    },
+    {
+      "schema": "helper-lane-exception.v1",
+      "kind": "one_time_lane_write",
+      "role": "implementer",
+      "lane_id": "phase0-commit-gate-20261006",
+      "task_id": "phase0-commit-gate-docs-first-attempt",
+      "mode": "write",
+      "first_attempt_only": true,
+      "approved_by": "operator",
+      "approval_ref": "operator-chat-2026-10-06-phase0-astra-qa-sol-implementer"
     }
   ]
 }

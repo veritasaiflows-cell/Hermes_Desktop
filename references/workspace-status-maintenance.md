@@ -57,6 +57,25 @@ malformed correctness evidence produces a warning and the brief recommends
 `python scripts/cron_test_gate.py`; the fast operating-status command does not
 rerun the full suite itself.
 
+The brief (fast and full) also includes `uncommitted_work`: one
+`git --git-dir=<root>/.git --work-tree=<root> status --porcelain=v1 -z
+--no-renames --untracked-files=all` read (~0.6s; every inherited `GIT_*`
+variable removed, an invalid `.git` reports `unavailable`) summarising
+tracked modifications, staged changes, deletions, and non-ignored untracked
+files. Per-path `lstat` work is capped by `UNCOMMITTED_WORK_STAT_LIMIT` and
+`UNCOMMITTED_WORK_STAT_BUDGET_SECONDS`; a capped read reports `truncated`.
+When any examined file's mtime is at least 4h old
+(`UNCOMMITTED_WORK_WARN_HOURS`) the brief warns `uncommitted_work_aged`, lists
+up to 20 aged paths, and recommends a commit or `checkpoint_pending`
+disposition. It is a warning only (never a hard failure) and an mtime
+heuristic, not "time since the change became uncommitted"; deletions have
+unknown age and never warn alone. The compact brief carries
+`status/changed_count/examined_count/truncated/aged_count/oldest_age_hours`.
+Age counts, oldest age, and warnings describe only the examined subset when
+`truncated` is true, not every changed path. Filesystem resolution/probing
+failures report `unavailable` without adding a hard failure or changing the
+existing exit outcome.
+
 The brief also includes the compact `feedback_evaluation` packet. A fresh
 `review_required` report is a warning, not a hard failure: it means repeated
 metadata has produced a baseline-backed candidate that needs explicit human

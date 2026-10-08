@@ -51,6 +51,14 @@
     "ai workflow diagnostic": "WF-1006",
     "ai-workflow-diagnostic": "WF-1006",
     "ai integration diagnostic": "WF-1006",
-    "smb-ai-diagnostic": "WF-1006"
+    "smb-ai-diagnostic": "WF-1006",
+    "efficiency": "WF-1300",
+    "workspace-efficiency": "WF-1300",
+    "efficiency-roadmap": "WF-1300",
+    "efficiency-phase0": "WF-1300",
+    "efficiency-phase0b": "WF-1300",
+    "efficiency-phase1": "WF-1300",
+    "efficiency-phase2": "WF-1300",
+    "implementation-work-tracking": "WF-1300"
   }
 }

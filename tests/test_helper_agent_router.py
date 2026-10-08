@@ -983,6 +983,7 @@ class QaReviewRouteTests(unittest.TestCase):
     """
 
     SOL = "openai-codex/gpt-6.1-sol"
+    ASTRA = "openai-codex/gpt-6-astra"
     SONNET = "anthropic/claude-sonnet-5-5"
 
     def _request(self, model: str, reviewer: str | None = None, **extra: object) -> dict[str, object]:
@@ -1026,8 +1027,9 @@ class QaReviewRouteTests(unittest.TestCase):
         result = self._admit(self.SOL, self._request(self.SONNET))
         self.assertEqual(result["status"], "admitted", result["reasons"])
 
-    def test_sonnet_authored_lane_is_reviewed_on_the_sol_primary(self) -> None:
-        result = self._admit(self.SONNET, self._request(self.SOL))
+    def test_sonnet_authored_lane_is_reviewed_on_the_opus_primary(self) -> None:
+        # Operator rebinding 2026-10-07: QA primary is Claude Opus 5.5.
+        result = self._admit(self.SONNET, self._request("anthropic/claude-opus-5-5"))
         self.assertEqual(result["status"], "admitted", result["reasons"])
 
     def test_sol_authored_lane_cannot_be_reviewed_on_sol(self) -> None:
@@ -1054,7 +1056,8 @@ class QaReviewRouteTests(unittest.TestCase):
         self.assertTrue(any("reviewer_model" in r for r in result["reasons"]), result["reasons"])
 
     def test_a_model_outside_the_qa_chain_is_still_rejected(self) -> None:
-        result = self._admit(self.SOL, self._request("openai-codex/gpt-6-astra"))
+        # Sol is the implementer / senior engineer, no longer a QA route (2026-10-06).
+        result = self._admit(self.SONNET, self._request(self.SOL))
         self.assertEqual(result["status"], "rejected")
         self.assertTrue(any("approved binding" in r or "approved route" in r for r in result["reasons"]), result["reasons"])
 
@@ -1163,9 +1166,13 @@ class FleetRoleBindingTests(unittest.TestCase):
             (PROJECT_ROOT / "state" / "fleet-role-registry.json").read_text(encoding="utf-8")
         )
         bindings = {r: f"{s['provider']}/{s['model']}" for r, s in live["roles"].items()}
-        self.assertEqual(bindings["governor"], "anthropic/claude-opus-5-5")
-        # 2026-10-03 operator rebinding: Astra is the Governor's parent-only
-        # fallback; GPT-6.1-Sol is the escalation-only Senior Engineer.
+        self.assertEqual(bindings["governor"], "openai-codex/gpt-6.1-sol")
+        self.assertEqual(
+            live["roles"]["governor"]["approval_ref"],
+            "references/efficiency-phase0-reduced-closeout.md#operator-approval",
+        )
+        # The main primary is Sol; retain the existing approved Astra fallback.
+        # Main ownership does not promote the Sol helper roles or allow self-review.
         fallbacks = live["roles"]["governor"]["fallback_providers"]
         self.assertEqual(
             [f"{f['provider']}/{f['model']}" for f in fallbacks],
@@ -1189,11 +1196,13 @@ class FleetRoleBindingTests(unittest.TestCase):
                 self.assertTrue(item.get("approval_ref"), role)
                 # a fallback must never be the role's own primary
                 self.assertNotEqual(f"{item['provider']}/{item['model']}", bindings[role], role)
-        # 2026-10-03 operator decision: formal QA runs on GPT-6.1-Sol, so the QA fallback is
-        # Sonnet (a fallback may not equal its own primary). Sol is also the Senior Engineer
-        # primary, so a Sol-authored lane needs a non-Sol reviewer.
-        self.assertEqual(bindings["qa"], "openai-codex/gpt-6.1-sol")
-        self.assertEqual(live["roles"]["qa"]["approval_ref"], "operator-chat-2026-10-03-qa-sol-rebinding")
+        # 2026-10-07 operator decision: permanently bind Opus 5.5 as QA.
+        # Sonnet remains the independent fallback for Opus-authored work.
+        self.assertEqual(bindings["qa"], "anthropic/claude-opus-5-5")
+        self.assertEqual(
+            live["roles"]["qa"]["approval_ref"],
+            "derived/model-routing/2026-10-07/qa-opus-permanent/operator-approval.md",
+        )
         self.assertEqual(bindings["researcher"], "openai-codex/gpt-6-luna")
         self.assertIn(live["roles"]["researcher"]["status"], {"qualified", "qualification_required"})
         if live["roles"]["researcher"]["status"] == "qualification_required":
@@ -1201,7 +1210,7 @@ class FleetRoleBindingTests(unittest.TestCase):
         self.assertNotIn("muse", json.dumps(live).lower())
         self.assertEqual(bindings["architect"], "openai-codex/gpt-6-astra")
         self.assertEqual(bindings["senior_engineer"], "openai-codex/gpt-6.1-sol")
-        self.assertEqual(bindings["implementer"], "ollama-cloud/deepseek-v4.1-flash")
+        self.assertEqual(bindings["implementer"], "openai-codex/gpt-6.1-sol")
         self.assertEqual(live["roles"]["implementer"]["status"], "qualification_required")
         self.assertEqual(live["roles"]["governor"]["profile"], "default")
         self.assertEqual(live["roles"]["architect"]["profile"], "architect")
@@ -1260,7 +1269,7 @@ class FleetRoleBindingTests(unittest.TestCase):
     def test_unqualified_implementer_write_is_rejected_without_exception(self) -> None:
         root = self._write_root()
         result = helper_agent_router.admit_request(
-            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            _write_mode_request(role="implementer", model="openai-codex/gpt-6.1-sol"),
             project_root=root,
         )
         self.assertEqual(result["status"], "rejected")
@@ -1284,7 +1293,7 @@ class FleetRoleBindingTests(unittest.TestCase):
         ]
         path.write_text(json.dumps(registry), encoding="utf-8")
         result = helper_agent_router.admit_request(
-            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            _write_mode_request(role="implementer", model="openai-codex/gpt-6.1-sol"),
             project_root=root,
         )
         self.assertEqual(result["status"], "admitted", result["reasons"])
@@ -1308,7 +1317,7 @@ class FleetRoleBindingTests(unittest.TestCase):
         path.write_text(json.dumps(registry), encoding="utf-8")
 
         result = helper_agent_router.admit_request(
-            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            _write_mode_request(role="implementer", model="openai-codex/gpt-6.1-sol"),
             project_root=root,
         )
 
@@ -1318,7 +1327,7 @@ class FleetRoleBindingTests(unittest.TestCase):
     def test_qualified_implementer_blocked_after_failed_attempt(self) -> None:
         root = self._write_root(retry=1, implementer={"status": "qualified"})
         result = helper_agent_router.admit_request(
-            _write_mode_request(role="implementer", model="ollama-cloud/deepseek-v4.1-flash"),
+            _write_mode_request(role="implementer", model="openai-codex/gpt-6.1-sol"),
             project_root=root,
         )
         self.assertEqual(result["status"], "rejected")

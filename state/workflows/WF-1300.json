@@ -1,0 +1,73 @@
+{
+  "authoritative_next_action": "Reduced Phase 0 warning/tracking qualification and administrative closeout are complete. Execute only the operator-approved scope-limited checkpoint and fast-forward push, subject to real export/manual/hook verification and exact remote-ref readback in references/efficiency-phase0-checkpoint.md. Keep Phase 0b deferred; do not repair or promote B. Use exact pickup and the informational warning. Phase 0b/1/2 need separate scoped approval; no automatic next phase.",
+  "authority_boundary": "review_only",
+  "authority_class": "review_ready",
+  "blocker_count": 3,
+  "blockers": [
+    "checkpoint_publication: the operator authorized the accepted Phase 0 scope and four local ancestors only; real export/manual/hook verification and remote-ref readback remain required. No rejected source or hook installation is authorized.",
+    "Phase 0b is deferred, not accepted: B's independently verified Opus FAIL and seven unresolved MEDIUM, consumed review and retry 2 remain preserved; no promotion or full isolation/coverage/performance/publication/deployment acceptance.",
+    "Phase 1 and Phase 2 require rebaselined scoped plans, independent planning acceptance and separate execution approval."
+  ],
+  "commands": {
+    "dry_run": "python scripts/implementation_job.py pickup --contract state/implementation-jobs/workspace-efficiency.json",
+    "write": null
+  },
+  "continuity_note": "continuity\\WF-1300-Workspace-Efficiency.md",
+  "control_override": null,
+  "current_state": "Reduced Phase 0 warning/tracking qualification and administrative closeout are complete, with the real fingerprinted owner receipt and verified independent Opus review of Sol's scope/binding/control delta preserved. Main is permanently Sol; implementation stays with main and QA stays Opus. The operator separately authorized the scope-limited checkpoint and fast-forward push in references/efficiency-phase0-checkpoint.md, subject to real verification. Phase 0b is deferred, not accepted; A source-core/design history, B FAIL/seven MEDIUM/consumed review/retry 2 are unchanged. No controller deployment or overall WF-1300 completion.",
+  "default_resume_command": "python scripts/workflow_router.py efficiency --status",
+  "dependency_blockers": [],
+  "depends_on": [],
+  "display_name": "Workspace Efficiency and Started-Work Tracking",
+  "effective_status": "blocked",
+  "freshness_sla": "per_phase_transition",
+  "graph_dependency_blockers": [],
+  "helper_safe": false,
+  "human_approval_owner": "operator",
+  "implementation_script": null,
+  "lifecycle": "active",
+  "next_action": "Reduced Phase 0 warning/tracking qualification and administrative closeout are complete. Execute only the operator-approved scope-limited checkpoint and fast-forward push, subject to real export/manual/hook verification and exact remote-ref readback in references/efficiency-phase0-checkpoint.md. Keep Phase 0b deferred; do not repair or promote B. Use exact pickup and the informational warning. Phase 0b/1/2 need separate scoped approval; no automatic next phase.",
+  "owner_action_required": true,
+  "primary_owner_lane": "agent-main",
+  "primary_route_artifact": "state/workflows/WF-1300.json",
+  "priority": "high",
+  "proof_artifact": "continuity\\WF-1300-Workspace-Efficiency.md",
+  "readiness": "blocked",
+  "required_refresh_command": "python scripts/workflow_router.py --all --answer summary --validate --write-index",
+  "routing_contract": "workflow-routing-index.v1",
+  "routing_schema_version": "workflow-routing-index.v1",
+  "routing_source_contracts": {
+    "active_workflows": "active-workflows.v1",
+    "alias_source": "workflow-alias-index.v1",
+    "overrides": "workflow-control-overrides.v1"
+  },
+  "schema": "workflow_capsule.v2",
+  "secondary_artifacts": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json"
+  ],
+  "secondary_consumers": [
+    "review",
+    "operations"
+  ],
+  "state_sources": [
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/active_workflows.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow_alias_index.json",
+    "C:/Users/Veritas/Documents/HermesWorkspace/state/workflow-control-overrides.json",
+    "continuity\\WF-1300-Workspace-Efficiency.md"
+  ],
+  "stop_lines": [
+    "Only the operator-approved accepted Phase 0 checkpoint and fast-forward push may advance refs/heads/master from 383782e5c54adb84aecf5b77620d0ea48a3fbbd2; see references/efficiency-phase0-checkpoint.md. No rejected source, hook installation, controller promotion, force push or deadline increase.",
+    "No helper writes, repair-history reset, consumed-exception reuse or same-model QA.",
+    "Stop on unresolved HIGH/MEDIUM at an authorized review boundary; no automatic correction round.",
+    "No general Phase 1/2 execution, profile/configuration changes, scheduler pause or bootstrap grant is implied by implementation approval."
+  ],
+  "tier": "P1",
+  "validator_commands": [
+    "python scripts/implementation_job.py validate --contract state/implementation-jobs/workspace-efficiency.json",
+    "python scripts/check_note_state_drift.py",
+    "python scripts/workflow_router.py efficiency --status"
+  ],
+  "workflow_id": "WF-1300"
+}

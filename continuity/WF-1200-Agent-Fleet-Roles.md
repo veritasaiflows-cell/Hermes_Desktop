@@ -11,6 +11,16 @@ Operator decision 2026-09-26: offload implementation tokens from the governor
 model to cheaper coding models, with distinct models per purpose instead of a
 single `delegation.model`.
 
+## Current QA binding — operator-approved 2026-10-07
+
+This current binding supersedes the dated QA model assignments below; their history is preserved. QA primary is permanently `anthropic/claude-opus-5-5`, with the existing `anthropic/claude-sonnet-5-5` fallback unchanged. Registry, consuming qa profile model keys and qa identity text are aligned under `derived/model-routing/2026-10-07/qa-opus-permanent/operator-approval.md`. Status remains admissible, read-only and review-only; no qualification or helper write authority is granted. Configuration readback is not an actual reviewer-session verification.
+
+## Current permanent main binding — operator-approved 2026-10-08
+
+The permanent primary Governor/main is `openai-codex/gpt-6.1-sol`; implementation stays with agent-main and independent QA goes to `anthropic/claude-opus-5-5`. Authority and qualification evidence: `references/efficiency-phase0-reduced-closeout.md`. The existing parent-only Astra fallback, other role qualifications, exceptions and profiles are unchanged. This does not promote the Sol helper roles. Any genuinely Opus-authored work still requires a different admitted reviewer; the gate/driver reject unknown, mismatched or author-equal actual models, including after failover. Historical Astra count/corrective authorship and original Opus warning authorship remain preserved. Automatic failover remains untested. This binding does not accept WF-1100 repairs or Phase 0b.
+
+Governor post-review provenance clarification: the original rejected Opus Phase 0b code was excluded from the Astra-authored count/binding delta review. Historical fresh-process review verification and lane evidence remain in `derived/model-routing/2026-10-07/qa-opus-permanent/` and `derived/efficiency-phase0b/2026-10-07/count-review/`. This restores the historical pointers without accepting that rejected source; the factual clarification is not claimed as a new source-review pass.
+
 ## Role roster
 
 **Authoritative owner: `state/fleet-role-registry.json`.** The table below is generated from it and
@@ -25,11 +35,11 @@ enforces the registry, not this table). Regenerate with
 
 | Role | Profile | Binding | Registry status | Modes | Lane retry gate | Fallback chain |
 |---|---|---|---|---|---|---|
-| governor | `default` | `anthropic/claude-opus-5-5` | parent_only | - | - | `openai-codex/gpt-6-astra` |
+| governor | `default` | `openai-codex/gpt-6.1-sol` | parent_only | - | - | `openai-codex/gpt-6-astra` |
 | architect | `architect` | `openai-codex/gpt-6-astra` | admissible | read-only | - | `anthropic/claude-opus-5-5` |
-| implementer | `implementer` | `ollama-cloud/deepseek-v4.1-flash` | qualification_required | read-only, write | repair cycle <= 0 | `ollama-cloud/glm-5.3-flash` |
+| implementer | `implementer` | `openai-codex/gpt-6.1-sol` | qualification_required | read-only, write | repair cycle <= 0 | `ollama-cloud/glm-5.3-flash` |
 | senior_engineer | `seniorengineer` | `openai-codex/gpt-6.1-sol` | admissible | read-only, write | repair cycle >= 1 | `anthropic/claude-sonnet-5-5` |
-| qa | `qa` | `openai-codex/gpt-6.1-sol` | admissible | read-only | - | `anthropic/claude-sonnet-5-5` |
+| qa | `qa` | `anthropic/claude-opus-5-5` | admissible | read-only | - | `anthropic/claude-sonnet-5-5` |
 | researcher | `researcher` | `openai-codex/gpt-6-luna` | qualified | read-only | - | `ollama-cloud/deepseek-v4.1-flash` |
 
 Governor parent-only fallback chain: `openai-codex/gpt-6-astra`.
@@ -42,6 +52,7 @@ Recorded one-time lane exceptions (lane register owns their status):
 - `implementer` / `wf1100-p1-demo-datasets`
 - `implementer` / `otel-allroles-impl-20261005`
 - `implementer` / `otel-expiry-extend-impl-20261005`
+- `implementer` / `phase0-commit-gate-20261006`
 
 <!-- END GENERATED: fleet-role-roster -->
 

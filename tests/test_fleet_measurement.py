@@ -33,7 +33,7 @@ class FakeEmitter:
 
 def request(role="implementer"):
     return {"schema": "helper-agent-request.v1", "task_id": "unit-helper", "role": role,
-            "model": "ollama-cloud/deepseek-v4.1-flash" if role == "implementer" else "openai-codex/gpt-6.1-sol",
+            "model": "openai-codex/gpt-6.1-sol" if role == "implementer" else "openai-codex/gpt-6-astra",
             "mode": "read-only", "task_class": "documentation" if role == "implementer" else "review",
             "phase": "pre-implementation", "owner": "unit", "allowed_toolsets": ["read_file"],
             "allowed_writes": [], "max_duration_minutes": 1,
@@ -48,7 +48,7 @@ def no_tools(names):
 def make(tmp_path, runner=None, admission=None, exporter=None, resolver=no_tools):
     return fleet.MeasurementRun(expires_at=time.time() + 60, emitter=FakeEmitter(),
                                 runner=runner, admitter=admission or (lambda r: {"status": "admitted", "reasons": []}),
-                                exporter=exporter or (lambda role, sid: "ollama-cloud/deepseek-v4.1-flash" if role == "implementer" else "openai-codex/gpt-6.1-sol"),
+                                exporter=exporter or (lambda role, sid: "openai-codex/gpt-6.1-sol" if role == "implementer" else "openai-codex/gpt-6-astra"),
                                 tool_resolver=resolver)
 
 
@@ -102,7 +102,7 @@ def test_full_path_requires_explicit_review_verdict_and_verification(tmp_path):
     run.helper(request(), prompt(tmp_path))
     run.verify(lambda: True)
     qa = run.helper(request("qa"), prompt(tmp_path))
-    assert qa["effective_model"] == "openai-codex/gpt-6.1-sol"
+    assert qa["effective_model"] == "openai-codex/gpt-6-astra"
     run.review_verdict(passed=True, evidence={"source": "governor-checked-qa"})
     receipt = run.accept()
     assert receipt["accepted"] is True
@@ -125,7 +125,7 @@ def test_timeout_and_verification_exception_produce_failed_stages(tmp_path):
     assert ("execution", "timeout") in [(p, o) for p, o, _ in run.emitter.records]
 
 
-@pytest.mark.parametrize("effective", [None, "openai-codex/gpt-6-astra"])
+@pytest.mark.parametrize("effective", [None, "ollama-cloud/deepseek-v4.1-flash"])
 def test_unknown_or_unexpected_actual_model_fails_closed(tmp_path, effective):
     run = make(tmp_path, runner=success, exporter=lambda role, sid: effective)
     assert run.helper(request(), prompt(tmp_path))["status"] == "error"
@@ -282,7 +282,7 @@ def real_run(tmp_path, runner=success, exporter=None, resolver=no_tools):
     run = fleet.MeasurementRun(
         expires_at=time.time() + 60, emitter=FakeEmitter(), runner=runner,
         admitter=fleet.gate_admitter(project_root=root, audit_log=audit),
-        exporter=exporter or (lambda role, sid: "ollama-cloud/deepseek-v4.1-flash" if role == "implementer"
+        exporter=exporter or (lambda role, sid: "openai-codex/gpt-6.1-sol" if role == "implementer"
                               else "anthropic/claude-sonnet-5-5"),
         tool_resolver=resolver)
     return run, audit
@@ -317,7 +317,7 @@ def test_real_gate_rejection_is_audited_and_never_spawns(tmp_path):
     called = []
     run, audit = real_run(tmp_path, runner=lambda *a, **k: called.append(1))
     bad = request()
-    bad["model"] = "openai-codex/gpt-6-astra"  # in pilot scope, but not the role binding
+    bad["model"] = "openai-codex/gpt-6-astra"  # the QA binding, not the implementer binding
     result = run.helper(bad, prompt(tmp_path))
     assert result == {"status": "rejected", "reason": "admission_gate"} and called == []
     event = json.loads(audit.read_text(encoding="utf-8").splitlines()[-1])
@@ -383,7 +383,7 @@ def test_default_admitter_is_the_real_gate(tmp_path, monkeypatch):
     root = gate_root(tmp_path)
     monkeypatch.setattr(fleet, "ROOT", root)
     run = fleet.MeasurementRun(expires_at=time.time() + 60, emitter=FakeEmitter(), runner=success,
-                               exporter=lambda role, sid: "ollama-cloud/deepseek-v4.1-flash",
+                               exporter=lambda role, sid: "openai-codex/gpt-6.1-sol",
                                tool_resolver=no_tools)
     bad = request()
     bad["model"] = "openai-codex/gpt-6-astra"

@@ -20,6 +20,7 @@ import qa_review_driver as driver  # noqa: E402
 from test_helper_agent_router import _LaneFixture, _install_registry  # noqa: E402
 
 SOL = "openai-codex/gpt-6.1-sol"
+ASTRA = "openai-codex/gpt-6-astra"
 SONNET = "anthropic/claude-sonnet-5-5"
 LANE = "WF-1000::helper-gate-fixture"
 
@@ -89,10 +90,12 @@ class QaReviewDriverTests(unittest.TestCase):
         self.assertEqual(record["effective_model"], "anthropic/claude-sonnet-5-5")
         self.assertTrue(record["effective_model_verified"])
 
-    def test_sonnet_authored_lane_reviewed_on_sol_is_verified(self) -> None:
-        fakes = _Fakes("gpt-6.1-sol", "openai-codex")
-        result, record, _ = self._go(SONNET, SOL, fakes)
+    def test_sonnet_authored_lane_reviewed_on_opus_is_verified(self) -> None:
+        fakes = _Fakes("claude-opus-5-5", "anthropic")
+        result, record, _ = self._go(SONNET, "anthropic/claude-opus-5-5", fakes)
         self.assertEqual(result["status"], "verified", result)
+        self.assertEqual(record["effective_model"], "anthropic/claude-opus-5-5")
+        self.assertTrue(record["effective_model_verified"])
 
     def test_route_is_pinned_with_provider_and_model_flags(self) -> None:
         fakes = _Fakes("claude-sonnet-5-5", "anthropic")
@@ -146,8 +149,9 @@ class QaReviewDriverTests(unittest.TestCase):
         self.assertEqual(fakes.run_calls, [])
 
     def test_model_outside_the_qa_chain_is_refused(self) -> None:
-        fakes = _Fakes("gpt-6-astra", "openai-codex")
-        result, _, _ = self._go(SOL, "openai-codex/gpt-6-astra", fakes)
+        # Sol is no longer a QA route (operator rebinding 2026-10-06).
+        fakes = _Fakes("gpt-6.1-sol", "openai-codex")
+        result, _, _ = self._go(SONNET, SOL, fakes)
         self.assertEqual(result["status"], "refused")
         self.assertEqual(fakes.run_calls, [])
 
